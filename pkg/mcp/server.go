@@ -4,8 +4,9 @@ package mcp
 type Transport string
 
 const (
-	TransportStdio Transport = "stdio"
-	TransportSSE   Transport = "sse"
+	TransportStdio Transport = "stdio" // Local process communication
+	TransportSSE   Transport = "sse"   // Server-Sent Events
+	TransportHTTP  Transport = "http"  // Remote HTTP MCP server (like Sentry)
 )
 
 // Source represents where an MCP server comes from
@@ -27,8 +28,10 @@ type BuildConfig struct {
 type Server struct {
 	Name      string            `json:"name"`
 	Source    Source            `json:"source"`
-	Command   string            `json:"command"`
-	Args      []string          `json:"args,omitempty"`
+	Command   string            `json:"command,omitempty"`   // For local servers (stdio)
+	Args      []string          `json:"args,omitempty"`      // For local servers
+	URL       string            `json:"url,omitempty"`       // For remote servers (http/sse)
+	Headers   map[string]string `json:"headers,omitempty"`   // For remote servers (http/sse)
 	Env       map[string]string `json:"env,omitempty"`
 	Transport Transport         `json:"transport,omitempty"`
 	Namespace string            `json:"namespace,omitempty"` // For conflict resolution

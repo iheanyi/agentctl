@@ -117,3 +117,48 @@ func LoadAll(dir string) ([]*Rule, error) {
 
 	return rules, nil
 }
+
+// Save saves a rule to a directory as a markdown file
+func Save(r *Rule, dir string) error {
+	// Ensure directory exists
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	var content strings.Builder
+
+	// Write frontmatter if present
+	if r.Frontmatter != nil {
+		content.WriteString("---\n")
+		if r.Frontmatter.Priority != 0 {
+			content.WriteString("priority: ")
+			content.WriteString(strings.TrimSpace(yaml.Node{Value: string(rune(r.Frontmatter.Priority))}.Value))
+			content.WriteString("\n")
+		}
+		if len(r.Frontmatter.Tools) > 0 {
+			content.WriteString("tools: [")
+			content.WriteString(strings.Join(r.Frontmatter.Tools, ", "))
+			content.WriteString("]\n")
+		}
+		if r.Frontmatter.Applies != "" {
+			content.WriteString("applies: \"")
+			content.WriteString(r.Frontmatter.Applies)
+			content.WriteString("\"\n")
+		}
+		content.WriteString("---\n\n")
+	}
+
+	content.WriteString(r.Content)
+
+	// Determine filename
+	name := r.Name
+	if name == "" {
+		name = "imported-rule"
+	}
+	if !strings.HasSuffix(name, ".md") {
+		name += ".md"
+	}
+
+	path := dir + "/" + name
+	return os.WriteFile(path, []byte(content.String()), 0644)
+}

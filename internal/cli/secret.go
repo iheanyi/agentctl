@@ -7,6 +7,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/charmbracelet/huh"
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/secrets"
 	"github.com/spf13/cobra"
@@ -30,10 +31,18 @@ Examples:
 }
 
 var secretSetCmd = &cobra.Command{
-	Use:   "set <name>",
+	Use:   "set [name]",
 	Short: "Store a secret in the keychain",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSecretSet,
+	Long: `Store a secret in the system keychain.
+
+If no name is provided, launches an interactive form.
+
+Examples:
+  agentctl secret set                  # Interactive mode
+  agentctl secret set github-token     # Prompt for value only
+  echo "value" | agentctl secret set github-token  # Piped value`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runSecretSet,
 }
 
 var secretGetCmd = &cobra.Command{
@@ -65,31 +74,57 @@ func init() {
 }
 
 func runSecretSet(cmd *cobra.Command, args []string) error {
-	name := args[0]
 	out := output.DefaultWriter()
 
-	// Read secret from stdin or prompt
+	var name string
 	var value string
 	var err error
 
+	// Check if we have a name argument
+	if len(args) > 0 {
+		name = args[0]
+	}
+
+	// Check stdin mode
 	stat, _ := os.Stdin.Stat()
-	if (stat.Mode() & os.ModeCharDevice) == 0 {
-		// Piped input
-		reader := bufio.NewReader(os.Stdin)
-		value, err = reader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("failed to read secret: %w", err)
+	isPiped := (stat.Mode() & os.ModeCharDevice) == 0
+
+	// If no name provided and not piped, use interactive form
+	if name == "" && !isPiped {
+		if err := requireInteractive("secret set"); err != nil {
+			return err
 		}
-		value = strings.TrimSpace(value)
+
+		name, value, err = runInteractiveSecretSet()
+		if err != nil {
+			if err == huh.ErrUserAborted {
+				showCancelHint("secret set")
+				return nil
+			}
+			return err
+		}
+	} else if name == "" && isPiped {
+		return fmt.Errorf("secret name is required when using piped input\nUsage: echo 'value' | agentctl secret set <name>")
 	} else {
-		// Interactive - prompt for password
-		fmt.Printf("Enter secret value for %q: ", name)
-		byteValue, err := term.ReadPassword(int(syscall.Stdin))
-		fmt.Println() // newline after password input
-		if err != nil {
-			return fmt.Errorf("failed to read secret: %w", err)
+		// Name provided, just get the value
+		if isPiped {
+			// Piped input
+			reader := bufio.NewReader(os.Stdin)
+			value, err = reader.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("failed to read secret: %w", err)
+			}
+			value = strings.TrimSpace(value)
+		} else {
+			// Interactive - prompt for password
+			fmt.Printf("Enter secret value for %q: ", name)
+			byteValue, err := term.ReadPassword(int(syscall.Stdin))
+			fmt.Println() // newline after password input
+			if err != nil {
+				return fmt.Errorf("failed to read secret: %w", err)
+			}
+			value = string(byteValue)
 		}
-		value = string(byteValue)
 	}
 
 	if value == "" {
@@ -105,6 +140,56 @@ func runSecretSet(cmd *cobra.Command, args []string) error {
 	out.Info("Reference in config as: keychain:%s", name)
 
 	return nil
+}
+
+// runInteractiveSecretSet launches an interactive form to set a secret
+func runInteractiveSecretSet() (name string, value string, err error) {
+	// Step 1: Get secret name
+	nameForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Secret name").
+				Description("A unique identifier for this secret").
+				Placeholder("e.g., github-token, api-key").
+				Value(&name).
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("name is required")
+					}
+					if strings.ContainsAny(s, " \t\n") {
+						return fmt.Errorf("name cannot contain whitespace")
+					}
+					return nil
+				}),
+		),
+	)
+
+	if err = nameForm.Run(); err != nil {
+		return "", "", err
+	}
+
+	// Step 2: Get secret value with masked input
+	valueForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Secret value").
+				Description("The secret value to store (input is masked)").
+				EchoMode(huh.EchoModePassword).
+				Value(&value).
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("value is required")
+					}
+					return nil
+				}),
+		),
+	)
+
+	if err = valueForm.Run(); err != nil {
+		return "", "", err
+	}
+
+	return name, value, nil
 }
 
 func runSecretGet(cmd *cobra.Command, args []string) error {

@@ -42,7 +42,7 @@ func Execute() {
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
-	rootCmd.AddCommand(installCmd)
+	rootCmd.AddCommand(addCmd) // Primary command for adding MCP servers (alias: install)
 	rootCmd.AddCommand(removeCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(syncCmd)

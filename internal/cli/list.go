@@ -33,10 +33,15 @@ func init() {
 }
 
 func runList(cmd *cobra.Command, args []string) error {
-	// Load config
-	cfg, err := config.Load()
+	// Load config (including project config if present)
+	cfg, err := config.LoadWithProject()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Show project config notice if applicable
+	if cfg.ProjectPath != "" {
+		fmt.Printf("Project config: %s\n\n", cfg.ProjectPath)
 	}
 
 	// Apply profile filter if specified

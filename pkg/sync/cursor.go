@@ -107,8 +107,8 @@ func (a *CursorAdapter) WriteServers(servers []*mcp.Server) error {
 		}
 	}
 
-	// Add new servers
-	for _, server := range servers {
+	// Add new servers (only stdio transport - Cursor doesn't support HTTP/SSE)
+	for _, server := range FilterStdioServers(servers) {
 		name := server.Name
 		if server.Namespace != "" {
 			name = server.Namespace

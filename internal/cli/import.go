@@ -2,10 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 
+	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/output"
+	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/sync"
 	"github.com/spf13/cobra"
 )
@@ -105,12 +108,21 @@ func runImport(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			out.Warning("Failed to read commands: %v", err)
 		} else {
-			commandCount = len(commands)
-			// Commands would need to be saved to the commands/ directory
-			// For now, just count them
-			if commandCount > 0 {
-				out.Info("Found %d commands (command import not yet implemented)", commandCount)
-				commandCount = 0
+			commandsDir := filepath.Join(cfg.ConfigDir, "commands")
+			for _, cmd := range commands {
+				// Check if already exists
+				existingPath := filepath.Join(commandsDir, cmd.Name+".json")
+				if command.Exists(existingPath) {
+					out.Info("Skipping command %q (already exists)", cmd.Name)
+					continue
+				}
+
+				// Save command
+				if err := command.Save(cmd, commandsDir); err != nil {
+					out.Warning("Failed to save command %q: %v", cmd.Name, err)
+					continue
+				}
+				commandCount++
 			}
 		}
 	}
@@ -121,12 +133,19 @@ func runImport(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			out.Warning("Failed to read rules: %v", err)
 		} else {
-			ruleCount = len(rules)
-			// Rules would need to be saved to the rules/ directory
-			// For now, just count them
-			if ruleCount > 0 {
-				out.Info("Found %d rules (rule import not yet implemented)", ruleCount)
-				ruleCount = 0
+			rulesDir := filepath.Join(cfg.ConfigDir, "rules")
+			for _, r := range rules {
+				name := filepath.Base(r.Path)
+				if name == "" || name == "." {
+					name = "imported-rule"
+				}
+
+				// Save rule
+				if err := rule.Save(r, rulesDir); err != nil {
+					out.Warning("Failed to save rule %q: %v", name, err)
+					continue
+				}
+				ruleCount++
 			}
 		}
 	}

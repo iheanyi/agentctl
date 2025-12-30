@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -51,8 +52,9 @@ type Config struct {
 	LoadedSkills   []*skill.Skill     `json:"-"`
 
 	// Path info (not serialized)
-	Path      string `json:"-"` // Path to config file
-	ConfigDir string `json:"-"` // Config directory
+	Path        string `json:"-"` // Path to config file
+	ConfigDir   string `json:"-"` // Config directory
+	ProjectPath string `json:"-"` // Path to project config (if loaded from project)
 }
 
 // DefaultConfigDir returns the default configuration directory
@@ -151,9 +153,74 @@ func LoadProjectConfig(projectDir string) (*Config, error) {
 		return nil, err
 	}
 
+	// Mark that we have a project config
+	globalCfg.ProjectPath = projectPath
+
 	// Merge: project overrides global
 	merged := globalCfg.Merge(projectCfg)
+	merged.ProjectPath = projectPath
 	return merged, nil
+}
+
+// LoadWithProject loads global config merged with any project config in cwd
+func LoadWithProject() (*Config, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		// Fall back to just global config
+		return Load()
+	}
+	return LoadProjectConfig(cwd)
+}
+
+// FindProjectConfig walks up from dir looking for .agentctl.json
+func FindProjectConfig(dir string) (string, bool) {
+	for {
+		configPath := filepath.Join(dir, ".agentctl.json")
+		if _, err := os.Stat(configPath); err == nil {
+			return configPath, true
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached filesystem root
+			return "", false
+		}
+		dir = parent
+	}
+}
+
+// HasProjectConfig checks if current directory has a project config
+func HasProjectConfig() bool {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return false
+	}
+	_, found := FindProjectConfig(cwd)
+	return found
+}
+
+// InitProjectConfig creates a .agentctl.json in the given directory
+func InitProjectConfig(dir string) (*Config, error) {
+	configPath := filepath.Join(dir, ".agentctl.json")
+
+	// Check if already exists
+	if _, err := os.Stat(configPath); err == nil {
+		return nil, fmt.Errorf("project config already exists at %s", configPath)
+	}
+
+	cfg := &Config{
+		Version:     "1",
+		Servers:     make(map[string]*mcp.Server),
+		Path:        configPath,
+		ConfigDir:   dir,
+		ProjectPath: configPath,
+	}
+
+	if err := cfg.Save(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
 
 // Merge merges another config into this one (other takes precedence)

@@ -1,82 +1,160 @@
 {
+  "sentry": {
+    "description": "Sentry error tracking and monitoring",
+    "defaultVariant": "remote",
+    "variants": {
+      "remote": {
+        "transport": "http",
+        "mcpUrl": "https://mcp.sentry.dev/mcp"
+      },
+      "local": {
+        "transport": "stdio",
+        "package": "@sentry/mcp-server",
+        "runtime": "node"
+      }
+    }
+  },
+  "figma": {
+    "description": "Figma design-to-code integration",
+    "defaultVariant": "remote",
+    "variants": {
+      "remote": {
+        "transport": "http",
+        "mcpUrl": "https://mcp.figma.com/mcp"
+      },
+      "local": {
+        "transport": "stdio",
+        "package": "@anthropic-labs/figma-mcp",
+        "runtime": "node"
+      }
+    }
+  },
+  "linear": {
+    "description": "Linear issue tracking integration",
+    "defaultVariant": "remote",
+    "variants": {
+      "remote": {
+        "transport": "http",
+        "mcpUrl": "https://mcp.linear.app/mcp"
+      }
+    }
+  },
+  "notion": {
+    "description": "Notion workspace and database integration",
+    "defaultVariant": "local",
+    "variants": {
+      "local": {
+        "transport": "stdio",
+        "package": "@notionhq/notion-mcp-server",
+        "runtime": "node"
+      }
+    }
+  },
+  "github": {
+    "description": "GitHub API integration for repos, issues, PRs",
+    "defaultVariant": "local",
+    "variants": {
+      "local": {
+        "transport": "stdio",
+        "package": "@modelcontextprotocol/server-github",
+        "runtime": "node"
+      }
+    },
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/github",
+    "runtime": "node"
+  },
   "filesystem": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
     "description": "Read and write files on the local filesystem",
-    "runtime": "node"
-  },
-  "github": {
-    "url": "github.com/modelcontextprotocol/servers/tree/main/src/github",
-    "description": "GitHub API integration for repos, issues, PRs",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-filesystem"
   },
   "postgres": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/postgres",
     "description": "PostgreSQL database integration",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-postgres"
   },
   "sqlite": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/sqlite",
     "description": "SQLite database integration",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-sqlite"
   },
   "memory": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/memory",
     "description": "Knowledge graph-based memory storage",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-memory"
   },
   "puppeteer": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/puppeteer",
     "description": "Browser automation with Puppeteer",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-puppeteer"
   },
   "brave-search": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/brave-search",
     "description": "Web search using Brave Search API",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-brave-search"
   },
   "google-maps": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/google-maps",
     "description": "Google Maps integration",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-google-maps"
   },
   "fetch": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/fetch",
     "description": "Fetch and convert web content to markdown",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-fetch"
   },
   "slack": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/slack",
     "description": "Slack workspace integration",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-slack"
   },
   "google-drive": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/gdrive",
     "description": "Google Drive file management",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-gdrive"
   },
   "git": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/git",
     "description": "Git repository operations",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-git"
   },
   "sequential-thinking": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
     "description": "Dynamic problem-solving through thought sequences",
-    "runtime": "node"
-  },
-  "sentry": {
-    "url": "github.com/modelcontextprotocol/servers/tree/main/src/sentry",
-    "description": "Sentry error tracking integration",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-sequential-thinking"
   },
   "everart": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/everart",
     "description": "AI image generation with EverArt",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-everart"
   },
   "aws-kb-retrieval": {
     "url": "github.com/modelcontextprotocol/servers/tree/main/src/aws-kb-retrieval-server",
     "description": "AWS Bedrock Knowledge Base retrieval",
-    "runtime": "node"
+    "runtime": "node",
+    "package": "@modelcontextprotocol/server-aws-kb-retrieval"
+  },
+  "context7": {
+    "description": "Context7 documentation lookup for up-to-date library docs",
+    "runtime": "node",
+    "package": "@context7/mcp-server"
+  },
+  "playwright": {
+    "description": "Browser automation with Playwright",
+    "runtime": "node",
+    "package": "@anthropic-labs/mcp-playwright"
   }
 }

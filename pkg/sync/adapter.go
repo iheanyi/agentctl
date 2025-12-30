@@ -153,3 +153,15 @@ func containsResource(resources []ResourceType, target ResourceType) bool {
 	}
 	return false
 }
+
+// FilterStdioServers returns only servers that use stdio transport
+// Use this for tools that don't support HTTP/SSE remote MCP servers
+func FilterStdioServers(servers []*mcp.Server) []*mcp.Server {
+	var filtered []*mcp.Server
+	for _, s := range servers {
+		if s.Transport != mcp.TransportHTTP && s.Transport != mcp.TransportSSE {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered
+}

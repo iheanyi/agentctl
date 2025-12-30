@@ -12,11 +12,34 @@ import (
 //go:embed aliases.json
 var embeddedAliases embed.FS
 
-// Alias maps a short name to a full git URL
+// Alias maps a short name to an MCP server configuration
 type Alias struct {
-	URL         string `json:"url"`
-	Description string `json:"description,omitempty"`
-	Runtime     string `json:"runtime,omitempty"` // node, python, go, docker
+	URL            string             `json:"url"`                      // Git URL for local servers
+	Description    string             `json:"description,omitempty"`
+	Runtime        string             `json:"runtime,omitempty"`        // node, python, go, docker
+	Transport      string             `json:"transport,omitempty"`      // stdio (default), http, sse
+	MCPURL         string             `json:"mcpUrl,omitempty"`         // Remote MCP URL (for http/sse transport)
+	OAuth          *OAuth             `json:"oauth,omitempty"`          // OAuth configuration if required
+	Package        string             `json:"package,omitempty"`        // npm/pypi package name (e.g., "@figma/mcp-local")
+	Variants       map[string]Variant `json:"variants,omitempty"`       // Available variants (local, remote)
+	DefaultVariant string             `json:"defaultVariant,omitempty"` // Preferred variant (local or remote)
+}
+
+// Variant represents a specific distribution variant of an MCP server
+type Variant struct {
+	Transport string `json:"transport,omitempty"` // stdio, http, sse
+	Package   string `json:"package,omitempty"`   // npm/pypi package name
+	MCPURL    string `json:"mcpUrl,omitempty"`    // Remote MCP URL
+	Runtime   string `json:"runtime,omitempty"`   // node, python, etc.
+}
+
+// OAuth represents OAuth configuration for remote MCP servers
+type OAuth struct {
+	AuthURL     string   `json:"authUrl"`              // OAuth authorization endpoint
+	TokenURL    string   `json:"tokenUrl"`             // OAuth token endpoint
+	Scopes      []string `json:"scopes,omitempty"`     // Required OAuth scopes
+	ClientID    string   `json:"clientId,omitempty"`   // Public client ID (if applicable)
+	PKCEEnabled bool     `json:"pkceEnabled,omitempty"` // Use PKCE for security
 }
 
 // Store manages alias lookups from bundled and user-defined sources
@@ -287,4 +310,86 @@ func (s *Store) Search(query string) []AliasInfo {
 // Search searches aliases using the default store
 func Search(query string) []AliasInfo {
 	return Default().Search(query)
+}
+
+// ResolveVariant resolves an alias with a specific variant preference
+// variantPref can be "local", "remote", or empty (use default)
+func (s *Store) ResolveVariant(name string, variantPref string) (Alias, string, bool) {
+	alias, ok := s.Resolve(name)
+	if !ok {
+		return Alias{}, "", false
+	}
+
+	// If no variants defined, return the alias as-is
+	if len(alias.Variants) == 0 {
+		return alias, "", true
+	}
+
+	// Determine which variant to use
+	variantName := variantPref
+	if variantName == "" {
+		variantName = alias.DefaultVariant
+	}
+	if variantName == "" {
+		// Default to "local" if available, otherwise "remote"
+		if _, ok := alias.Variants["local"]; ok {
+			variantName = "local"
+		} else if _, ok := alias.Variants["remote"]; ok {
+			variantName = "remote"
+		}
+	}
+
+	variant, ok := alias.Variants[variantName]
+	if !ok {
+		// Variant not found, return base alias
+		return alias, "", true
+	}
+
+	// Merge variant into alias
+	resolved := alias
+	if variant.Transport != "" {
+		resolved.Transport = variant.Transport
+	}
+	if variant.Package != "" {
+		resolved.Package = variant.Package
+	}
+	if variant.MCPURL != "" {
+		resolved.MCPURL = variant.MCPURL
+	}
+	if variant.Runtime != "" {
+		resolved.Runtime = variant.Runtime
+	}
+
+	return resolved, variantName, true
+}
+
+// ResolveVariant resolves an alias with a specific variant using the default store
+func ResolveVariant(name string, variantPref string) (Alias, string, bool) {
+	return Default().ResolveVariant(name, variantPref)
+}
+
+// HasVariants checks if an alias has multiple variants
+func (a *Alias) HasVariants() bool {
+	return len(a.Variants) > 0
+}
+
+// GetVariantNames returns the names of available variants
+func (a *Alias) GetVariantNames() []string {
+	var names []string
+	for name := range a.Variants {
+		names = append(names, name)
+	}
+	return names
+}
+
+// HasLocalVariant checks if a local variant exists
+func (a *Alias) HasLocalVariant() bool {
+	_, ok := a.Variants["local"]
+	return ok
+}
+
+// HasRemoteVariant checks if a remote variant exists
+func (a *Alias) HasRemoteVariant() bool {
+	_, ok := a.Variants["remote"]
+	return ok
 }

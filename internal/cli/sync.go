@@ -37,17 +37,26 @@ func init() {
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
-	// Load config
-	cfg, err := config.Load()
+	// Load config (including project config if present)
+	cfg, err := config.LoadWithProject()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Get active servers
+	// Show project config notice if applicable
+	if cfg.ProjectPath != "" {
+		fmt.Printf("Using project config: %s\n\n", cfg.ProjectPath)
+	}
+
+	// Get active servers, commands, and rules
 	servers := cfg.ActiveServers()
-	if len(servers) == 0 {
-		fmt.Println("No servers to sync.")
+	commands := cfg.LoadedCommands
+	rules := cfg.LoadedRules
+
+	if len(servers) == 0 && len(commands) == 0 && len(rules) == 0 {
+		fmt.Println("No resources to sync.")
 		fmt.Println("Use 'agentctl install <server>' to add servers.")
+		fmt.Println("Use 'agentctl import <tool>' to import existing config.")
 		return nil
 	}
 
@@ -83,44 +92,59 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("Syncing to %s...\n", adapter.Name())
 
+		// Get supported resources
+		supported := adapter.SupportedResources()
+
 		if syncDryRun {
-			fmt.Printf("  Would sync %d server(s)\n", len(servers))
+			if containsResourceType(supported, sync.ResourceMCP) && len(servers) > 0 {
+				fmt.Printf("  Would sync %d server(s)\n", len(servers))
+			}
+			if containsResourceType(supported, sync.ResourceCommands) && len(commands) > 0 {
+				fmt.Printf("  Would sync %d command(s)\n", len(commands))
+			}
+			if containsResourceType(supported, sync.ResourceRules) && len(rules) > 0 {
+				fmt.Printf("  Would sync %d rule(s)\n", len(rules))
+			}
 			successCount++
 			continue
 		}
 
-		// Get supported resources
-		supported := adapter.SupportedResources()
+		var syncedAny bool
 
 		// Sync servers if supported
-		if containsResourceType(supported, sync.ResourceMCP) {
+		if containsResourceType(supported, sync.ResourceMCP) && len(servers) > 0 {
 			if err := adapter.WriteServers(servers); err != nil {
 				fmt.Printf("  Error syncing servers: %v\n", err)
 				errorCount++
-				continue
+			} else {
+				fmt.Printf("  Synced %d server(s)\n", len(servers))
+				syncedAny = true
 			}
-			fmt.Printf("  Synced %d server(s)\n", len(servers))
 		}
 
 		// Sync commands if supported
-		if containsResourceType(supported, sync.ResourceCommands) && len(cfg.LoadedCommands) > 0 {
-			if err := adapter.WriteCommands(cfg.LoadedCommands); err != nil {
+		if containsResourceType(supported, sync.ResourceCommands) && len(commands) > 0 {
+			if err := adapter.WriteCommands(commands); err != nil {
 				fmt.Printf("  Error syncing commands: %v\n", err)
 			} else {
-				fmt.Printf("  Synced %d command(s)\n", len(cfg.LoadedCommands))
+				fmt.Printf("  Synced %d command(s)\n", len(commands))
+				syncedAny = true
 			}
 		}
 
 		// Sync rules if supported
-		if containsResourceType(supported, sync.ResourceRules) && len(cfg.LoadedRules) > 0 {
-			if err := adapter.WriteRules(cfg.LoadedRules); err != nil {
+		if containsResourceType(supported, sync.ResourceRules) && len(rules) > 0 {
+			if err := adapter.WriteRules(rules); err != nil {
 				fmt.Printf("  Error syncing rules: %v\n", err)
 			} else {
-				fmt.Printf("  Synced %d rule(s)\n", len(cfg.LoadedRules))
+				fmt.Printf("  Synced %d rule(s)\n", len(rules))
+				syncedAny = true
 			}
 		}
 
-		successCount++
+		if syncedAny {
+			successCount++
+		}
 	}
 
 	fmt.Println()
