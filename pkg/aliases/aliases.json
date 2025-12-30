@@ -1,0 +1,82 @@
+{
+  "filesystem": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+    "description": "Read and write files on the local filesystem",
+    "runtime": "node"
+  },
+  "github": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/github",
+    "description": "GitHub API integration for repos, issues, PRs",
+    "runtime": "node"
+  },
+  "postgres": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/postgres",
+    "description": "PostgreSQL database integration",
+    "runtime": "node"
+  },
+  "sqlite": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/sqlite",
+    "description": "SQLite database integration",
+    "runtime": "node"
+  },
+  "memory": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/memory",
+    "description": "Knowledge graph-based memory storage",
+    "runtime": "node"
+  },
+  "puppeteer": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/puppeteer",
+    "description": "Browser automation with Puppeteer",
+    "runtime": "node"
+  },
+  "brave-search": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/brave-search",
+    "description": "Web search using Brave Search API",
+    "runtime": "node"
+  },
+  "google-maps": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/google-maps",
+    "description": "Google Maps integration",
+    "runtime": "node"
+  },
+  "fetch": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+    "description": "Fetch and convert web content to markdown",
+    "runtime": "node"
+  },
+  "slack": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/slack",
+    "description": "Slack workspace integration",
+    "runtime": "node"
+  },
+  "google-drive": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/gdrive",
+    "description": "Google Drive file management",
+    "runtime": "node"
+  },
+  "git": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/git",
+    "description": "Git repository operations",
+    "runtime": "node"
+  },
+  "sequential-thinking": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+    "description": "Dynamic problem-solving through thought sequences",
+    "runtime": "node"
+  },
+  "sentry": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/sentry",
+    "description": "Sentry error tracking integration",
+    "runtime": "node"
+  },
+  "everart": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/everart",
+    "description": "AI image generation with EverArt",
+    "runtime": "node"
+  },
+  "aws-kb-retrieval": {
+    "url": "github.com/modelcontextprotocol/servers/tree/main/src/aws-kb-retrieval-server",
+    "description": "AWS Bedrock Knowledge Base retrieval",
+    "runtime": "node"
+  }
+}
