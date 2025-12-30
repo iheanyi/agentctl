@@ -29,7 +29,7 @@ func TestPathToName(t *testing.T) {
 	}
 }
 
-func TestParseInstallTarget(t *testing.T) {
+func TestParseAddTarget(t *testing.T) {
 	tests := []struct {
 		name     string
 		target   string
@@ -70,7 +70,7 @@ func TestParseInstallTarget(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server, err := parseInstallTarget(tt.target)
+			server, err := parseAddTarget(tt.target)
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Expected error, got nil")
@@ -87,8 +87,8 @@ func TestParseInstallTarget(t *testing.T) {
 	}
 }
 
-func TestParseInstallTargetWithVersion(t *testing.T) {
-	server, err := parseInstallTarget("filesystem@v1.2.3")
+func TestParseAddTargetWithVersion(t *testing.T) {
+	server, err := parseAddTarget("filesystem@v1.2.3")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -146,10 +146,10 @@ func TestInitFlagsExist(t *testing.T) {
 	}
 }
 
-func TestInstallFlagsExist(t *testing.T) {
-	flag := installCmd.Flag("namespace")
+func TestAddFlagsExist(t *testing.T) {
+	flag := addCmd.Flag("namespace")
 	if flag == nil {
-		t.Error("install command should have --namespace flag")
+		t.Error("add command should have --namespace flag")
 	}
 }
 
@@ -212,7 +212,7 @@ func TestProfileSubcommands(t *testing.T) {
 
 func TestRootCommandHasSubcommands(t *testing.T) {
 	subcommands := rootCmd.Commands()
-	expectedNames := []string{"install", "remove", "list", "sync", "alias", "profile", "init", "doctor", "status", "version"}
+	expectedNames := []string{"add", "remove", "list", "sync", "alias", "profile", "init", "doctor", "status", "version"}
 
 	subcommandNames := make(map[string]bool)
 	for _, cmd := range subcommands {

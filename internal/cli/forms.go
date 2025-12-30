@@ -5,7 +5,24 @@ import (
 	"os"
 
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
+)
+
+// Poimandres color palette
+// https://github.com/drcmda/poimandres-theme
+var (
+	// Base colors
+	poimandresBg       = lipgloss.Color("#1b1e28")
+	poimandresFg       = lipgloss.Color("#a6accd")
+	poimandresFgMuted  = lipgloss.Color("#767c9d")
+	poimandresFgSubtle = lipgloss.Color("#506477")
+	poimandresPanel    = lipgloss.Color("#303340")
+
+	// Accent colors
+	poimandresTeal = lipgloss.Color("#5DE4c7")
+	poimandresCyan = lipgloss.Color("#89ddff")
+	poimandresPink = lipgloss.Color("#f087bd")
 )
 
 // isInteractive checks if stdin is a TTY (interactive terminal)
@@ -60,9 +77,37 @@ func runFormWithCancel(form *huh.Form, cmdName string) (bool, error) {
 	return true, nil
 }
 
-// formTheme returns the standard theme for all agentctl forms
+// formTheme returns a Poimandres-inspired theme for all agentctl forms
 func formTheme() *huh.Theme {
-	return huh.ThemeDracula()
+	t := huh.ThemeBase()
+
+	// Focused styles
+	t.Focused.Base = t.Focused.Base.BorderForeground(poimandresTeal)
+	t.Focused.Title = t.Focused.Title.Foreground(poimandresTeal)
+	t.Focused.Description = t.Focused.Description.Foreground(poimandresFgMuted)
+	t.Focused.ErrorIndicator = t.Focused.ErrorIndicator.Foreground(poimandresPink)
+	t.Focused.ErrorMessage = t.Focused.ErrorMessage.Foreground(poimandresPink)
+	t.Focused.SelectSelector = t.Focused.SelectSelector.Foreground(poimandresTeal)
+	t.Focused.Option = t.Focused.Option.Foreground(poimandresFg)
+	t.Focused.MultiSelectSelector = t.Focused.MultiSelectSelector.Foreground(poimandresTeal)
+	t.Focused.SelectedOption = t.Focused.SelectedOption.Foreground(poimandresTeal)
+	t.Focused.SelectedPrefix = t.Focused.SelectedPrefix.Foreground(poimandresTeal)
+	t.Focused.UnselectedOption = t.Focused.UnselectedOption.Foreground(poimandresFgMuted)
+	t.Focused.UnselectedPrefix = t.Focused.UnselectedPrefix.Foreground(poimandresFgSubtle)
+	t.Focused.FocusedButton = t.Focused.FocusedButton.Foreground(poimandresBg).Background(poimandresTeal)
+	t.Focused.BlurredButton = t.Focused.BlurredButton.Foreground(poimandresFg).Background(poimandresPanel)
+	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(poimandresTeal)
+	t.Focused.TextInput.Placeholder = t.Focused.TextInput.Placeholder.Foreground(poimandresFgSubtle)
+	t.Focused.TextInput.Prompt = t.Focused.TextInput.Prompt.Foreground(poimandresTeal)
+
+	// Blurred styles
+	t.Blurred.Base = t.Blurred.Base.BorderForeground(poimandresFgSubtle)
+	t.Blurred.Title = t.Blurred.Title.Foreground(poimandresFgMuted)
+	t.Blurred.Description = t.Blurred.Description.Foreground(poimandresFgSubtle)
+	t.Blurred.TextInput.Placeholder = t.Blurred.TextInput.Placeholder.Foreground(poimandresFgSubtle)
+	t.Blurred.TextInput.Prompt = t.Blurred.TextInput.Prompt.Foreground(poimandresFgMuted)
+
+	return t
 }
 
 // newStyledForm creates a new form with consistent styling
