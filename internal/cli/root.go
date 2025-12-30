@@ -51,6 +51,7 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(searchCmd)
 }
 
 var versionCmd = &cobra.Command{

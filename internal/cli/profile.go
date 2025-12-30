@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/iheanyi/agentctl/pkg/config"
+	"github.com/iheanyi/agentctl/pkg/output"
+	"github.com/iheanyi/agentctl/pkg/profile"
 	"github.com/spf13/cobra"
 )
 
@@ -57,12 +60,21 @@ var profileImportCmd = &cobra.Command{
 	RunE:  runProfileImport,
 }
 
+var profileDeleteCmd = &cobra.Command{
+	Use:     "delete <name>",
+	Aliases: []string{"rm"},
+	Short:   "Delete a profile",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runProfileDelete,
+}
+
 func init() {
 	profileCmd.AddCommand(profileListCmd)
 	profileCmd.AddCommand(profileCreateCmd)
 	profileCmd.AddCommand(profileSwitchCmd)
 	profileCmd.AddCommand(profileExportCmd)
 	profileCmd.AddCommand(profileImportCmd)
+	profileCmd.AddCommand(profileDeleteCmd)
 }
 
 func runProfileList(cmd *cobra.Command, args []string) error {
@@ -71,15 +83,51 @@ func runProfileList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// TODO: Load profiles from profiles/ directory
-	defaultProfile := cfg.Settings.DefaultProfile
-	if defaultProfile == "" {
-		defaultProfile = "default"
+	out := output.DefaultWriter()
+	profilesDir := filepath.Join(cfg.ConfigDir, "profiles")
+
+	// Load all profiles
+	profiles, err := profile.LoadAll(profilesDir)
+	if err != nil {
+		return fmt.Errorf("failed to load profiles: %w", err)
 	}
 
-	fmt.Println("Profiles:")
-	fmt.Printf("  * %s (active)\n", defaultProfile)
+	activeProfile := cfg.Settings.DefaultProfile
+	if activeProfile == "" {
+		activeProfile = "default"
+	}
 
+	if len(profiles) == 0 {
+		out.Println("No profiles found.")
+		out.Info("The 'default' profile is active (using main config)")
+		out.Println("")
+		out.Println("Create a profile with: agentctl profile create <name>")
+		return nil
+	}
+
+	table := output.NewTable("Name", "Description", "Status")
+
+	// Add default profile if it's active and not in the list
+	hasDefault := false
+	for _, p := range profiles {
+		if p.Name == "default" {
+			hasDefault = true
+			break
+		}
+	}
+	if !hasDefault && activeProfile == "default" {
+		table.AddRow("default", "(main config)", "*active*")
+	}
+
+	for _, p := range profiles {
+		status := ""
+		if p.Name == activeProfile {
+			status = "*active*"
+		}
+		table.AddRow(p.Name, p.Description, status)
+	}
+
+	table.Render()
 	return nil
 }
 
@@ -91,37 +139,22 @@ func runProfileCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Create profile in profiles/ directory
-	profileDir := cfg.ConfigDir + "/profiles"
-	if err := os.MkdirAll(profileDir, 0755); err != nil {
-		return fmt.Errorf("failed to create profiles directory: %w", err)
-	}
+	out := output.DefaultWriter()
+	profilesDir := filepath.Join(cfg.ConfigDir, "profiles")
 
-	profilePath := profileDir + "/" + name + ".json"
-	if _, err := os.Stat(profilePath); err == nil {
+	// Check if profile already exists
+	if profile.Exists(profilesDir, name) {
 		return fmt.Errorf("profile %q already exists", name)
 	}
 
-	// Create empty profile
-	profile := map[string]interface{}{
-		"name":     name,
-		"servers":  []string{},
-		"commands": []string{},
-		"rules":    []string{},
-		"disabled": []string{},
-	}
-
-	data, err := json.MarshalIndent(profile, "", "  ")
+	// Create the profile
+	p, err := profile.Create(profilesDir, name, "")
 	if err != nil {
-		return err
-	}
-
-	if err := os.WriteFile(profilePath, data, 0644); err != nil {
 		return fmt.Errorf("failed to create profile: %w", err)
 	}
 
-	fmt.Printf("Created profile %q\n", name)
-	fmt.Printf("Edit %s to configure the profile.\n", profilePath)
+	out.Success("Created profile %q", name)
+	out.Info("Edit %s to configure the profile", p.Path)
 
 	return nil
 }
@@ -134,9 +167,11 @@ func runProfileSwitch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Check profile exists
-	profilePath := cfg.ConfigDir + "/profiles/" + name + ".json"
-	if _, err := os.Stat(profilePath); os.IsNotExist(err) {
+	out := output.DefaultWriter()
+	profilesDir := filepath.Join(cfg.ConfigDir, "profiles")
+
+	// Check profile exists (unless switching to default)
+	if name != "default" && !profile.Exists(profilesDir, name) {
 		return fmt.Errorf("profile %q does not exist", name)
 	}
 
@@ -146,8 +181,8 @@ func runProfileSwitch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	fmt.Printf("Switched to profile %q\n", name)
-	fmt.Println("Run 'agentctl sync' to apply the new profile.")
+	out.Success("Switched to profile %q", name)
+	out.Info("Run 'agentctl sync' to apply the new profile")
 
 	return nil
 }
@@ -209,5 +244,44 @@ func runProfileImport(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Imported profile %q\n", name)
+	return nil
+}
+
+func runProfileDelete(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	if name == "default" {
+		return fmt.Errorf("cannot delete the default profile")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	out := output.DefaultWriter()
+	profilesDir := filepath.Join(cfg.ConfigDir, "profiles")
+
+	// Check profile exists
+	if !profile.Exists(profilesDir, name) {
+		return fmt.Errorf("profile %q does not exist", name)
+	}
+
+	// Delete the profile
+	if err := profile.Delete(profilesDir, name); err != nil {
+		return fmt.Errorf("failed to delete profile: %w", err)
+	}
+
+	// If this was the active profile, switch to default
+	if cfg.Settings.DefaultProfile == name {
+		cfg.Settings.DefaultProfile = "default"
+		if err := cfg.Save(); err != nil {
+			out.Warning("Deleted profile was active, but failed to update config: %v", err)
+		} else {
+			out.Info("Switched to 'default' profile")
+		}
+	}
+
+	out.Success("Deleted profile %q", name)
 	return nil
 }

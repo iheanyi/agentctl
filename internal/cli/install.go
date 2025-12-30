@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/iheanyi/agentctl/pkg/aliases"
+	"github.com/iheanyi/agentctl/pkg/builder"
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/spf13/cobra"
@@ -57,6 +58,26 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Server %q is already installed (source: %s)\n", server.Name, existing.Source.URL)
 		fmt.Println("Use 'agentctl update' to update, or 'agentctl remove' then reinstall.")
 		return nil
+	}
+
+	// For git sources, clone and build
+	if server.Source.Type == "git" {
+		b := builder.New(cfg.CacheDir())
+
+		fmt.Printf("Cloning %s...\n", server.Source.URL)
+		if err := b.Clone(server); err != nil {
+			return fmt.Errorf("failed to clone: %w", err)
+		}
+
+		fmt.Println("Building...")
+		if err := b.Build(server); err != nil {
+			return fmt.Errorf("failed to build: %w", err)
+		}
+
+		// Resolve the command after building
+		if server.Command == "" {
+			server.Command = b.ResolveCommand(server)
+		}
 	}
 
 	// Add to config

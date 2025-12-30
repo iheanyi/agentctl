@@ -114,7 +114,8 @@ func TestBuildConfig(t *testing.T) {
 		Command: "node",
 		Args:    []string{"dist/index.js"},
 		Build: &BuildConfig{
-			Command: "npm run build",
+			Install: "npm install",
+			Build:   "npm run build",
 			WorkDir: ".",
 		},
 	}
@@ -132,8 +133,11 @@ func TestBuildConfig(t *testing.T) {
 	if decoded.Build == nil {
 		t.Fatal("Build config should not be nil")
 	}
-	if decoded.Build.Command != "npm run build" {
-		t.Errorf("Build command mismatch: got %q", decoded.Build.Command)
+	if decoded.Build.Install != "npm install" {
+		t.Errorf("Build install mismatch: got %q", decoded.Build.Install)
+	}
+	if decoded.Build.Build != "npm run build" {
+		t.Errorf("Build command mismatch: got %q", decoded.Build.Build)
 	}
 }
 

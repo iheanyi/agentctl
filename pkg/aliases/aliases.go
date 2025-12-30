@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -236,4 +237,54 @@ func Remove(name string) error {
 // List returns all aliases using the default store
 func List() map[string]Alias {
 	return Default().List()
+}
+
+// AliasInfo contains alias info for display
+type AliasInfo struct {
+	Name        string
+	Description string
+	Runtime     string
+	URL         string
+}
+
+// Search searches for aliases matching the query
+func (s *Store) Search(query string) []AliasInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query = strings.ToLower(query)
+	var results []AliasInfo
+
+	// Search bundled
+	for name, alias := range s.bundled {
+		if strings.Contains(strings.ToLower(name), query) ||
+			strings.Contains(strings.ToLower(alias.Description), query) {
+			results = append(results, AliasInfo{
+				Name:        name,
+				Description: alias.Description,
+				Runtime:     alias.Runtime,
+				URL:         alias.URL,
+			})
+		}
+	}
+
+	// Search user
+	for name, alias := range s.user {
+		if strings.Contains(strings.ToLower(name), query) ||
+			strings.Contains(strings.ToLower(alias.Description), query) {
+			results = append(results, AliasInfo{
+				Name:        name,
+				Description: alias.Description,
+				Runtime:     alias.Runtime,
+				URL:         alias.URL,
+			})
+		}
+	}
+
+	return results
+}
+
+// Search searches aliases using the default store
+func Search(query string) []AliasInfo {
+	return Default().Search(query)
 }

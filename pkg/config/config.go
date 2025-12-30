@@ -262,6 +262,11 @@ func (c *Config) ActiveServers() []*mcp.Server {
 	return servers
 }
 
+// CacheDir returns the cache directory for this config
+func (c *Config) CacheDir() string {
+	return DefaultCacheDir()
+}
+
 // defaultToolSettings returns default tool configuration
 func defaultToolSettings() map[string]ToolConfig {
 	tools := []string{"claude", "cursor", "codex", "opencode", "cline", "windsurf", "zed", "continue"}

@@ -18,7 +18,8 @@ type Source struct {
 
 // BuildConfig defines how to build an MCP server
 type BuildConfig struct {
-	Command string `json:"command"`           // e.g., "npm run build"
+	Install string `json:"install,omitempty"` // e.g., "npm install"
+	Build   string `json:"build,omitempty"`   // e.g., "npm run build"
 	WorkDir string `json:"workdir,omitempty"` // Working directory for build
 }
 
