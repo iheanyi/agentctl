@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/iheanyi/agentctl/pkg/config"
+	"github.com/iheanyi/agentctl/pkg/lockfile"
+	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/spf13/cobra"
 )
 
@@ -25,11 +27,18 @@ Examples:
 
 func runRemove(cmd *cobra.Command, args []string) error {
 	name := args[0]
+	out := output.DefaultWriter()
 
 	// Load config
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Load lockfile
+	lf, err := lockfile.Load(cfg.ConfigDir)
+	if err != nil {
+		return fmt.Errorf("failed to load lockfile: %w", err)
 	}
 
 	// Check if server exists
@@ -45,8 +54,16 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	fmt.Printf("Removed %q\n", name)
-	fmt.Println("Run 'agentctl sync' to update your tools.")
+	// Remove from lockfile
+	if lf.IsLocked(name) {
+		lf.Unlock(name)
+		if err := lf.Save(); err != nil {
+			out.Warning("Failed to update lockfile: %v", err)
+		}
+	}
+
+	out.Success("Removed %q", name)
+	out.Info("Run 'agentctl sync' to update your tools.")
 
 	return nil
 }

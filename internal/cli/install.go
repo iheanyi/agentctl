@@ -2,12 +2,15 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/iheanyi/agentctl/pkg/aliases"
 	"github.com/iheanyi/agentctl/pkg/builder"
 	"github.com/iheanyi/agentctl/pkg/config"
+	"github.com/iheanyi/agentctl/pkg/lockfile"
 	"github.com/iheanyi/agentctl/pkg/mcp"
+	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/spf13/cobra"
 )
 
@@ -35,11 +38,18 @@ func init() {
 
 func runInstall(cmd *cobra.Command, args []string) error {
 	target := args[0]
+	out := output.DefaultWriter()
 
 	// Load config
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Load lockfile
+	lf, err := lockfile.Load(cfg.ConfigDir)
+	if err != nil {
+		return fmt.Errorf("failed to load lockfile: %w", err)
 	}
 
 	// Parse the target
@@ -55,21 +65,23 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	// Check if already installed
 	if existing, ok := cfg.Servers[server.Name]; ok {
-		fmt.Printf("Server %q is already installed (source: %s)\n", server.Name, existing.Source.URL)
-		fmt.Println("Use 'agentctl update' to update, or 'agentctl remove' then reinstall.")
+		out.Warning("Server %q is already installed (source: %s)", server.Name, existing.Source.URL)
+		out.Info("Use 'agentctl update' to update, or 'agentctl remove' then reinstall.")
 		return nil
 	}
+
+	var lockedEntry *lockfile.LockedEntry
 
 	// For git sources, clone and build
 	if server.Source.Type == "git" {
 		b := builder.New(cfg.CacheDir())
 
-		fmt.Printf("Cloning %s...\n", server.Source.URL)
+		out.Info("Cloning %s...", server.Source.URL)
 		if err := b.Clone(server); err != nil {
 			return fmt.Errorf("failed to clone: %w", err)
 		}
 
-		fmt.Println("Building...")
+		out.Info("Building...")
 		if err := b.Build(server); err != nil {
 			return fmt.Errorf("failed to build: %w", err)
 		}
@@ -77,6 +89,26 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		// Resolve the command after building
 		if server.Command == "" {
 			server.Command = b.ResolveCommand(server)
+		}
+
+		// Get commit hash for lockfile
+		commit, _ := b.GetCommit(server)
+
+		// Calculate integrity hash
+		serverDir := filepath.Join(cfg.CacheDir(), "downloads", server.Name)
+		integrity, _ := lockfile.CalculateIntegrity(serverDir)
+
+		lockedEntry = &lockfile.LockedEntry{
+			Source:    server.Source.URL,
+			Version:   server.Source.Ref,
+			Commit:    commit,
+			Integrity: integrity,
+		}
+	} else if server.Source.Type == "alias" {
+		// For aliases, record the source info
+		lockedEntry = &lockfile.LockedEntry{
+			Source:  server.Source.URL,
+			Version: server.Source.Ref,
 		}
 	}
 
@@ -91,8 +123,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	fmt.Printf("Installed %q\n", server.Name)
-	fmt.Println("Run 'agentctl sync' to sync to your tools.")
+	// Update lockfile
+	if lockedEntry != nil {
+		lf.Lock(server.Name, lockedEntry)
+		if err := lf.Save(); err != nil {
+			out.Warning("Failed to save lockfile: %v", err)
+		}
+	}
+
+	out.Success("Installed %q", server.Name)
+	out.Info("Run 'agentctl sync' to sync to your tools.")
 
 	return nil
 }

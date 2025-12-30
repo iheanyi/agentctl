@@ -55,6 +55,9 @@ func init() {
 	rootCmd.AddCommand(newCmd)
 	rootCmd.AddCommand(importCmd)
 	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(secretCmd)
+	rootCmd.AddCommand(testCmd)
+	rootCmd.AddCommand(configCmd)
 }
 
 var versionCmd = &cobra.Command{

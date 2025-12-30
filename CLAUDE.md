@@ -37,12 +37,14 @@ pkg/
 ├── aliases/    # Bundled + user aliases with search
 ├── builder/    # Git cloning, auto-build detection (Node/Go/Rust/Python)
 ├── profile/    # Profile CRUD operations
-├── registry/   # mcp.so API client
+├── registry/   # mcp.so API client (opt-in via --community flag)
 ├── output/     # Terminal output formatting (gh CLI-style)
 ├── command/    # Slash command schema
 ├── rule/       # Rules with YAML frontmatter
 ├── prompt/     # Prompt templates
 ├── skill/      # Directory-based skills
+├── secrets/    # Keychain integration (macOS/Linux/Windows)
+├── lockfile/   # Version locking and integrity verification
 
 internal/cli/   # Cobra command implementations
 cmd/agentctl/   # Entry point
@@ -92,6 +94,7 @@ type Adapter interface {
 ### Config Locations
 
 - **agentctl config:** `~/.config/agentctl/agentctl.json`
+- **Lockfile:** `~/.config/agentctl/agentctl.lock`
 - **Cache:** `~/.cache/agentctl/`
 - **Project config:** `.agentctl.json` in project root
 
@@ -165,11 +168,20 @@ func init() {
 | `remove <name>` | Remove installed server |
 | `list` | List all resources |
 | `sync` | Sync config to all detected tools |
-| `search <query>` | Search mcp.so and bundled aliases |
+| `search <query>` | Search bundled aliases (use --community for mcp.so) |
 | `alias list/add/remove` | Manage aliases |
 | `profile list/create/switch/delete` | Manage profiles |
+| `new command/rule/prompt/skill` | Scaffold new resources |
+| `import <tool>` | Import config from existing tools |
+| `update [server]` | Check/apply updates |
 | `doctor` | Diagnose common issues |
 | `status` | Show resource status |
+| `test [server]` | Health check MCP servers |
+| `config` | View/edit configuration |
+| `config show` | Show full config as JSON |
+| `config get/set` | Get/set config values |
+| `config edit` | Open config in editor |
+| `secret set/get/list/delete` | Manage secrets in keychain |
 
 ## Bundled Aliases
 
@@ -185,6 +197,28 @@ Located in `pkg/aliases/aliases.json`. Add popular MCP servers here:
 }
 ```
 
+## Secrets Management
+
+Secrets can be stored in the system keychain and referenced in MCP server configs:
+
+```json
+{
+  "servers": {
+    "github": {
+      "env": {
+        "GITHUB_TOKEN": "$GITHUB_TOKEN",      // Environment variable
+        "API_KEY": "keychain:my-api-key"       // Keychain secret
+      }
+    }
+  }
+}
+```
+
+Supported backends:
+- **macOS:** Keychain Access (via `security` command)
+- **Linux:** Secret Service (via `secret-tool`)
+- **Windows:** Credential Manager (via `cmdkey`)
+
 ## Environment Variables
 
 - `AGENTCTL_HOME` - Override config directory
@@ -196,21 +230,25 @@ Located in `pkg/aliases/aliases.json`. Add popular MCP servers here:
 ### Completed
 - Core types and config
 - All 8 tool adapters
-- Bundled aliases (16 servers)
+- Bundled aliases (16 servers from official modelcontextprotocol/servers)
 - Git cloning and auto-building
 - Profile management
-- mcp.so search integration
+- mcp.so search (opt-in via `--community` flag for security)
 - Output formatting
+- Secrets management (keychain integration for macOS/Linux/Windows)
+- `agentctl new` scaffolding commands
+- `agentctl import` from existing tools
+- `agentctl update` for checking/applying updates
+- `agentctl test` health check command
+- `agentctl config` view/edit command
+- Lockfile support with integrity verification
 
 ### TODO
-- [ ] Secrets management (keychain integration)
 - [ ] Background daemon for auto-updates
 - [ ] TUI mode (Bubble Tea)
-- [ ] `agentctl new` scaffolding commands
-- [ ] `agentctl import` from existing tools
-- [ ] Lockfile support
 - [ ] GoReleaser setup
 - [ ] Homebrew formula
+- [ ] Install script
 
 ## Code Style
 

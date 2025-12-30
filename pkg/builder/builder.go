@@ -328,3 +328,35 @@ func (b *Builder) ResolveCommand(server *mcp.Server) string {
 
 	return server.Command
 }
+
+// GetCommit returns the current git commit hash for a server
+func (b *Builder) GetCommit(server *mcp.Server) (string, error) {
+	dir := b.ServerDir(server)
+
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
+
+// GetVersion returns the current version tag for a server, if available
+func (b *Builder) GetVersion(server *mcp.Server) (string, error) {
+	dir := b.ServerDir(server)
+
+	// Try to get the tag at HEAD
+	cmd := exec.Command("git", "describe", "--tags", "--exact-match", "HEAD")
+	cmd.Dir = dir
+
+	output, err := cmd.Output()
+	if err != nil {
+		// No tag at HEAD, that's okay
+		return "", nil
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
