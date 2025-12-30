@@ -58,6 +58,8 @@ func init() {
 	rootCmd.AddCommand(secretCmd)
 	rootCmd.AddCommand(testCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(uiCmd)
+	rootCmd.AddCommand(daemonCmd)
 }
 
 var versionCmd = &cobra.Command{

@@ -182,6 +182,8 @@ func init() {
 | `config get/set` | Get/set config values |
 | `config edit` | Open config in editor |
 | `secret set/get/list/delete` | Manage secrets in keychain |
+| `ui` | Launch interactive TUI |
+| `daemon start/stop/status` | Manage background daemon |
 
 ## Bundled Aliases
 
@@ -242,13 +244,15 @@ Supported backends:
 - `agentctl test` health check command
 - `agentctl config` view/edit command
 - Lockfile support with integrity verification
+- TUI mode (Bubble Tea)
+- Background daemon for auto-updates
+- GoReleaser configuration
+- Homebrew formula
+- Install script
 
 ### TODO
-- [ ] Background daemon for auto-updates
-- [ ] TUI mode (Bubble Tea)
-- [ ] GoReleaser setup
-- [ ] Homebrew formula
-- [ ] Install script
+- [ ] More comprehensive daemon update checking
+- [ ] Shell completions command
 
 ## Code Style
 

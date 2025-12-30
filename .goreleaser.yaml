@@ -1,0 +1,107 @@
+version: 2
+
+project_name: agentctl
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: agentctl
+    main: ./cmd/agentctl
+    binary: agentctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/iheanyi/agentctl/internal/cli.Version={{.Version}}
+      - -X github.com/iheanyi/agentctl/internal/cli.Commit={{.Commit}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: iheanyi
+    name: agentctl
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## What's Changed
+
+    For installation instructions, see the [README](https://github.com/iheanyi/agentctl#installation).
+  footer: |
+    **Full Changelog**: https://github.com/iheanyi/agentctl/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+brews:
+  - name: agentctl
+    repository:
+      owner: iheanyi
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/iheanyi/agentctl
+    description: Universal agent configuration manager for MCP servers
+    license: MIT
+    install: |
+      bin.install "agentctl"
+    test: |
+      system "#{bin}/agentctl", "version"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+
+nfpms:
+  - id: packages
+    package_name: agentctl
+    vendor: Iheanyi Ekechukwu
+    homepage: https://github.com/iheanyi/agentctl
+    maintainer: Iheanyi Ekechukwu <iheanyi@hey.com>
+    description: Universal agent configuration manager for MCP servers
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# Announce to Discord/Slack/etc (optional)
+# announce:
+#   skip: true
