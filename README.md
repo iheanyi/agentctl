@@ -7,7 +7,7 @@ Universal agent configuration manager for MCP servers across multiple agentic to
 
 ## Overview
 
-`agentctl` manages MCP servers, commands, rules, prompts, and skills across 8 agentic frameworks:
+`agentctl` manages MCP servers, commands, rules, prompts, and skills across 9 agentic frameworks:
 
 - **Claude Code** - Anthropic's CLI assistant
 - **Claude Desktop** - Anthropic's desktop app
@@ -23,22 +23,10 @@ One config, all tools. Install once, sync everywhere.
 
 ## Installation
 
-### Homebrew (macOS/Linux)
-
-```bash
-brew install iheanyi/tap/agentctl
-```
-
 ### Go Install
 
 ```bash
 go install github.com/iheanyi/agentctl/cmd/agentctl@latest
-```
-
-### Script
-
-```bash
-curl -sSL https://raw.githubusercontent.com/iheanyi/agentctl/main/install.sh | bash
 ```
 
 ### From Source
@@ -87,9 +75,6 @@ agentctl add my-api --url https://api.example.com/mcp/sse --type sse
 agentctl add playwright --command npx --args "playwriter@latest"
 agentctl add fs --command npx --args "-y,@modelcontextprotocol/server-filesystem"
 
-# Add from git URL
-agentctl add github.com/org/mcp-server
-
 # Options
 agentctl add sentry --local         # Force local npx variant
 agentctl add sentry --remote        # Force remote HTTP variant
@@ -101,8 +86,6 @@ agentctl add figma --dry-run        # Preview config without adding
 agentctl remove <server>
 agentctl update [server]
 agentctl list
-
-# Note: `agentctl install` is an alias for `agentctl add`
 ```
 
 ### Syncing
@@ -110,7 +93,19 @@ agentctl list
 ```bash
 agentctl sync                  # Sync to all detected tools
 agentctl sync --tool claude    # Sync to specific tool
-agentctl sync --dry-run        # Preview changes
+agentctl sync --dry-run        # Preview changes with diff output
+agentctl sync --verbose        # Show detailed sync output
+```
+
+### Diagnostics
+
+```bash
+agentctl validate              # Validate all tool config syntax
+agentctl validate --tool claude  # Validate specific tool
+agentctl doctor                # Run comprehensive health checks
+agentctl doctor -v             # Verbose health check output
+agentctl test [server]         # Health check MCP servers
+agentctl status                # Show resource status
 ```
 
 ### Search & Discovery
@@ -126,11 +121,9 @@ agentctl alias add name url    # Add custom alias
 Profiles use an **additive model** - they add servers on top of your base config.
 
 ```bash
-# Profile management
 agentctl profile list                    # List all profiles
-agentctl profile create work -d "Work MCPs"  # Create with description
+agentctl profile create work             # Create profile
 agentctl profile switch work             # Switch active profile
-agentctl profile show [name]             # Show profile details
 agentctl profile delete work             # Delete profile
 
 # Add/remove servers from profiles
@@ -143,12 +136,9 @@ agentctl profile remove-server work sentry
 Create `.agentctl.json` in your project root for project-specific servers:
 
 ```bash
-# Initialize project config
-agentctl init --local
-
-# Commands automatically detect and merge project config
-agentctl list    # Shows "Project config: /path/to/.agentctl.json"
-agentctl sync    # Syncs merged global + project config
+agentctl init --local          # Initialize project config
+agentctl list                  # Shows merged global + project config
+agentctl sync                  # Syncs merged configuration
 ```
 
 ### Resource Creation
@@ -167,7 +157,7 @@ agentctl config                # Show config summary
 agentctl config show           # Show full config as JSON
 agentctl config edit           # Open in $EDITOR
 agentctl config get <key>      # Get config value
-agentctl config set <key> <value>  # Set config value
+agentctl config set <key> <val>  # Set config value
 ```
 
 ### Secrets
@@ -179,41 +169,22 @@ agentctl secret list           # List stored secrets
 agentctl secret delete <name>  # Remove secret
 ```
 
-### Health & Status
-
-```bash
-agentctl test [server]         # Health check servers
-agentctl status                # Show resource status
-agentctl doctor                # Diagnose common issues
-```
-
 ### Interactive TUI
 
 ```bash
 agentctl ui
 ```
 
-The TUI provides two views:
-- **Installed** - Manage installed MCP servers (delete, test, sync)
-- **Browse** - Discover and install available MCPs
-
 Keyboard shortcuts:
 - `Tab` - Switch between Installed/Browse views
-- `↑/↓` or `j/k` - Navigate
+- `j/k` or `Up/Down` - Navigate
 - `/` - Filter list
-- `d` - Delete server (Installed view)
-- `i` - Install server (Browse view)
+- `Enter` - Install/view details
+- `d` - Delete server
 - `s` - Sync all servers
 - `t` - Test selected server
+- `?` - Show help
 - `q` - Quit
-
-### Background Daemon
-
-```bash
-agentctl daemon start          # Start auto-update daemon
-agentctl daemon stop           # Stop daemon
-agentctl daemon status         # Check daemon status
-```
 
 ## Configuration
 
@@ -224,21 +195,12 @@ Configuration is stored in `~/.config/agentctl/agentctl.json`:
   "version": "1",
   "servers": {
     "figma": {
-      "source": { "type": "remote", "url": "https://mcp.figma.com/mcp" },
-      "transport": "http",
-      "url": "https://mcp.figma.com/mcp"
+      "url": "https://mcp.figma.com/mcp",
+      "transport": "http"
     },
     "filesystem": {
-      "source": { "type": "alias", "alias": "filesystem" },
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem"]
-    }
-  },
-  "settings": {
-    "defaultProfile": "default",
-    "autoUpdate": {
-      "enabled": true,
-      "interval": "24h"
     }
   }
 }
@@ -261,92 +223,31 @@ Reference secrets using environment variables or keychain:
 }
 ```
 
-### Project-Local Config
-
-Create `.agentctl.json` in your project root for project-specific configuration:
-
-```json
-{
-  "version": "1",
-  "servers": {
-    "project-db": {
-      "source": { "type": "local", "url": "./tools/db-mcp" },
-      "command": "./tools/db-mcp/server"
-    }
-  },
-  "disabled": ["personal-mcp"]
-}
-```
-
-Project config is automatically detected and merged with global config. Same-name servers override global, others are added.
-
-## Bundled Aliases
-
-agentctl ships with aliases for popular MCP servers:
-
-### Remote MCPs (OAuth, HTTP transport)
-
-| Alias | Description |
-|-------|-------------|
-| `sentry` | Sentry error tracking (remote + local variants) |
-| `figma` | Figma design-to-code (remote + local variants) |
-| `linear` | Linear issue tracking |
-| `notion` | Notion workspace integration |
-
-### Local MCPs (stdio transport)
-
-| Alias | Description |
-|-------|-------------|
-| `filesystem` | File system operations |
-| `github` | GitHub API integration |
-| `postgres` | PostgreSQL database |
-| `sqlite` | SQLite database |
-| `memory` | Knowledge graph storage |
-| `fetch` | HTTP fetch operations |
-| `puppeteer` | Browser automation |
-| `playwright` | Browser automation |
-| `brave-search` | Brave search integration |
-| `google-maps` | Google Maps API |
-| `google-drive` | Google Drive integration |
-| `slack` | Slack integration |
-| `git` | Git repository operations |
-| `sequential-thinking` | Structured reasoning |
-| `context7` | Up-to-date library documentation |
-
 ## Transport Support
 
 Different tools support different MCP transports:
 
 | Tool | stdio | HTTP/SSE |
 |------|-------|----------|
-| Claude Code | ✓ | ✓ |
-| Claude Desktop | ✓ | ✓ |
-| Cursor | ✓ | ✗ |
-| Codex | ✓ | ✗ |
-| Cline | ✓ | ✗ |
+| Claude Code | Yes | Yes |
+| Claude Desktop | Yes | Yes |
+| Cursor | Yes | No |
+| Codex | Yes | Yes |
+| OpenCode | Yes | Yes |
+| Cline | Yes | Yes |
+| Windsurf | Yes | Yes |
+| Zed | Yes | Yes |
+| Continue | Yes | Yes |
 
-When installing a remote MCP (like Figma), agentctl automatically:
-- Uses HTTP transport for Claude (supports it natively)
-- Suggests local npm variant for Cursor/others (no HTTP support)
+When syncing, agentctl automatically filters servers based on transport support.
 
 ## Sync Behavior
 
-agentctl marks managed entries with `"_managedBy": "agentctl"` and preserves manually-added configurations:
+agentctl tracks managed servers and preserves manually-added configurations:
 
-```json
-{
-  "mcpServers": {
-    "figma": {
-      "_managedBy": "agentctl",
-      "transport": "http",
-      "url": "https://mcp.figma.com/mcp"
-    },
-    "my-manual-server": {
-      "command": "/path/to/server"
-    }
-  }
-}
-```
+- **Managed servers**: Tracked via `_managedBy: "agentctl"` marker (or external state file for OpenCode)
+- **Manual servers**: Preserved during sync - agentctl never touches them
+- **Unknown config fields**: Preserved (`$schema`, hooks, plugins, etc.)
 
 ## Environment Variables
 
@@ -361,4 +262,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Contributing
 
-Contributions welcome! Please read the development guide in [CLAUDE.md](CLAUDE.md).
+Contributions welcome! See [CLAUDE.md](CLAUDE.md) for development guide.

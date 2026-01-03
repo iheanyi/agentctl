@@ -1,1 +1,38 @@
+# Binary
 agentctl
+dist/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+*.log
+coverage.out
+coverage.html
+
+# Build
+bin/
+build/
+
+# Temp
+tmp/
+*.tmp
