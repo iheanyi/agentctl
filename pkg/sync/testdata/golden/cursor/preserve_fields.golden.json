@@ -1,0 +1,19 @@
+{
+  "customSetting": true,
+  "mcpServers": {
+    "user-server": {
+      "command": "my-server",
+      "args": ["--custom"]
+    },
+    "test-server": {
+      "command": "echo",
+      "args": ["hello"],
+      "_managedBy": "agentctl"
+    },
+    "test-server-2": {
+      "command": "cat",
+      "args": ["-"],
+      "_managedBy": "agentctl"
+    }
+  }
+}

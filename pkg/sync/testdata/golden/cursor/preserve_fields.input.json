@@ -1,0 +1,9 @@
+{
+  "customSetting": true,
+  "mcpServers": {
+    "user-server": {
+      "command": "my-server",
+      "args": ["--custom"]
+    }
+  }
+}

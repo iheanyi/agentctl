@@ -1,0 +1,19 @@
+{
+  "theme": "One Dark",
+  "font_size": 14,
+  "context_servers": {
+    "manual-server": {
+      "command": "manual"
+    },
+    "test-server": {
+      "command": "echo",
+      "args": ["hello"],
+      "_managedBy": "agentctl"
+    },
+    "test-server-2": {
+      "command": "cat",
+      "args": ["-"],
+      "_managedBy": "agentctl"
+    }
+  }
+}

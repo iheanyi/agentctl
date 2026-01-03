@@ -22,11 +22,6 @@ type ContinueServerConfig struct {
 	ManagedBy string            `json:"_managedBy,omitempty"`
 }
 
-// ContinueConfig represents Continue's configuration
-type ContinueConfig struct {
-	MCPServers map[string]ContinueServerConfig `json:"mcpServers,omitempty"`
-}
-
 func init() {
 	Register(&ContinueAdapter{})
 }
@@ -70,19 +65,105 @@ func (a *ContinueAdapter) SupportedResources() []ResourceType {
 }
 
 func (a *ContinueAdapter) ReadServers() ([]*mcp.Server, error) {
-	config, err := a.loadConfig()
+	raw, err := a.loadRawConfig()
 	if err != nil {
 		return nil, err
 	}
 
+	// Continue uses "experimental" -> "modelContextProtocolServers" structure
+	experimental, ok := raw["experimental"].(map[string]interface{})
+	if !ok {
+		// Also check for mcpServers at top level (newer versions)
+		return a.readServersFromMCPServers(raw)
+	}
+
+	mcpServers, ok := experimental["modelContextProtocolServers"].([]interface{})
+	if !ok {
+		return a.readServersFromMCPServers(raw)
+	}
+
 	var servers []*mcp.Server
-	for name, serverCfg := range config.MCPServers {
-		server := &mcp.Server{
-			Name:    name,
-			Command: serverCfg.Command,
-			Args:    serverCfg.Args,
-			Env:     serverCfg.Env,
+	for _, v := range mcpServers {
+		serverData, ok := v.(map[string]interface{})
+		if !ok {
+			continue
 		}
+
+		server := &mcp.Server{}
+
+		if name, ok := serverData["name"].(string); ok {
+			server.Name = name
+		}
+
+		if transport, ok := serverData["transport"].(map[string]interface{}); ok {
+			if transportType, ok := transport["type"].(string); ok && transportType == "stdio" {
+				if cmd, ok := transport["command"].(string); ok {
+					server.Command = cmd
+				}
+				if args, ok := transport["args"].([]interface{}); ok {
+					for _, arg := range args {
+						if str, ok := arg.(string); ok {
+							server.Args = append(server.Args, str)
+						}
+					}
+				}
+				if envData, ok := transport["env"].(map[string]interface{}); ok {
+					server.Env = make(map[string]string)
+					for k, v := range envData {
+						if str, ok := v.(string); ok {
+							server.Env[k] = str
+						}
+					}
+				}
+			}
+		}
+
+		if server.Name != "" {
+			servers = append(servers, server)
+		}
+	}
+
+	return servers, nil
+}
+
+func (a *ContinueAdapter) readServersFromMCPServers(raw map[string]interface{}) ([]*mcp.Server, error) {
+	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+
+	var servers []*mcp.Server
+	for name, v := range mcpServers {
+		serverData, ok := v.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		server := &mcp.Server{
+			Name: name,
+		}
+
+		if cmd, ok := serverData["command"].(string); ok {
+			server.Command = cmd
+		}
+
+		if args, ok := serverData["args"].([]interface{}); ok {
+			for _, arg := range args {
+				if str, ok := arg.(string); ok {
+					server.Args = append(server.Args, str)
+				}
+			}
+		}
+
+		if envData, ok := serverData["env"].(map[string]interface{}); ok {
+			server.Env = make(map[string]string)
+			for k, v := range envData {
+				if str, ok := v.(string); ok {
+					server.Env[k] = str
+				}
+			}
+		}
+
 		servers = append(servers, server)
 	}
 
@@ -90,36 +171,54 @@ func (a *ContinueAdapter) ReadServers() ([]*mcp.Server, error) {
 }
 
 func (a *ContinueAdapter) WriteServers(servers []*mcp.Server) error {
-	config, err := a.loadConfig()
+	// Load the full raw config to preserve all fields
+	raw, err := a.loadRawConfig()
 	if err != nil {
 		return err
 	}
 
-	if config.MCPServers == nil {
-		config.MCPServers = make(map[string]ContinueServerConfig)
+	// Get or create the mcpServers section (use modern format)
+	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
+	if !ok {
+		mcpServers = make(map[string]interface{})
 	}
 
-	for name, serverCfg := range config.MCPServers {
-		if serverCfg.ManagedBy == ManagedValue {
-			delete(config.MCPServers, name)
+	// Remove old agentctl-managed entries
+	for name, v := range mcpServers {
+		if serverData, ok := v.(map[string]interface{}); ok {
+			if managedBy, ok := serverData["_managedBy"].(string); ok && managedBy == ManagedValue {
+				delete(mcpServers, name)
+			}
 		}
 	}
 
+	// Add new servers
 	for _, server := range servers {
 		name := server.Name
 		if server.Namespace != "" {
 			name = server.Namespace
 		}
 
-		config.MCPServers[name] = ContinueServerConfig{
-			Command:   server.Command,
-			Args:      server.Args,
-			Env:       server.Env,
-			ManagedBy: ManagedValue,
+		serverCfg := map[string]interface{}{
+			"command":    server.Command,
+			"_managedBy": ManagedValue,
 		}
+
+		if len(server.Args) > 0 {
+			serverCfg["args"] = server.Args
+		}
+
+		if len(server.Env) > 0 {
+			serverCfg["env"] = server.Env
+		}
+
+		mcpServers[name] = serverCfg
 	}
 
-	return a.saveConfig(config)
+	// Update the mcpServers section in raw config
+	raw["mcpServers"] = mcpServers
+
+	return a.saveRawConfig(raw)
 }
 
 func (a *ContinueAdapter) ReadCommands() ([]*command.Command, error) {
@@ -178,26 +277,28 @@ func (a *ContinueAdapter) WriteRules(rules []*rule.Rule) error {
 	return os.WriteFile(rulesPath, []byte(content), 0644)
 }
 
-func (a *ContinueAdapter) loadConfig() (*ContinueConfig, error) {
+// loadRawConfig loads the entire config as a raw map to preserve all fields
+func (a *ContinueAdapter) loadRawConfig() (map[string]interface{}, error) {
 	path := a.ConfigPath()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &ContinueConfig{}, nil
+			return make(map[string]interface{}), nil
 		}
 		return nil, err
 	}
 
-	var config ContinueConfig
-	if err := json.Unmarshal(data, &config); err != nil {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, err
 	}
 
-	return &config, nil
+	return raw, nil
 }
 
-func (a *ContinueAdapter) saveConfig(config *ContinueConfig) error {
+// saveRawConfig saves the entire config, preserving all fields
+func (a *ContinueAdapter) saveRawConfig(raw map[string]interface{}) error {
 	path := a.ConfigPath()
 
 	dir := filepath.Dir(path)
@@ -205,7 +306,7 @@ func (a *ContinueAdapter) saveConfig(config *ContinueConfig) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(config, "", "  ")
+	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return err
 	}

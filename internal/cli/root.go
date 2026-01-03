@@ -50,6 +50,7 @@ func init() {
 	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(doctorCmd)
+	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(newCmd)

@@ -22,11 +22,6 @@ type ZedServerConfig struct {
 	ManagedBy string            `json:"_managedBy,omitempty"`
 }
 
-// ZedConfig represents Zed's configuration
-type ZedConfig struct {
-	MCPServers map[string]ZedServerConfig `json:"mcp_servers,omitempty"`
-}
-
 func init() {
 	Register(&ZedAdapter{})
 }
@@ -72,19 +67,49 @@ func (a *ZedAdapter) SupportedResources() []ResourceType {
 }
 
 func (a *ZedAdapter) ReadServers() ([]*mcp.Server, error) {
-	config, err := a.loadConfig()
+	raw, err := a.loadRawConfig()
 	if err != nil {
 		return nil, err
 	}
 
+	// Zed uses "context_servers" with snake_case
+	contextServers, ok := raw["context_servers"].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+
 	var servers []*mcp.Server
-	for name, serverCfg := range config.MCPServers {
-		server := &mcp.Server{
-			Name:    name,
-			Command: serverCfg.Command,
-			Args:    serverCfg.Args,
-			Env:     serverCfg.Env,
+	for name, v := range contextServers {
+		serverData, ok := v.(map[string]interface{})
+		if !ok {
+			continue
 		}
+
+		server := &mcp.Server{
+			Name: name,
+		}
+
+		if cmd, ok := serverData["command"].(string); ok {
+			server.Command = cmd
+		}
+
+		if args, ok := serverData["args"].([]interface{}); ok {
+			for _, arg := range args {
+				if str, ok := arg.(string); ok {
+					server.Args = append(server.Args, str)
+				}
+			}
+		}
+
+		if envData, ok := serverData["env"].(map[string]interface{}); ok {
+			server.Env = make(map[string]string)
+			for k, v := range envData {
+				if str, ok := v.(string); ok {
+					server.Env[k] = str
+				}
+			}
+		}
+
 		servers = append(servers, server)
 	}
 
@@ -92,36 +117,54 @@ func (a *ZedAdapter) ReadServers() ([]*mcp.Server, error) {
 }
 
 func (a *ZedAdapter) WriteServers(servers []*mcp.Server) error {
-	config, err := a.loadConfig()
+	// Load the full raw config to preserve all fields
+	raw, err := a.loadRawConfig()
 	if err != nil {
 		return err
 	}
 
-	if config.MCPServers == nil {
-		config.MCPServers = make(map[string]ZedServerConfig)
+	// Get or create the context_servers section (Zed uses snake_case)
+	contextServers, ok := raw["context_servers"].(map[string]interface{})
+	if !ok {
+		contextServers = make(map[string]interface{})
 	}
 
-	for name, serverCfg := range config.MCPServers {
-		if serverCfg.ManagedBy == ManagedValue {
-			delete(config.MCPServers, name)
+	// Remove old agentctl-managed entries
+	for name, v := range contextServers {
+		if serverData, ok := v.(map[string]interface{}); ok {
+			if managedBy, ok := serverData["_managedBy"].(string); ok && managedBy == ManagedValue {
+				delete(contextServers, name)
+			}
 		}
 	}
 
+	// Add new servers
 	for _, server := range servers {
 		name := server.Name
 		if server.Namespace != "" {
 			name = server.Namespace
 		}
 
-		config.MCPServers[name] = ZedServerConfig{
-			Command:   server.Command,
-			Args:      server.Args,
-			Env:       server.Env,
-			ManagedBy: ManagedValue,
+		serverCfg := map[string]interface{}{
+			"command":    server.Command,
+			"_managedBy": ManagedValue,
 		}
+
+		if len(server.Args) > 0 {
+			serverCfg["args"] = server.Args
+		}
+
+		if len(server.Env) > 0 {
+			serverCfg["env"] = server.Env
+		}
+
+		contextServers[name] = serverCfg
 	}
 
-	return a.saveConfig(config)
+	// Update the context_servers section in raw config
+	raw["context_servers"] = contextServers
+
+	return a.saveRawConfig(raw)
 }
 
 func (a *ZedAdapter) ReadCommands() ([]*command.Command, error) {
@@ -140,26 +183,28 @@ func (a *ZedAdapter) WriteRules(rules []*rule.Rule) error {
 	return nil
 }
 
-func (a *ZedAdapter) loadConfig() (*ZedConfig, error) {
+// loadRawConfig loads the entire config as a raw map to preserve all fields
+func (a *ZedAdapter) loadRawConfig() (map[string]interface{}, error) {
 	path := a.ConfigPath()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &ZedConfig{}, nil
+			return make(map[string]interface{}), nil
 		}
 		return nil, err
 	}
 
-	var config ZedConfig
-	if err := json.Unmarshal(data, &config); err != nil {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, err
 	}
 
-	return &config, nil
+	return raw, nil
 }
 
-func (a *ZedAdapter) saveConfig(config *ZedConfig) error {
+// saveRawConfig saves the entire config, preserving all fields
+func (a *ZedAdapter) saveRawConfig(raw map[string]interface{}) error {
 	path := a.ConfigPath()
 
 	dir := filepath.Dir(path)
@@ -167,7 +212,7 @@ func (a *ZedAdapter) saveConfig(config *ZedConfig) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(config, "", "  ")
+	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return err
 	}

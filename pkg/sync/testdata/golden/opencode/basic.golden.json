@@ -1,0 +1,14 @@
+{
+  "mcp": {
+    "test-server": {
+      "type": "local",
+      "command": ["echo", "hello"],
+      "enabled": true
+    },
+    "test-server-2": {
+      "type": "local",
+      "command": ["cat", "-"],
+      "enabled": true
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "http-server": {
+      "type": "remote",
+      "url": "https://mcp.example.com/api",
+      "enabled": true
+    }
+  }
+}

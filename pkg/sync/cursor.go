@@ -22,11 +22,6 @@ type CursorServerConfig struct {
 	ManagedBy string            `json:"_managedBy,omitempty"`
 }
 
-// CursorConfig represents Cursor's MCP configuration file structure
-type CursorConfig struct {
-	MCPServers map[string]CursorServerConfig `json:"mcpServers,omitempty"`
-}
-
 func init() {
 	Register(&CursorAdapter{})
 }
@@ -71,19 +66,48 @@ func (a *CursorAdapter) SupportedResources() []ResourceType {
 }
 
 func (a *CursorAdapter) ReadServers() ([]*mcp.Server, error) {
-	config, err := a.loadConfig()
+	raw, err := a.loadRawConfig()
 	if err != nil {
 		return nil, err
 	}
 
+	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+
 	var servers []*mcp.Server
-	for name, serverCfg := range config.MCPServers {
-		server := &mcp.Server{
-			Name:    name,
-			Command: serverCfg.Command,
-			Args:    serverCfg.Args,
-			Env:     serverCfg.Env,
+	for name, v := range mcpServers {
+		serverData, ok := v.(map[string]interface{})
+		if !ok {
+			continue
 		}
+
+		server := &mcp.Server{
+			Name: name,
+		}
+
+		if cmd, ok := serverData["command"].(string); ok {
+			server.Command = cmd
+		}
+
+		if args, ok := serverData["args"].([]interface{}); ok {
+			for _, arg := range args {
+				if str, ok := arg.(string); ok {
+					server.Args = append(server.Args, str)
+				}
+			}
+		}
+
+		if envData, ok := serverData["env"].(map[string]interface{}); ok {
+			server.Env = make(map[string]string)
+			for k, v := range envData {
+				if str, ok := v.(string); ok {
+					server.Env[k] = str
+				}
+			}
+		}
+
 		servers = append(servers, server)
 	}
 
@@ -91,19 +115,24 @@ func (a *CursorAdapter) ReadServers() ([]*mcp.Server, error) {
 }
 
 func (a *CursorAdapter) WriteServers(servers []*mcp.Server) error {
-	config, err := a.loadConfig()
+	// Load the full raw config to preserve all fields
+	raw, err := a.loadRawConfig()
 	if err != nil {
 		return err
 	}
 
-	if config.MCPServers == nil {
-		config.MCPServers = make(map[string]CursorServerConfig)
+	// Get or create the mcpServers section
+	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
+	if !ok {
+		mcpServers = make(map[string]interface{})
 	}
 
 	// Remove old agentctl-managed entries
-	for name, serverCfg := range config.MCPServers {
-		if serverCfg.ManagedBy == ManagedValue {
-			delete(config.MCPServers, name)
+	for name, v := range mcpServers {
+		if serverData, ok := v.(map[string]interface{}); ok {
+			if managedBy, ok := serverData["_managedBy"].(string); ok && managedBy == ManagedValue {
+				delete(mcpServers, name)
+			}
 		}
 	}
 
@@ -114,15 +143,26 @@ func (a *CursorAdapter) WriteServers(servers []*mcp.Server) error {
 			name = server.Namespace
 		}
 
-		config.MCPServers[name] = CursorServerConfig{
-			Command:   server.Command,
-			Args:      server.Args,
-			Env:       server.Env,
-			ManagedBy: ManagedValue,
+		serverCfg := map[string]interface{}{
+			"command":    server.Command,
+			"_managedBy": ManagedValue,
 		}
+
+		if len(server.Args) > 0 {
+			serverCfg["args"] = server.Args
+		}
+
+		if len(server.Env) > 0 {
+			serverCfg["env"] = server.Env
+		}
+
+		mcpServers[name] = serverCfg
 	}
 
-	return a.saveConfig(config)
+	// Update the mcpServers section in raw config
+	raw["mcpServers"] = mcpServers
+
+	return a.saveRawConfig(raw)
 }
 
 func (a *CursorAdapter) ReadCommands() ([]*command.Command, error) {
@@ -178,26 +218,28 @@ func (a *CursorAdapter) WriteRules(rules []*rule.Rule) error {
 	return os.WriteFile(rulesPath, []byte(content), 0644)
 }
 
-func (a *CursorAdapter) loadConfig() (*CursorConfig, error) {
+// loadRawConfig loads the entire config as a raw map to preserve all fields
+func (a *CursorAdapter) loadRawConfig() (map[string]interface{}, error) {
 	path := a.ConfigPath()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &CursorConfig{}, nil
+			return make(map[string]interface{}), nil
 		}
 		return nil, err
 	}
 
-	var config CursorConfig
-	if err := json.Unmarshal(data, &config); err != nil {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, err
 	}
 
-	return &config, nil
+	return raw, nil
 }
 
-func (a *CursorAdapter) saveConfig(config *CursorConfig) error {
+// saveRawConfig saves the entire config, preserving all fields
+func (a *CursorAdapter) saveRawConfig(raw map[string]interface{}) error {
 	path := a.ConfigPath()
 
 	// Ensure directory exists
@@ -206,7 +248,7 @@ func (a *CursorAdapter) saveConfig(config *CursorConfig) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(config, "", "  ")
+	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return err
 	}

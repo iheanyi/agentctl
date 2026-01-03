@@ -1,0 +1,33 @@
+{
+  "servers": [
+    {
+      "name": "stdio-server",
+      "command": "npx",
+      "args": ["-y", "@example/mcp-stdio"],
+      "transport": "stdio"
+    },
+    {
+      "name": "http-server",
+      "url": "https://mcp.example.com/api",
+      "transport": "http",
+      "headers": {
+        "Authorization": "Bearer ${API_TOKEN}"
+      }
+    },
+    {
+      "name": "sse-server",
+      "url": "https://mcp.example.com/sse",
+      "transport": "sse"
+    },
+    {
+      "name": "stdio-with-env",
+      "command": "node",
+      "args": ["server.js", "--port", "3000"],
+      "env": {
+        "NODE_ENV": "production",
+        "DEBUG": "mcp:*"
+      },
+      "transport": "stdio"
+    }
+  ]
+}

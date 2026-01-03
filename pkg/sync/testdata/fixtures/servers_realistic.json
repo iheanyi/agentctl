@@ -1,0 +1,44 @@
+{
+  "servers": [
+    {
+      "name": "context7",
+      "command": "npx",
+      "args": ["-y", "@context7/mcp-server"],
+      "transport": "stdio"
+    },
+    {
+      "name": "sentry",
+      "command": "npx",
+      "args": ["-y", "@sentry/mcp-server"],
+      "env": {
+        "SENTRY_AUTH_TOKEN": "${SENTRY_AUTH_TOKEN}"
+      },
+      "transport": "stdio"
+    },
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "env": {
+        "DEBUG": "true"
+      },
+      "transport": "stdio"
+    },
+    {
+      "name": "playwright",
+      "command": "npx",
+      "args": ["@playwright/mcp@latest", "--isolated"],
+      "transport": "stdio"
+    },
+    {
+      "name": "figma",
+      "url": "https://mcp.figma.com/mcp",
+      "transport": "http"
+    },
+    {
+      "name": "linear",
+      "url": "https://mcp.linear.app/mcp",
+      "transport": "http"
+    }
+  ]
+}
