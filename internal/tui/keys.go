@@ -19,16 +19,17 @@ type keyMap struct {
 	SelectAll key.Binding
 
 	// Operations
-	Install key.Binding
-	Delete  key.Binding
-	Edit    key.Binding
-	Toggle  key.Binding
-	Update  key.Binding
-	Sync    key.Binding
-	SyncAll key.Binding
-	Test    key.Binding
-	TestAll key.Binding
-	Refresh key.Binding
+	Install  key.Binding
+	Delete   key.Binding
+	Edit     key.Binding
+	Toggle   key.Binding
+	Update   key.Binding
+	Sync     key.Binding
+	SyncAll  key.Binding
+	Test     key.Binding
+	TestAll  key.Binding
+	Refresh  key.Binding
+	ExecTool key.Binding
 
 	// Filters
 	CycleFilter     key.Binding
@@ -44,6 +45,15 @@ type keyMap struct {
 	ToggleLogs key.Binding
 	Help       key.Binding
 	Quit       key.Binding
+
+	// Tabs
+	NextTab key.Binding
+	PrevTab key.Binding
+	Tab1    key.Binding
+	Tab2    key.Binding
+	Tab3    key.Binding
+	Tab4    key.Binding
+	Tab5    key.Binding
 }
 
 // newKeyMap creates a new keyMap with all keybindings configured.
@@ -134,6 +144,10 @@ func newKeyMap() keyMap {
 			key.WithKeys("r"),
 			key.WithHelp("r", "refresh"),
 		),
+		ExecTool: key.NewBinding(
+			key.WithKeys("x"),
+			key.WithHelp("x", "tools"),
+		),
 
 		// Filters
 		CycleFilter: key.NewBinding(
@@ -175,6 +189,36 @@ func newKeyMap() keyMap {
 		Quit: key.NewBinding(
 			key.WithKeys("q", "ctrl+c"),
 			key.WithHelp("q", "quit"),
+		),
+
+		// Tabs
+		NextTab: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("Tab", "next tab"),
+		),
+		PrevTab: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("Shift+Tab", "prev tab"),
+		),
+		Tab1: key.NewBinding(
+			key.WithKeys("F1"),
+			key.WithHelp("F1", "servers"),
+		),
+		Tab2: key.NewBinding(
+			key.WithKeys("F2"),
+			key.WithHelp("F2", "commands"),
+		),
+		Tab3: key.NewBinding(
+			key.WithKeys("F3"),
+			key.WithHelp("F3", "rules"),
+		),
+		Tab4: key.NewBinding(
+			key.WithKeys("F4"),
+			key.WithHelp("F4", "skills"),
+		),
+		Tab5: key.NewBinding(
+			key.WithKeys("F5"),
+			key.WithHelp("F5", "prompts"),
 		),
 	}
 }

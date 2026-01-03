@@ -5,6 +5,7 @@ import (
 
 	"github.com/iheanyi/agentctl/pkg/aliases"
 	"github.com/iheanyi/agentctl/pkg/mcp"
+	"github.com/iheanyi/agentctl/pkg/mcpclient"
 )
 
 // ServerStatusType represents the installation status of an MCP server
@@ -33,9 +34,11 @@ type Server struct {
 	Status         ServerStatusType
 	Health         HealthStatusType
 	HealthError    error
+	HealthLatency  string // e.g., "120ms"
 	Transport      string // stdio, http, sse
 	Command        string // for display
 	Selected       bool   // for multi-select
+	Tools          []mcpclient.Tool // Discovered tools
 	ServerConfig   *mcp.Server
 	AliasConfig    *aliases.Alias
 }
