@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/charmbracelet/huh"
+	"github.com/iheanyi/agentctl/internal/tui"
 	"github.com/iheanyi/agentctl/pkg/aliases"
 	"github.com/spf13/cobra"
 )
@@ -54,6 +55,23 @@ var aliasRemoveCmd = &cobra.Command{
 	RunE:    runAliasRemove,
 }
 
+var aliasManageCmd = &cobra.Command{
+	Use:   "manage",
+	Short: "Open interactive alias manager TUI",
+	Long: `Open an interactive TUI for managing bundled aliases.
+
+This allows you to add, edit, delete, test, and validate aliases
+in the bundled aliases.json file.
+
+Note: Run this from the agentctl source directory, or set
+AGENTCTL_ALIASES_PATH to point to the aliases.json file.
+
+Examples:
+  agentctl alias manage
+  AGENTCTL_ALIASES_PATH=./pkg/aliases/aliases.json agentctl alias manage`,
+	RunE: runAliasManage,
+}
+
 var (
 	aliasDescription string
 	aliasRuntime     string
@@ -66,6 +84,7 @@ func init() {
 	aliasCmd.AddCommand(aliasListCmd)
 	aliasCmd.AddCommand(aliasAddCmd)
 	aliasCmd.AddCommand(aliasRemoveCmd)
+	aliasCmd.AddCommand(aliasManageCmd)
 
 	aliasAddCmd.Flags().StringVarP(&aliasDescription, "description", "d", "", "Description for the alias")
 	aliasAddCmd.Flags().StringVarP(&aliasRuntime, "runtime", "r", "", "Runtime (node, python, go, docker) - for stdio transport")
@@ -378,4 +397,8 @@ func runAliasRemove(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Removed alias %q\n", name)
 	return nil
+}
+
+func runAliasManage(cmd *cobra.Command, args []string) error {
+	return tui.RunAliasManager()
 }

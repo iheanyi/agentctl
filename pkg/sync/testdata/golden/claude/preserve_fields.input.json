@@ -1,0 +1,15 @@
+{
+  "theme": "dark",
+  "autoUpdate": true,
+  "customSettings": {
+    "nested": {
+      "deeply": "value"
+    }
+  },
+  "mcpServers": {
+    "manual-server": {
+      "command": "manual",
+      "args": ["--arg"]
+    }
+  }
+}

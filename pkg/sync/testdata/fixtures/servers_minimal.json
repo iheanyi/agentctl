@@ -1,0 +1,14 @@
+{
+  "servers": [
+    {
+      "name": "test-server",
+      "command": "echo",
+      "args": ["hello"]
+    },
+    {
+      "name": "test-server-2",
+      "command": "cat",
+      "args": ["-"]
+    }
+  ]
+}

@@ -146,3 +146,63 @@ func TestKeyMapFullHelp(t *testing.T) {
 		t.Error("FullHelp() should have multiple columns")
 	}
 }
+
+func TestResourceTabConstants(t *testing.T) {
+	// Verify tab constants are sequential
+	if TabServers != 0 {
+		t.Error("TabServers should be 0")
+	}
+	if TabCommands != 1 {
+		t.Error("TabCommands should be 1")
+	}
+	if TabRules != 2 {
+		t.Error("TabRules should be 2")
+	}
+	if TabSkills != 3 {
+		t.Error("TabSkills should be 3")
+	}
+	if TabPrompts != 4 {
+		t.Error("TabPrompts should be 4")
+	}
+}
+
+func TestTabNames(t *testing.T) {
+	// Verify we have names for all tabs
+	if len(TabNames) != 5 {
+		t.Errorf("TabNames should have 5 entries, got %d", len(TabNames))
+	}
+
+	expectedNames := []string{"Servers", "Commands", "Rules", "Skills", "Prompts"}
+	for i, name := range expectedNames {
+		if TabNames[i] != name {
+			t.Errorf("TabNames[%d] = %q, want %q", i, TabNames[i], name)
+		}
+	}
+}
+
+func TestKeyMapTabBindings(t *testing.T) {
+	km := newKeyMap()
+
+	// Verify tab key bindings exist
+	if len(km.NextTab.Keys()) == 0 {
+		t.Error("NextTab key binding should have keys")
+	}
+	if len(km.PrevTab.Keys()) == 0 {
+		t.Error("PrevTab key binding should have keys")
+	}
+	if len(km.Tab1.Keys()) == 0 {
+		t.Error("Tab1 key binding should have keys")
+	}
+	if len(km.Tab2.Keys()) == 0 {
+		t.Error("Tab2 key binding should have keys")
+	}
+	if len(km.Tab3.Keys()) == 0 {
+		t.Error("Tab3 key binding should have keys")
+	}
+	if len(km.Tab4.Keys()) == 0 {
+		t.Error("Tab4 key binding should have keys")
+	}
+	if len(km.Tab5.Keys()) == 0 {
+		t.Error("Tab5 key binding should have keys")
+	}
+}

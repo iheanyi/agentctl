@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "hook": {
+    "session-start": ["bd prime"]
+  },
+  "plugin": ["opencode-notifier"],
+  "mcp": {
+    "grove": {
+      "type": "local",
+      "command": ["/Users/test/bin/grove", "mcp"],
+      "enabled": true
+    }
+  }
+}

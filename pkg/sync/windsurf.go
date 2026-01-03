@@ -22,11 +22,6 @@ type WindsurfServerConfig struct {
 	ManagedBy string            `json:"_managedBy,omitempty"`
 }
 
-// WindsurfConfig represents Windsurf's MCP configuration
-type WindsurfConfig struct {
-	MCPServers map[string]WindsurfServerConfig `json:"mcpServers,omitempty"`
-}
-
 func init() {
 	Register(&WindsurfAdapter{})
 }
@@ -70,19 +65,48 @@ func (a *WindsurfAdapter) SupportedResources() []ResourceType {
 }
 
 func (a *WindsurfAdapter) ReadServers() ([]*mcp.Server, error) {
-	config, err := a.loadConfig()
+	raw, err := a.loadRawConfig()
 	if err != nil {
 		return nil, err
 	}
 
+	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+
 	var servers []*mcp.Server
-	for name, serverCfg := range config.MCPServers {
-		server := &mcp.Server{
-			Name:    name,
-			Command: serverCfg.Command,
-			Args:    serverCfg.Args,
-			Env:     serverCfg.Env,
+	for name, v := range mcpServers {
+		serverData, ok := v.(map[string]interface{})
+		if !ok {
+			continue
 		}
+
+		server := &mcp.Server{
+			Name: name,
+		}
+
+		if cmd, ok := serverData["command"].(string); ok {
+			server.Command = cmd
+		}
+
+		if args, ok := serverData["args"].([]interface{}); ok {
+			for _, arg := range args {
+				if str, ok := arg.(string); ok {
+					server.Args = append(server.Args, str)
+				}
+			}
+		}
+
+		if envData, ok := serverData["env"].(map[string]interface{}); ok {
+			server.Env = make(map[string]string)
+			for k, v := range envData {
+				if str, ok := v.(string); ok {
+					server.Env[k] = str
+				}
+			}
+		}
+
 		servers = append(servers, server)
 	}
 
@@ -90,19 +114,24 @@ func (a *WindsurfAdapter) ReadServers() ([]*mcp.Server, error) {
 }
 
 func (a *WindsurfAdapter) WriteServers(servers []*mcp.Server) error {
-	config, err := a.loadConfig()
+	// Load the full raw config to preserve all fields
+	raw, err := a.loadRawConfig()
 	if err != nil {
 		return err
 	}
 
-	if config.MCPServers == nil {
-		config.MCPServers = make(map[string]WindsurfServerConfig)
+	// Get or create the mcpServers section
+	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
+	if !ok {
+		mcpServers = make(map[string]interface{})
 	}
 
 	// Remove old agentctl-managed entries
-	for name, serverCfg := range config.MCPServers {
-		if serverCfg.ManagedBy == ManagedValue {
-			delete(config.MCPServers, name)
+	for name, v := range mcpServers {
+		if serverData, ok := v.(map[string]interface{}); ok {
+			if managedBy, ok := serverData["_managedBy"].(string); ok && managedBy == ManagedValue {
+				delete(mcpServers, name)
+			}
 		}
 	}
 
@@ -113,15 +142,26 @@ func (a *WindsurfAdapter) WriteServers(servers []*mcp.Server) error {
 			name = server.Namespace
 		}
 
-		config.MCPServers[name] = WindsurfServerConfig{
-			Command:   server.Command,
-			Args:      server.Args,
-			Env:       server.Env,
-			ManagedBy: ManagedValue,
+		serverCfg := map[string]interface{}{
+			"command":    server.Command,
+			"_managedBy": ManagedValue,
 		}
+
+		if len(server.Args) > 0 {
+			serverCfg["args"] = server.Args
+		}
+
+		if len(server.Env) > 0 {
+			serverCfg["env"] = server.Env
+		}
+
+		mcpServers[name] = serverCfg
 	}
 
-	return a.saveConfig(config)
+	// Update the mcpServers section in raw config
+	raw["mcpServers"] = mcpServers
+
+	return a.saveRawConfig(raw)
 }
 
 func (a *WindsurfAdapter) ReadCommands() ([]*command.Command, error) {
@@ -174,26 +214,28 @@ func (a *WindsurfAdapter) WriteRules(rules []*rule.Rule) error {
 	return os.WriteFile(rulesPath, []byte(content), 0644)
 }
 
-func (a *WindsurfAdapter) loadConfig() (*WindsurfConfig, error) {
+// loadRawConfig loads the entire config as a raw map to preserve all fields
+func (a *WindsurfAdapter) loadRawConfig() (map[string]interface{}, error) {
 	path := a.ConfigPath()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &WindsurfConfig{}, nil
+			return make(map[string]interface{}), nil
 		}
 		return nil, err
 	}
 
-	var config WindsurfConfig
-	if err := json.Unmarshal(data, &config); err != nil {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, err
 	}
 
-	return &config, nil
+	return raw, nil
 }
 
-func (a *WindsurfAdapter) saveConfig(config *WindsurfConfig) error {
+// saveRawConfig saves the entire config, preserving all fields
+func (a *WindsurfAdapter) saveRawConfig(raw map[string]interface{}) error {
 	path := a.ConfigPath()
 
 	dir := filepath.Dir(path)
@@ -201,7 +243,7 @@ func (a *WindsurfAdapter) saveConfig(config *WindsurfConfig) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(config, "", "  ")
+	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,12 +17,31 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/iheanyi/agentctl/pkg/aliases"
+	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/mcp"
+	"github.com/iheanyi/agentctl/pkg/mcpclient"
 	"github.com/iheanyi/agentctl/pkg/profile"
+	"github.com/iheanyi/agentctl/pkg/prompt"
+	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/secrets"
+	"github.com/iheanyi/agentctl/pkg/skill"
 	"github.com/iheanyi/agentctl/pkg/sync"
 )
+
+// ResourceTab represents the current tab/resource type being viewed
+type ResourceTab int
+
+const (
+	TabServers ResourceTab = iota
+	TabCommands
+	TabRules
+	TabSkills
+	TabPrompts
+)
+
+// TabNames returns the display names for tabs
+var TabNames = []string{"Servers", "Commands", "Rules", "Skills", "Prompts"}
 
 // FilterMode represents the current filter for the server list
 type FilterMode int
@@ -48,6 +68,15 @@ type Model struct {
 	filteredItems []Server // Currently visible items after filtering
 	selected      map[string]bool
 
+	// Other resource types
+	commands []*command.Command
+	rules    []*rule.Rule
+	skills   []*skill.Skill
+	prompts  []*prompt.Prompt
+
+	// Tab state
+	activeTab ResourceTab
+
 	// State
 	cursor      int
 	filterMode  FilterMode
@@ -56,22 +85,30 @@ type Model struct {
 	profile     string // Current profile name
 
 	// Log panel
-	logs         []LogEntry
-	logExpanded  bool
-	logViewport  viewport.Model
+	logs        []LogEntry
+	logExpanded bool
+	logViewport viewport.Model
 
 	// UI state
-	showHelp   bool
-	quitting   bool
-	width      int
-	height     int
-	spinner    spinner.Model
-	statusMsg  string
+	showHelp  bool
+	quitting  bool
+	width     int
+	height    int
+	spinner   spinner.Model
+	statusMsg string
 
 	// Profile picker
 	showProfilePicker bool
 	profiles          []*profile.Profile
 	profileCursor     int
+
+	// Tool testing modal
+	showToolModal    bool
+	toolModalServer  *Server           // Server being tested
+	toolCursor       int               // Selected tool index
+	toolArgInput     string            // Current argument input (JSON)
+	toolResult       *mcpclient.ToolCallResult
+	toolExecuting    bool
 
 	// Keys
 	keys keyMap
@@ -109,11 +146,43 @@ func New() (*Model, error) {
 		m.profile = cfg.Settings.DefaultProfile
 	}
 
+	// Load all resource types
+	m.loadAllResources()
+
 	m.buildServerList()
 	m.applyFilter()
 	m.addLog("info", "agentctl UI ready")
 
 	return m, nil
+}
+
+// loadAllResources loads commands, rules, skills, and prompts from config directory
+func (m *Model) loadAllResources() {
+	configDir := m.cfg.ConfigDir
+
+	// Load commands
+	commandsDir := filepath.Join(configDir, "commands")
+	if cmds, err := command.LoadAll(commandsDir); err == nil {
+		m.commands = cmds
+	}
+
+	// Load rules
+	rulesDir := filepath.Join(configDir, "rules")
+	if rules, err := rule.LoadAll(rulesDir); err == nil {
+		m.rules = rules
+	}
+
+	// Load skills
+	skillsDir := filepath.Join(configDir, "skills")
+	if skills, err := skill.LoadAll(skillsDir); err == nil {
+		m.skills = skills
+	}
+
+	// Load prompts
+	promptsDir := filepath.Join(configDir, "prompts")
+	if prompts, err := prompt.LoadAll(promptsDir); err == nil {
+		m.prompts = prompts
+	}
 }
 
 // buildServerList constructs the unified server list from config and aliases
@@ -287,7 +356,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case serverTestedMsg:
 		if msg.healthy {
-			m.addLog("success", fmt.Sprintf("%s is healthy", msg.name))
+			toolCount := len(msg.tools)
+			latencyStr := msg.latency.Round(time.Millisecond).String()
+			m.addLog("success", fmt.Sprintf("%s is healthy (%d tools, %s)", msg.name, toolCount, latencyStr))
 		} else {
 			m.addLog("error", fmt.Sprintf("%s: %v", msg.name, msg.err))
 		}
@@ -296,6 +367,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.allServers[i].Name == msg.name {
 				if msg.healthy {
 					m.allServers[i].Health = HealthStatusHealthy
+					m.allServers[i].Tools = msg.tools
+					m.allServers[i].HealthLatency = msg.latency.Round(time.Millisecond).String()
 				} else {
 					m.allServers[i].Health = HealthStatusUnhealthy
 					m.allServers[i].HealthError = msg.err
@@ -345,6 +418,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.buildServerList()
 				m.applyFilter()
 			}
+		}
+
+	case toolExecutedMsg:
+		m.toolExecuting = false
+		m.toolResult = &msg.result
+		if msg.result.Error != nil {
+			m.addLog("error", fmt.Sprintf("Tool %s failed: %v", msg.toolName, msg.result.Error))
+		} else if msg.result.IsError {
+			m.addLog("warn", fmt.Sprintf("Tool %s returned error", msg.toolName))
+		} else {
+			m.addLog("success", fmt.Sprintf("Tool %s executed (%s)", msg.toolName, msg.result.Latency.Round(time.Millisecond)))
 		}
 
 	case tea.KeyMsg:
@@ -403,6 +487,63 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showProfilePicker = false
 				m.buildServerList()
 				m.applyFilter()
+			}
+			return m, nil
+		}
+
+		// Handle tool modal
+		if m.showToolModal {
+			if m.toolExecuting {
+				// Don't accept input while executing
+				return m, nil
+			}
+
+			switch msg.String() {
+			case "esc", "q":
+				m.showToolModal = false
+				m.toolModalServer = nil
+				m.toolResult = nil
+				m.toolArgInput = ""
+			case "j", "down":
+				if m.toolModalServer != nil && m.toolCursor < len(m.toolModalServer.Tools)-1 {
+					m.toolCursor++
+					m.toolResult = nil // Clear previous result when changing selection
+				}
+			case "k", "up":
+				if m.toolCursor > 0 {
+					m.toolCursor--
+					m.toolResult = nil
+				}
+			case "enter":
+				// Execute the selected tool
+				if m.toolModalServer != nil && len(m.toolModalServer.Tools) > 0 {
+					tool := m.toolModalServer.Tools[m.toolCursor]
+					m.toolExecuting = true
+					m.toolResult = nil
+					m.addLog("info", fmt.Sprintf("Executing %s...", tool.Name))
+					// Parse JSON args if provided, otherwise use empty map
+					var args map[string]any
+					if m.toolArgInput != "" {
+						// Try to parse as JSON
+						if err := json.Unmarshal([]byte(m.toolArgInput), &args); err != nil {
+							m.addLog("error", fmt.Sprintf("Invalid JSON args: %v", err))
+							m.toolExecuting = false
+							return m, nil
+						}
+					} else {
+						args = make(map[string]any)
+					}
+					return m, m.executeTool(m.toolModalServer.Name, tool.Name, args)
+				}
+			case "backspace":
+				if len(m.toolArgInput) > 0 {
+					m.toolArgInput = m.toolArgInput[:len(m.toolArgInput)-1]
+				}
+			default:
+				// Add to argument input
+				if len(msg.String()) == 1 {
+					m.toolArgInput += msg.String()
+				}
 			}
 			return m, nil
 		}
@@ -520,6 +661,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addLog("info", "Testing all installed servers...")
 			return m, m.testAllServers()
 
+		case key.Matches(msg, m.keys.ExecTool):
+			if s := m.selectedServer(); s != nil && s.Status != ServerStatusAvailable {
+				if len(s.Tools) == 0 {
+					m.addLog("warn", fmt.Sprintf("%s has no discovered tools - run test (t) first", s.Name))
+				} else {
+					m.showToolModal = true
+					m.toolModalServer = s
+					m.toolCursor = 0
+					m.toolArgInput = ""
+					m.toolResult = nil
+				}
+			}
+
 		case key.Matches(msg, m.keys.Refresh):
 			m.buildServerList()
 			m.applyFilter()
@@ -563,6 +717,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
+
+		// Tab switching
+		case key.Matches(msg, m.keys.NextTab):
+			m.activeTab = (m.activeTab + 1) % 5
+			m.cursor = 0
+
+		case key.Matches(msg, m.keys.PrevTab):
+			if m.activeTab == 0 {
+				m.activeTab = 4
+			} else {
+				m.activeTab--
+			}
+			m.cursor = 0
+
+		case key.Matches(msg, m.keys.Tab1):
+			m.activeTab = TabServers
+			m.cursor = 0
+
+		case key.Matches(msg, m.keys.Tab2):
+			m.activeTab = TabCommands
+			m.cursor = 0
+
+		case key.Matches(msg, m.keys.Tab3):
+			m.activeTab = TabRules
+			m.cursor = 0
+
+		case key.Matches(msg, m.keys.Tab4):
+			m.activeTab = TabSkills
+			m.cursor = 0
+
+		case key.Matches(msg, m.keys.Tab5):
+			m.activeTab = TabPrompts
+			m.cursor = 0
 		}
 	}
 
@@ -583,6 +770,10 @@ func (m Model) View() string {
 		return m.renderProfilePicker()
 	}
 
+	if m.showToolModal {
+		return m.renderToolModal()
+	}
+
 	var sections []string
 
 	// Header
@@ -591,8 +782,19 @@ func (m Model) View() string {
 	// Divider
 	sections = append(sections, m.renderDivider())
 
-	// Server list
-	sections = append(sections, m.renderServerList())
+	// Main content based on active tab
+	switch m.activeTab {
+	case TabServers:
+		sections = append(sections, m.renderServerList())
+	case TabCommands:
+		sections = append(sections, m.renderCommandsList())
+	case TabRules:
+		sections = append(sections, m.renderRulesList())
+	case TabSkills:
+		sections = append(sections, m.renderSkillsList())
+	case TabPrompts:
+		sections = append(sections, m.renderPromptsList())
+	}
 
 	// Divider
 	sections = append(sections, m.renderDivider())
@@ -609,26 +811,46 @@ func (m Model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
-// renderHeader renders the header bar
+// renderHeader renders the header bar with tabs
 func (m *Model) renderHeader() string {
-	installed, available, disabled := m.counts()
-
 	// Left: App name
 	title := HeaderTitleStyle.Render("agentctl")
 
-	// Center: Profile info
-	profileInfo := HeaderSubtitleStyle.Render(fmt.Sprintf("%s (%d servers)", m.profile, len(m.allServers)))
+	// Tab bar
+	var tabs []string
+	for i, name := range TabNames {
+		if ResourceTab(i) == m.activeTab {
+			tabs = append(tabs, TabActiveStyle.Render("["+name+"]"))
+		} else {
+			tabs = append(tabs, TabStyle.Render(" "+name+" "))
+		}
+	}
+	tabBar := strings.Join(tabs, " ")
 
-	// Right: Status counts
-	counts := fmt.Sprintf("%s %d  %s %d  %s %d",
-		StatusInstalledStyle.Render(StatusInstalled), installed,
-		StatusAvailableStyle.Render(StatusAvailable), available,
-		StatusDisabledStyle.Render(StatusDisabled), disabled,
-	)
+	// Right: Resource counts based on active tab
+	var countStr string
+	switch m.activeTab {
+	case TabServers:
+		installed, available, disabled := m.counts()
+		countStr = fmt.Sprintf("%s %d  %s %d  %s %d",
+			StatusInstalledStyle.Render(StatusInstalled), installed,
+			StatusAvailableStyle.Render(StatusAvailable), available,
+			StatusDisabledStyle.Render(StatusDisabled), disabled,
+		)
+	case TabCommands:
+		countStr = fmt.Sprintf("%d commands", len(m.commands))
+	case TabRules:
+		countStr = fmt.Sprintf("%d rules", len(m.rules))
+	case TabSkills:
+		countStr = fmt.Sprintf("%d skills", len(m.skills))
+	case TabPrompts:
+		countStr = fmt.Sprintf("%d prompts", len(m.prompts))
+	}
+	counts := HeaderSubtitleStyle.Render(countStr)
 
 	// Calculate spacing
 	leftWidth := lipgloss.Width(title)
-	centerWidth := lipgloss.Width(profileInfo)
+	centerWidth := lipgloss.Width(tabBar)
 	rightWidth := lipgloss.Width(counts)
 	totalContent := leftWidth + centerWidth + rightWidth
 
@@ -639,7 +861,7 @@ func (m *Model) renderHeader() string {
 	leftPad := availableSpace / 2
 	rightPad := availableSpace - leftPad
 
-	header := title + strings.Repeat(" ", leftPad) + profileInfo + strings.Repeat(" ", rightPad) + counts
+	header := title + strings.Repeat(" ", leftPad) + tabBar + strings.Repeat(" ", rightPad) + counts
 
 	return HeaderStyle.Width(m.width).Render(header)
 }
@@ -745,11 +967,15 @@ func (m *Model) renderServerRow(s Server, selected bool) string {
 	}
 	name := nameStyle.Render(s.Name)
 
-	// Health indicator
+	// Health indicator with tool count
 	var healthBadge string
 	switch s.Health {
 	case HealthStatusHealthy:
-		healthBadge = HealthHealthyStyle.Render(" " + HealthHealthy)
+		toolInfo := ""
+		if len(s.Tools) > 0 {
+			toolInfo = fmt.Sprintf(" (%d tools)", len(s.Tools))
+		}
+		healthBadge = HealthHealthyStyle.Render(" "+HealthHealthy) + lipgloss.NewStyle().Foreground(colorCyan).Render(toolInfo)
 	case HealthStatusUnhealthy:
 		healthBadge = HealthUnhealthyStyle.Render(" " + HealthUnhealthy)
 	case HealthStatusChecking:
@@ -765,6 +991,393 @@ func (m *Model) renderServerRow(s Server, selected bool) string {
 
 	// Build the row
 	leftPart := selectIndicator + statusBadge + " " + name + healthBadge
+
+	// Calculate padding for right-aligned description
+	leftWidth := lipgloss.Width(leftPart)
+	descWidth := lipgloss.Width(desc)
+	padding := m.width - leftWidth - descWidth - 4
+	if padding < 2 {
+		padding = 2
+	}
+
+	row := leftPart + strings.Repeat(" ", padding) + desc
+
+	// Apply selection styling
+	if selected {
+		row = ListItemSelectedStyle.Width(m.width).Render(row)
+	} else {
+		row = ListItemNormalStyle.Width(m.width).Render(row)
+	}
+
+	return row
+}
+
+// renderCommandsList renders the commands list
+func (m *Model) renderCommandsList() string {
+	var rows []string
+
+	// Calculate available height for list
+	listHeight := m.height - 12
+	if m.logExpanded {
+		listHeight = m.height - 8 - m.height/3
+	}
+	if listHeight < 5 {
+		listHeight = 5
+	}
+
+	if len(m.commands) == 0 {
+		emptyMsg := lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Italic(true).
+			Render("No commands defined")
+		rows = append(rows, "  "+emptyMsg)
+		rows = append(rows, "")
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Render("  Create commands in ~/.config/agentctl/commands/"))
+	} else {
+		// Calculate visible range
+		startIdx := 0
+		if m.cursor >= listHeight {
+			startIdx = m.cursor - listHeight + 1
+		}
+		endIdx := min(startIdx+listHeight, len(m.commands))
+
+		for i := startIdx; i < endIdx; i++ {
+			cmd := m.commands[i]
+			row := m.renderCommandRow(cmd, i == m.cursor)
+			rows = append(rows, row)
+		}
+	}
+
+	// Pad to fill height
+	for len(rows) < listHeight {
+		rows = append(rows, "")
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// renderCommandRow renders a single command row
+func (m *Model) renderCommandRow(cmd *command.Command, selected bool) string {
+	// Icon
+	icon := StatusInstalledStyle.Render("⌘")
+
+	// Command name with / prefix
+	nameStyle := ListItemNameStyle
+	if selected {
+		nameStyle = ListItemNameSelectedStyle
+	}
+	name := nameStyle.Render("/" + cmd.Name)
+
+	// Description
+	descStyle := ListItemDescStyle
+	if selected {
+		descStyle = ListItemDescSelectedStyle
+	}
+	desc := descStyle.Render(truncate(cmd.Description, 50))
+
+	// Build the row
+	leftPart := "  " + icon + " " + name
+
+	// Calculate padding for right-aligned description
+	leftWidth := lipgloss.Width(leftPart)
+	descWidth := lipgloss.Width(desc)
+	padding := m.width - leftWidth - descWidth - 4
+	if padding < 2 {
+		padding = 2
+	}
+
+	row := leftPart + strings.Repeat(" ", padding) + desc
+
+	// Apply selection styling
+	if selected {
+		row = ListItemSelectedStyle.Width(m.width).Render(row)
+	} else {
+		row = ListItemNormalStyle.Width(m.width).Render(row)
+	}
+
+	return row
+}
+
+// renderRulesList renders the rules list
+func (m *Model) renderRulesList() string {
+	var rows []string
+
+	// Calculate available height for list
+	listHeight := m.height - 12
+	if m.logExpanded {
+		listHeight = m.height - 8 - m.height/3
+	}
+	if listHeight < 5 {
+		listHeight = 5
+	}
+
+	if len(m.rules) == 0 {
+		emptyMsg := lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Italic(true).
+			Render("No rules defined")
+		rows = append(rows, "  "+emptyMsg)
+		rows = append(rows, "")
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Render("  Create rules in ~/.config/agentctl/rules/"))
+	} else {
+		// Calculate visible range
+		startIdx := 0
+		if m.cursor >= listHeight {
+			startIdx = m.cursor - listHeight + 1
+		}
+		endIdx := min(startIdx+listHeight, len(m.rules))
+
+		for i := startIdx; i < endIdx; i++ {
+			r := m.rules[i]
+			row := m.renderRuleRow(r, i == m.cursor)
+			rows = append(rows, row)
+		}
+	}
+
+	// Pad to fill height
+	for len(rows) < listHeight {
+		rows = append(rows, "")
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// renderRuleRow renders a single rule row
+func (m *Model) renderRuleRow(r *rule.Rule, selected bool) string {
+	// Icon
+	icon := StatusInstalledStyle.Render("📜")
+
+	// Rule name
+	nameStyle := ListItemNameStyle
+	if selected {
+		nameStyle = ListItemNameSelectedStyle
+	}
+	name := nameStyle.Render(r.Name)
+
+	// Description - show first line of content or applies pattern
+	descStyle := ListItemDescStyle
+	if selected {
+		descStyle = ListItemDescSelectedStyle
+	}
+	var descText string
+	if r.Frontmatter != nil && r.Frontmatter.Applies != "" {
+		descText = "applies: " + r.Frontmatter.Applies
+	} else {
+		// Use first line of content as description
+		lines := strings.Split(r.Content, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				descText = line
+				break
+			}
+		}
+	}
+	desc := descStyle.Render(truncate(descText, 50))
+
+	// Build the row
+	leftPart := "  " + icon + " " + name
+
+	// Calculate padding for right-aligned description
+	leftWidth := lipgloss.Width(leftPart)
+	descWidth := lipgloss.Width(desc)
+	padding := m.width - leftWidth - descWidth - 4
+	if padding < 2 {
+		padding = 2
+	}
+
+	row := leftPart + strings.Repeat(" ", padding) + desc
+
+	// Apply selection styling
+	if selected {
+		row = ListItemSelectedStyle.Width(m.width).Render(row)
+	} else {
+		row = ListItemNormalStyle.Width(m.width).Render(row)
+	}
+
+	return row
+}
+
+// renderSkillsList renders the skills list
+func (m *Model) renderSkillsList() string {
+	var rows []string
+
+	// Calculate available height for list
+	listHeight := m.height - 12
+	if m.logExpanded {
+		listHeight = m.height - 8 - m.height/3
+	}
+	if listHeight < 5 {
+		listHeight = 5
+	}
+
+	if len(m.skills) == 0 {
+		emptyMsg := lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Italic(true).
+			Render("No skills installed")
+		rows = append(rows, "  "+emptyMsg)
+		rows = append(rows, "")
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Render("  Create skills in ~/.config/agentctl/skills/"))
+	} else {
+		// Calculate visible range
+		startIdx := 0
+		if m.cursor >= listHeight {
+			startIdx = m.cursor - listHeight + 1
+		}
+		endIdx := min(startIdx+listHeight, len(m.skills))
+
+		for i := startIdx; i < endIdx; i++ {
+			s := m.skills[i]
+			row := m.renderSkillRow(s, i == m.cursor)
+			rows = append(rows, row)
+		}
+	}
+
+	// Pad to fill height
+	for len(rows) < listHeight {
+		rows = append(rows, "")
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// renderSkillRow renders a single skill row
+func (m *Model) renderSkillRow(s *skill.Skill, selected bool) string {
+	// Icon
+	icon := StatusInstalledStyle.Render("⚡")
+
+	// Skill name
+	nameStyle := ListItemNameStyle
+	if selected {
+		nameStyle = ListItemNameSelectedStyle
+	}
+	name := nameStyle.Render(s.Name)
+
+	// Version badge if available
+	versionBadge := ""
+	if s.Version != "" {
+		versionBadge = lipgloss.NewStyle().Foreground(colorCyan).Render(" v" + s.Version)
+	}
+
+	// Description
+	descStyle := ListItemDescStyle
+	if selected {
+		descStyle = ListItemDescSelectedStyle
+	}
+	descText := s.Description
+	if descText == "" && len(s.Prompts) > 0 {
+		descText = fmt.Sprintf("%d prompts", len(s.Prompts))
+	}
+	desc := descStyle.Render(truncate(descText, 40))
+
+	// Build the row
+	leftPart := "  " + icon + " " + name + versionBadge
+
+	// Calculate padding for right-aligned description
+	leftWidth := lipgloss.Width(leftPart)
+	descWidth := lipgloss.Width(desc)
+	padding := m.width - leftWidth - descWidth - 4
+	if padding < 2 {
+		padding = 2
+	}
+
+	row := leftPart + strings.Repeat(" ", padding) + desc
+
+	// Apply selection styling
+	if selected {
+		row = ListItemSelectedStyle.Width(m.width).Render(row)
+	} else {
+		row = ListItemNormalStyle.Width(m.width).Render(row)
+	}
+
+	return row
+}
+
+// renderPromptsList renders the prompts list
+func (m *Model) renderPromptsList() string {
+	var rows []string
+
+	// Calculate available height for list
+	listHeight := m.height - 12
+	if m.logExpanded {
+		listHeight = m.height - 8 - m.height/3
+	}
+	if listHeight < 5 {
+		listHeight = 5
+	}
+
+	if len(m.prompts) == 0 {
+		emptyMsg := lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Italic(true).
+			Render("No prompts defined")
+		rows = append(rows, "  "+emptyMsg)
+		rows = append(rows, "")
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Render("  Create prompts in ~/.config/agentctl/prompts/"))
+	} else {
+		// Calculate visible range
+		startIdx := 0
+		if m.cursor >= listHeight {
+			startIdx = m.cursor - listHeight + 1
+		}
+		endIdx := min(startIdx+listHeight, len(m.prompts))
+
+		for i := startIdx; i < endIdx; i++ {
+			p := m.prompts[i]
+			row := m.renderPromptRow(p, i == m.cursor)
+			rows = append(rows, row)
+		}
+	}
+
+	// Pad to fill height
+	for len(rows) < listHeight {
+		rows = append(rows, "")
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// renderPromptRow renders a single prompt row
+func (m *Model) renderPromptRow(p *prompt.Prompt, selected bool) string {
+	// Icon
+	icon := StatusInstalledStyle.Render("💬")
+
+	// Prompt name
+	nameStyle := ListItemNameStyle
+	if selected {
+		nameStyle = ListItemNameSelectedStyle
+	}
+	name := nameStyle.Render(p.Name)
+
+	// Variables badge if available
+	varsBadge := ""
+	if len(p.Variables) > 0 {
+		varsBadge = lipgloss.NewStyle().Foreground(colorCyan).Render(fmt.Sprintf(" (%d vars)", len(p.Variables)))
+	}
+
+	// Description
+	descStyle := ListItemDescStyle
+	if selected {
+		descStyle = ListItemDescSelectedStyle
+	}
+	descText := p.Description
+	if descText == "" {
+		// Use truncated template as description
+		descText = truncate(strings.ReplaceAll(p.Template, "\n", " "), 40)
+	}
+	desc := descStyle.Render(truncate(descText, 40))
+
+	// Build the row
+	leftPart := "  " + icon + " " + name + varsBadge
 
 	// Calculate padding for right-aligned description
 	leftWidth := lipgloss.Width(leftPart)
@@ -834,13 +1447,30 @@ func (m *Model) renderLogPanel() string {
 func (m *Model) renderKeyHints() string {
 	hints := []struct{ Key, Desc string }{
 		{"j/k", "navigate"},
-		{"i", "install"},
-		{"d", "delete"},
-		{"e", "edit"},
-		{"s", "sync"},
-		{"/", "search"},
-		{"?", "help"},
+		{"Tab", "switch tab"},
 	}
+
+	// Add context-sensitive hints based on active tab
+	switch m.activeTab {
+	case TabServers:
+		hints = append(hints,
+			struct{ Key, Desc string }{"i", "install"},
+			struct{ Key, Desc string }{"d", "delete"},
+			struct{ Key, Desc string }{"t", "test"},
+			struct{ Key, Desc string }{"x", "tools"},
+			struct{ Key, Desc string }{"s", "sync"},
+		)
+	case TabCommands, TabRules, TabSkills, TabPrompts:
+		hints = append(hints,
+			struct{ Key, Desc string }{"e", "edit"},
+			struct{ Key, Desc string }{"d", "delete"},
+		)
+	}
+
+	hints = append(hints,
+		struct{ Key, Desc string }{"/", "search"},
+		struct{ Key, Desc string }{"?", "help"},
+	)
 
 	return RenderKeyHintsBar(hints)
 }
@@ -856,11 +1486,15 @@ func (m *Model) renderHelpOverlay() string {
   Esc     clear        Enter  toggle        3    available
                        s      sync          4    disabled
   Selection            t      test
-  ─────────                                 UI
-  Space   toggle       Profiles             ──
-  V       select all   ────────             L    toggle logs
-                       P      switch        ?    this help
-                                            q    quit
+  ─────────            x      tools (exec)  UI
+  Space   toggle                            ──
+  V       select all   Profiles             L    toggle logs
+                       ────────             ?    this help
+                       P      switch        q    quit
+  Tabs
+  ────
+  Tab/Shift+Tab  next/prev tab
+  F1-F5          jump to tab (Servers/Commands/Rules/Skills/Prompts)
 
                        Press any key to close
 `
@@ -929,6 +1563,101 @@ func (m *Model) renderProfilePicker() string {
 		Render(ModalTitleStyle.Render("Switch Profile") + "\n\n" + content + hints)
 }
 
+// renderToolModal renders the tool testing modal
+func (m *Model) renderToolModal() string {
+	if m.toolModalServer == nil {
+		return ""
+	}
+
+	var sections []string
+
+	// Title
+	title := ModalTitleStyle.Render(fmt.Sprintf("Tools - %s", m.toolModalServer.Name))
+	sections = append(sections, title)
+	sections = append(sections, "")
+
+	// Tool list
+	if len(m.toolModalServer.Tools) == 0 {
+		sections = append(sections, ListItemDimmedStyle.Render("  No tools available"))
+	} else {
+		for i, tool := range m.toolModalServer.Tools {
+			cursor := "  "
+			if i == m.toolCursor {
+				cursor = "> "
+			}
+
+			name := tool.Name
+			desc := truncate(tool.Description, 40)
+
+			row := cursor + name
+			if desc != "" {
+				row += " - " + lipgloss.NewStyle().Foreground(colorFgSubtle).Render(desc)
+			}
+
+			if i == m.toolCursor {
+				sections = append(sections, ListItemSelectedStyle.Render(row))
+			} else {
+				sections = append(sections, ListItemNormalStyle.Render(row))
+			}
+		}
+	}
+
+	sections = append(sections, "")
+
+	// Argument input
+	argLabel := lipgloss.NewStyle().Foreground(colorCyan).Render("Args (JSON): ")
+	argInput := m.toolArgInput
+	if m.toolExecuting {
+		argInput += m.spinner.View()
+	} else {
+		argInput += "█"
+	}
+	sections = append(sections, argLabel+argInput)
+
+	// Result display
+	if m.toolResult != nil {
+		sections = append(sections, "")
+		if m.toolResult.Error != nil {
+			errStyle := lipgloss.NewStyle().Foreground(colorError)
+			sections = append(sections, errStyle.Render("Error: "+m.toolResult.Error.Error()))
+		} else if m.toolResult.IsError {
+			warnStyle := lipgloss.NewStyle().Foreground(colorYellow)
+			sections = append(sections, warnStyle.Render("Tool returned error"))
+			for _, content := range m.toolResult.Content {
+				sections = append(sections, "  "+truncate(content, 60))
+			}
+		} else {
+			successStyle := lipgloss.NewStyle().Foreground(colorTeal)
+			sections = append(sections, successStyle.Render(fmt.Sprintf("Success (%s):", m.toolResult.Latency.Round(time.Millisecond))))
+			for _, content := range m.toolResult.Content {
+				// Wrap long content
+				lines := strings.Split(content, "\n")
+				for _, line := range lines {
+					if len(line) > 60 {
+						sections = append(sections, "  "+line[:60]+"...")
+					} else {
+						sections = append(sections, "  "+line)
+					}
+					if len(sections) > 20 {
+						sections = append(sections, "  ...")
+						break
+					}
+				}
+			}
+		}
+	}
+
+	sections = append(sections, "")
+	hints := KeyDescStyle.Render("j/k:select  Enter:execute  Esc:close")
+	sections = append(sections, hints)
+
+	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
+
+	return ModalStyle.
+		Width(70).
+		Render(content)
+}
+
 // Helper functions
 
 func truncate(s string, max int) string {
@@ -962,6 +1691,8 @@ type serverTestedMsg struct {
 	name    string
 	healthy bool
 	err     error
+	tools   []mcpclient.Tool
+	latency time.Duration
 }
 
 type syncCompletedMsg struct {
@@ -981,6 +1712,11 @@ type serverToggledMsg struct {
 
 type editorFinishedMsg struct {
 	err error
+}
+
+type toolExecutedMsg struct {
+	toolName string
+	result   mcpclient.ToolCallResult
 }
 
 // Commands
@@ -1006,71 +1742,26 @@ func (m *Model) testServer(name string) tea.Cmd {
 			return serverTestedMsg{name: name, healthy: false, err: fmt.Errorf("server is disabled")}
 		}
 
-		// Handle remote HTTP/SSE servers
-		if server.Transport == mcp.TransportHTTP || server.Transport == mcp.TransportSSE {
-			// For remote servers, just check if URL is reachable
-			// Note: A full implementation would do an actual MCP handshake
-			if server.URL == "" {
-				return serverTestedMsg{name: name, healthy: false, err: fmt.Errorf("no URL configured")}
-			}
-			return serverTestedMsg{name: name, healthy: true}
-		}
-
-		// Handle stdio servers
-		if server.Command == "" {
-			return serverTestedMsg{name: name, healthy: false, err: fmt.Errorf("no command configured")}
-		}
-
-		// Resolve environment variables
-		env := make(map[string]string)
+		// Resolve environment variables and create a copy of the server config
+		serverCopy := *server
 		if server.Env != nil {
-			var resolveErr error
-			env, resolveErr = secrets.ResolveEnv(server.Env)
-			if resolveErr != nil {
-				return serverTestedMsg{name: name, healthy: false, err: resolveErr}
-			}
-		}
-
-		// Try to start the server with timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		execCmd := exec.CommandContext(ctx, server.Command, server.Args...)
-
-		// Set environment
-		for k, v := range env {
-			execCmd.Env = append(execCmd.Env, fmt.Sprintf("%s=%s", k, v))
-		}
-
-		// Try to start and quickly check if it fails
-		err := execCmd.Start()
-		if err != nil {
-			return serverTestedMsg{name: name, healthy: false, err: err}
-		}
-
-		// Give it a moment to fail or succeed
-		done := make(chan error, 1)
-		go func() {
-			done <- execCmd.Wait()
-		}()
-
-		select {
-		case <-time.After(500 * time.Millisecond):
-			// Server is still running after 500ms, consider it healthy
-			execCmd.Process.Kill()
-			return serverTestedMsg{name: name, healthy: true}
-		case err := <-done:
+			resolvedEnv, err := secrets.ResolveEnv(server.Env)
 			if err != nil {
-				if ctx.Err() == context.DeadlineExceeded {
-					return serverTestedMsg{name: name, healthy: true}
-				}
 				return serverTestedMsg{name: name, healthy: false, err: err}
 			}
-			// Exited with 0, might be a short-lived command
-			return serverTestedMsg{name: name, healthy: true}
-		case <-ctx.Done():
-			execCmd.Process.Kill()
-			return serverTestedMsg{name: name, healthy: true}
+			serverCopy.Env = resolvedEnv
+		}
+
+		// Use real MCP client for health check
+		client := mcpclient.NewClient().WithTimeout(10 * time.Second)
+		result := client.CheckHealth(context.Background(), &serverCopy)
+
+		return serverTestedMsg{
+			name:    name,
+			healthy: result.Healthy,
+			err:     result.Error,
+			tools:   result.Tools,
+			latency: result.Latency,
 		}
 	}
 }
@@ -1201,6 +1892,43 @@ func (m *Model) addServer(name string) tea.Cmd {
 		}
 
 		return serverAddedMsg{name: name, err: nil}
+	}
+}
+
+func (m *Model) executeTool(serverName, toolName string, args map[string]any) tea.Cmd {
+	return func() tea.Msg {
+		server, ok := m.cfg.Servers[serverName]
+		if !ok {
+			return toolExecutedMsg{
+				toolName: toolName,
+				result: mcpclient.ToolCallResult{
+					Error: fmt.Errorf("server not found"),
+				},
+			}
+		}
+
+		// Resolve environment variables
+		serverCopy := *server
+		if server.Env != nil {
+			resolvedEnv, err := secrets.ResolveEnv(server.Env)
+			if err != nil {
+				return toolExecutedMsg{
+					toolName: toolName,
+					result: mcpclient.ToolCallResult{
+						Error: err,
+					},
+				}
+			}
+			serverCopy.Env = resolvedEnv
+		}
+
+		client := mcpclient.NewClient().WithTimeout(30 * time.Second)
+		result := client.CallTool(context.Background(), &serverCopy, toolName, args)
+
+		return toolExecutedMsg{
+			toolName: toolName,
+			result:   result,
+		}
 	}
 }
 

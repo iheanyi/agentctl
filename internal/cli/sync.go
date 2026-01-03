@@ -2,8 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
+	"github.com/iheanyi/agentctl/pkg/mcp"
+	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/sync"
 	"github.com/spf13/cobra"
 )
@@ -20,20 +24,23 @@ marker) are preserved.
 Examples:
   agentctl sync                  # Sync to all detected tools
   agentctl sync --tool claude    # Sync only to Claude Code
-  agentctl sync --dry-run        # Preview changes without applying`,
+  agentctl sync --dry-run        # Preview changes without applying
+  agentctl sync --verbose        # Show detailed sync information`,
 	RunE: runSync,
 }
 
 var (
-	syncTool   string
-	syncDryRun bool
-	syncClean  bool
+	syncTool    string
+	syncDryRun  bool
+	syncClean   bool
+	syncVerbose bool
 )
 
 func init() {
 	syncCmd.Flags().StringVarP(&syncTool, "tool", "t", "", "Sync to specific tool only")
 	syncCmd.Flags().BoolVarP(&syncDryRun, "dry-run", "n", false, "Preview changes without applying")
 	syncCmd.Flags().BoolVar(&syncClean, "clean", false, "Remove stale managed entries")
+	syncCmd.Flags().BoolVarP(&syncVerbose, "verbose", "v", false, "Show detailed sync information")
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
@@ -60,6 +67,24 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Show verbose summary of resources to sync
+	if syncVerbose {
+		fmt.Println("Resources to sync:")
+		if len(servers) > 0 {
+			fmt.Printf("\nServers (%d):\n", len(servers))
+			printVerboseServers(servers, "  ")
+		}
+		if len(commands) > 0 {
+			fmt.Printf("\nCommands (%d):\n", len(commands))
+			printVerboseCommands(commands, "  ")
+		}
+		if len(rules) > 0 {
+			fmt.Printf("\nRules (%d):\n", len(rules))
+			printVerboseRules(rules, "  ")
+		}
+		fmt.Println()
+	}
+
 	// Get adapters to sync to
 	var adapters []sync.Adapter
 	if syncTool != "" {
@@ -82,6 +107,12 @@ func runSync(cmd *cobra.Command, args []string) error {
 		fmt.Println("Dry run - no changes will be made")
 	}
 
+	// Load sync state for diff computation
+	state, stateErr := sync.LoadState()
+	if stateErr != nil {
+		state = nil // Continue without state if loading fails
+	}
+
 	// Sync to each adapter
 	var successCount, errorCount int
 	for _, adapter := range adapters {
@@ -92,18 +123,59 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("Syncing to %s...\n", adapter.Name())
 
+		// Show config path in verbose mode
+		if syncVerbose {
+			fmt.Printf("  Config: %s\n", adapter.ConfigPath())
+		}
+
 		// Get supported resources
 		supported := adapter.SupportedResources()
 
 		if syncDryRun {
 			if containsResourceType(supported, sync.ResourceMCP) && len(servers) > 0 {
-				fmt.Printf("  Would sync %d server(s)\n", len(servers))
+				// Read existing servers and compute diff
+				existingServers, readErr := adapter.ReadServers()
+				var managedNames []string
+				if state != nil {
+					managedNames = state.GetManagedServers(adapter.Name())
+				}
+
+				if readErr == nil {
+					diff := computeServerDiff(existingServers, servers, managedNames)
+					if syncVerbose {
+						printServerDiff(diff, "  ")
+					} else {
+						// Show summary in non-verbose mode
+						fmt.Printf("  Would sync %d server(s)", len(servers))
+						if len(diff.toAdd) > 0 {
+							fmt.Printf(" (+%d new)", len(diff.toAdd))
+						}
+						if len(diff.toUpdate) > 0 {
+							fmt.Printf(" (~%d update)", len(diff.toUpdate))
+						}
+						if len(diff.unmanaged) > 0 {
+							fmt.Printf(" (=%d preserved)", len(diff.unmanaged))
+						}
+						fmt.Println()
+					}
+				} else {
+					fmt.Printf("  Would sync %d server(s)\n", len(servers))
+					if syncVerbose {
+						printVerboseServers(servers, "    ")
+					}
+				}
 			}
 			if containsResourceType(supported, sync.ResourceCommands) && len(commands) > 0 {
 				fmt.Printf("  Would sync %d command(s)\n", len(commands))
+				if syncVerbose {
+					printVerboseCommands(commands, "    ")
+				}
 			}
 			if containsResourceType(supported, sync.ResourceRules) && len(rules) > 0 {
 				fmt.Printf("  Would sync %d rule(s)\n", len(rules))
+				if syncVerbose {
+					printVerboseRules(rules, "    ")
+				}
 			}
 			successCount++
 			continue
@@ -118,6 +190,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 				errorCount++
 			} else {
 				fmt.Printf("  Synced %d server(s)\n", len(servers))
+				if syncVerbose {
+					printVerboseServers(servers, "    ")
+				}
 				syncedAny = true
 			}
 		}
@@ -128,6 +203,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  Error syncing commands: %v\n", err)
 			} else {
 				fmt.Printf("  Synced %d command(s)\n", len(commands))
+				if syncVerbose {
+					printVerboseCommands(commands, "    ")
+				}
 				syncedAny = true
 			}
 		}
@@ -138,6 +216,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  Error syncing rules: %v\n", err)
 			} else {
 				fmt.Printf("  Synced %d rule(s)\n", len(rules))
+				if syncVerbose {
+					printVerboseRules(rules, "    ")
+				}
 				syncedAny = true
 			}
 		}
@@ -164,4 +245,172 @@ func containsResourceType(types []sync.ResourceType, target sync.ResourceType) b
 		}
 	}
 	return false
+}
+
+// printVerboseServers prints detailed server information
+func printVerboseServers(servers []*mcp.Server, indent string) {
+	for _, s := range servers {
+		name := s.Name
+		if s.Namespace != "" {
+			name = s.Namespace
+		}
+		fmt.Printf("%s• %s\n", indent, name)
+		if s.URL != "" {
+			fmt.Printf("%s    URL: %s\n", indent, s.URL)
+		} else {
+			cmdLine := s.Command
+			if len(s.Args) > 0 {
+				cmdLine += " " + strings.Join(s.Args, " ")
+			}
+			fmt.Printf("%s    Command: %s\n", indent, cmdLine)
+		}
+		if len(s.Env) > 0 {
+			var envKeys []string
+			for k := range s.Env {
+				envKeys = append(envKeys, k)
+			}
+			fmt.Printf("%s    Env: %s\n", indent, strings.Join(envKeys, ", "))
+		}
+	}
+}
+
+// serverDiff represents the diff between existing and new servers
+type serverDiff struct {
+	toAdd      []*mcp.Server // New servers to add
+	toUpdate   []*mcp.Server // Existing managed servers to update
+	unmanaged  []*mcp.Server // Existing unmanaged servers (won't touch)
+	toRemove   []string      // Managed server names that would be removed
+}
+
+// computeServerDiff computes what would change when syncing servers
+func computeServerDiff(existing []*mcp.Server, incoming []*mcp.Server, managedNames []string) serverDiff {
+	diff := serverDiff{}
+
+	// Build lookup maps
+	existingByName := make(map[string]*mcp.Server)
+	for _, s := range existing {
+		name := s.Name
+		if s.Namespace != "" {
+			name = s.Namespace
+		}
+		existingByName[name] = s
+	}
+
+	managedSet := make(map[string]bool)
+	for _, name := range managedNames {
+		managedSet[name] = true
+	}
+
+	incomingByName := make(map[string]*mcp.Server)
+	for _, s := range incoming {
+		name := s.Name
+		if s.Namespace != "" {
+			name = s.Namespace
+		}
+		incomingByName[name] = s
+	}
+
+	// Categorize incoming servers
+	for _, s := range incoming {
+		name := s.Name
+		if s.Namespace != "" {
+			name = s.Namespace
+		}
+		if _, exists := existingByName[name]; exists {
+			diff.toUpdate = append(diff.toUpdate, s)
+		} else {
+			diff.toAdd = append(diff.toAdd, s)
+		}
+	}
+
+	// Find unmanaged and to-be-removed servers
+	for name, s := range existingByName {
+		if _, inIncoming := incomingByName[name]; !inIncoming {
+			if managedSet[name] {
+				diff.toRemove = append(diff.toRemove, name)
+			} else {
+				diff.unmanaged = append(diff.unmanaged, s)
+			}
+		}
+	}
+
+	return diff
+}
+
+// printServerDiff prints a diff-style view of server changes
+func printServerDiff(diff serverDiff, indent string) {
+	if len(diff.toAdd) > 0 {
+		fmt.Printf("%s[+] Adding %d server(s):\n", indent, len(diff.toAdd))
+		for _, s := range diff.toAdd {
+			name := s.Name
+			if s.Namespace != "" {
+				name = s.Namespace
+			}
+			fmt.Printf("%s    + %s\n", indent, name)
+		}
+	}
+
+	if len(diff.toUpdate) > 0 {
+		fmt.Printf("%s[~] Updating %d server(s):\n", indent, len(diff.toUpdate))
+		for _, s := range diff.toUpdate {
+			name := s.Name
+			if s.Namespace != "" {
+				name = s.Namespace
+			}
+			fmt.Printf("%s    ~ %s\n", indent, name)
+		}
+	}
+
+	if len(diff.toRemove) > 0 {
+		fmt.Printf("%s[-] Removing %d stale server(s):\n", indent, len(diff.toRemove))
+		for _, name := range diff.toRemove {
+			fmt.Printf("%s    - %s\n", indent, name)
+		}
+	}
+
+	if len(diff.unmanaged) > 0 {
+		fmt.Printf("%s[=] Preserving %d unmanaged server(s):\n", indent, len(diff.unmanaged))
+		for _, s := range diff.unmanaged {
+			name := s.Name
+			if s.Namespace != "" {
+				name = s.Namespace
+			}
+			fmt.Printf("%s    = %s\n", indent, name)
+		}
+	}
+}
+
+// printVerboseCommands prints detailed command information
+func printVerboseCommands(commands []*command.Command, indent string) {
+	for _, c := range commands {
+		fmt.Printf("%s• %s\n", indent, c.Name)
+		if c.Description != "" {
+			fmt.Printf("%s    Description: %s\n", indent, c.Description)
+		}
+	}
+}
+
+// printVerboseRules prints detailed rule information
+func printVerboseRules(rules []*rule.Rule, indent string) {
+	for _, r := range rules {
+		name := r.Name
+		if name == "" && r.Path != "" {
+			name = r.Path
+		}
+		if name == "" {
+			name = "(unnamed)"
+		}
+		fmt.Printf("%s• %s\n", indent, name)
+		// Show first line of content as preview
+		lines := strings.Split(r.Content, "\n")
+		if len(lines) > 0 {
+			preview := strings.TrimSpace(lines[0])
+			if len(preview) > 60 {
+				preview = preview[:57] + "..."
+			}
+			if preview != "" {
+				fmt.Printf("%s    Preview: %s\n", indent, preview)
+			}
+		}
+	}
 }

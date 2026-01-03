@@ -1,0 +1,9 @@
+{
+  "theme": "One Dark",
+  "font_size": 14,
+  "context_servers": {
+    "manual-server": {
+      "command": "manual"
+    }
+  }
+}
