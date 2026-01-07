@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/iheanyi/agentctl/pkg/aliases"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
+	"github.com/iheanyi/agentctl/pkg/hook"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/mcpclient"
 	"github.com/iheanyi/agentctl/pkg/profile"
@@ -38,10 +40,11 @@ const (
 	TabRules
 	TabSkills
 	TabPrompts
+	TabHooks
 )
 
 // TabNames returns the display names for tabs
-var TabNames = []string{"Servers", "Commands", "Rules", "Skills", "Prompts"}
+var TabNames = []string{"Servers", "Commands", "Rules", "Skills", "Prompts", "Hooks"}
 
 // FilterMode represents the current filter for the server list
 type FilterMode int
@@ -73,6 +76,10 @@ type Model struct {
 	rules    []*rule.Rule
 	skills   []*skill.Skill
 	prompts  []*prompt.Prompt
+	hooks    []*hook.Hook
+
+	// Resource CRUD handler
+	resourceCRUD *ResourceCRUD
 
 	// Tab state
 	activeTab ResourceTab
@@ -126,13 +133,14 @@ func New() (*Model, error) {
 	s.Style = SpinnerStyle
 
 	m := &Model{
-		cfg:        cfg,
-		selected:   make(map[string]bool),
-		filterMode: FilterAll,
-		profile:    "default",
-		logs:       []LogEntry{},
-		keys:       newKeyMap(),
-		spinner:    s,
+		cfg:          cfg,
+		selected:     make(map[string]bool),
+		filterMode:   FilterAll,
+		profile:      "default",
+		logs:         []LogEntry{},
+		keys:         newKeyMap(),
+		spinner:      s,
+		resourceCRUD: NewResourceCRUD(cfg),
 	}
 
 	// Load profiles
@@ -182,6 +190,11 @@ func (m *Model) loadAllResources() {
 	promptsDir := filepath.Join(configDir, "prompts")
 	if prompts, err := prompt.LoadAll(promptsDir); err == nil {
 		m.prompts = prompts
+	}
+
+	// Load hooks (from all supported tools)
+	if hooks, err := hook.LoadAll(); err == nil {
+		m.hooks = hooks
 	}
 }
 
@@ -431,6 +444,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addLog("success", fmt.Sprintf("Tool %s executed (%s)", msg.toolName, msg.result.Latency.Round(time.Millisecond)))
 		}
 
+	case resourceCreatedMsg:
+		if msg.err != nil {
+			m.addLog("error", fmt.Sprintf("Failed to create %s: %v", msg.resourceType, msg.err))
+		} else {
+			m.addLog("success", fmt.Sprintf("Created %s: %s", msg.resourceType, msg.name))
+			m.loadAllResources()
+		}
+
+	case resourceEditedMsg:
+		if msg.err != nil {
+			m.addLog("error", fmt.Sprintf("Failed to edit %s: %v", msg.resourceType, msg.err))
+		} else {
+			m.addLog("success", fmt.Sprintf("Edited %s", msg.resourceType))
+			m.loadAllResources()
+		}
+
+	case resourceDeletedMsg:
+		if msg.err != nil {
+			m.addLog("error", fmt.Sprintf("Failed to delete %s: %v", msg.resourceType, msg.err))
+		} else {
+			m.addLog("success", fmt.Sprintf("Deleted %s: %s", msg.resourceType, msg.name))
+			m.loadAllResources()
+			// Adjust cursor if needed
+			m.adjustCursorForCurrentTab()
+		}
+
 	case tea.KeyMsg:
 		// Handle search input mode
 		if m.searching {
@@ -612,20 +651,81 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.keys.Install):
-			if s := m.selectedServer(); s != nil && s.Status == ServerStatusAvailable {
-				m.addLog("info", fmt.Sprintf("Installing %s...", s.Name))
-				return m, m.addServer(s.Name)
+			if m.activeTab == TabServers {
+				if s := m.selectedServer(); s != nil && s.Status == ServerStatusAvailable {
+					m.addLog("info", fmt.Sprintf("Installing %s...", s.Name))
+					return m, m.addServer(s.Name)
+				}
+			}
+
+		case key.Matches(msg, m.keys.Add):
+			// Add new resource based on current tab
+			switch m.activeTab {
+			case TabCommands:
+				return m, m.createCommand()
+			case TabRules:
+				return m, m.createRule()
+			case TabSkills:
+				return m, m.createSkill()
+			case TabPrompts:
+				return m, m.createPrompt()
 			}
 
 		case key.Matches(msg, m.keys.Delete):
-			if s := m.selectedServer(); s != nil && s.Status != ServerStatusAvailable {
-				return m, m.deleteServer(s.Name)
+			switch m.activeTab {
+			case TabServers:
+				if s := m.selectedServer(); s != nil && s.Status != ServerStatusAvailable {
+					return m, m.deleteServer(s.Name)
+				}
+			case TabCommands:
+				if m.cursor >= 0 && m.cursor < len(m.commands) {
+					cmd := m.commands[m.cursor]
+					return m, m.deleteCommand(cmd)
+				}
+			case TabRules:
+				if m.cursor >= 0 && m.cursor < len(m.rules) {
+					r := m.rules[m.cursor]
+					return m, m.deleteRule(r)
+				}
+			case TabSkills:
+				if m.cursor >= 0 && m.cursor < len(m.skills) {
+					s := m.skills[m.cursor]
+					return m, m.deleteSkill(s)
+				}
+			case TabPrompts:
+				if m.cursor >= 0 && m.cursor < len(m.prompts) {
+					p := m.prompts[m.cursor]
+					return m, m.deletePrompt(p)
+				}
 			}
 
 		case key.Matches(msg, m.keys.Edit):
-			if s := m.selectedServer(); s != nil && s.Status != ServerStatusAvailable {
-				m.addLog("info", fmt.Sprintf("Opening editor for %s...", s.Name))
-				return m, m.editServer(s.Name)
+			switch m.activeTab {
+			case TabServers:
+				if s := m.selectedServer(); s != nil && s.Status != ServerStatusAvailable {
+					m.addLog("info", fmt.Sprintf("Opening editor for %s...", s.Name))
+					return m, m.editServer(s.Name)
+				}
+			case TabCommands:
+				if m.cursor >= 0 && m.cursor < len(m.commands) {
+					cmd := m.commands[m.cursor]
+					return m, m.editCommand(cmd)
+				}
+			case TabRules:
+				if m.cursor >= 0 && m.cursor < len(m.rules) {
+					r := m.rules[m.cursor]
+					return m, m.editRule(r)
+				}
+			case TabSkills:
+				if m.cursor >= 0 && m.cursor < len(m.skills) {
+					s := m.skills[m.cursor]
+					return m, m.editSkill(s)
+				}
+			case TabPrompts:
+				if m.cursor >= 0 && m.cursor < len(m.prompts) {
+					p := m.prompts[m.cursor]
+					return m, m.editPrompt(p)
+				}
 			}
 
 		case key.Matches(msg, m.keys.Toggle):
@@ -750,6 +850,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Tab5):
 			m.activeTab = TabPrompts
 			m.cursor = 0
+
+		case key.Matches(msg, m.keys.Tab6):
+			m.activeTab = TabHooks
+			m.cursor = 0
 		}
 	}
 
@@ -794,6 +898,8 @@ func (m Model) View() string {
 		sections = append(sections, m.renderSkillsList())
 	case TabPrompts:
 		sections = append(sections, m.renderPromptsList())
+	case TabHooks:
+		sections = append(sections, m.renderHooksList())
 	}
 
 	// Divider
@@ -845,6 +951,8 @@ func (m *Model) renderHeader() string {
 		countStr = fmt.Sprintf("%d skills", len(m.skills))
 	case TabPrompts:
 		countStr = fmt.Sprintf("%d prompts", len(m.prompts))
+	case TabHooks:
+		countStr = fmt.Sprintf("%d hooks", len(m.hooks))
 	}
 	counts := HeaderSubtitleStyle.Render(countStr)
 
@@ -1399,6 +1507,120 @@ func (m *Model) renderPromptRow(p *prompt.Prompt, selected bool) string {
 	return row
 }
 
+// renderHooksList renders the hooks list (read-only)
+func (m *Model) renderHooksList() string {
+	var rows []string
+
+	// Calculate available height for list
+	listHeight := m.height - 12
+	if m.logExpanded {
+		listHeight = m.height - 8 - m.height/3
+	}
+	if listHeight < 5 {
+		listHeight = 5
+	}
+
+	if len(m.hooks) == 0 {
+		emptyMsg := lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Italic(true).
+			Render("No hooks configured")
+		rows = append(rows, "  "+emptyMsg)
+		rows = append(rows, "")
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Render("  Hooks are configured in ~/.claude/settings.json"))
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Render("  (Read-only view - edit settings.json directly)"))
+	} else {
+		// Calculate visible range
+		startIdx := 0
+		if m.cursor >= listHeight {
+			startIdx = m.cursor - listHeight + 1
+		}
+		endIdx := min(startIdx+listHeight, len(m.hooks))
+
+		for i := startIdx; i < endIdx; i++ {
+			h := m.hooks[i]
+			row := m.renderHookRow(h, i == m.cursor)
+			rows = append(rows, row)
+		}
+	}
+
+	// Pad to fill height
+	for len(rows) < listHeight {
+		rows = append(rows, "")
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// renderHookRow renders a single hook row
+func (m *Model) renderHookRow(h *hook.Hook, selected bool) string {
+	// Icon based on hook type
+	icon := "🪝"
+	switch h.Type {
+	case "PreToolUse":
+		icon = "⏮"
+	case "PostToolUse":
+		icon = "⏭"
+	case "Notification":
+		icon = "🔔"
+	case "Stop":
+		icon = "⏹"
+	case "UserPromptSubmit":
+		icon = "📝"
+	}
+	iconStyled := StatusInstalledStyle.Render(icon)
+
+	// Hook type
+	nameStyle := ListItemNameStyle
+	if selected {
+		nameStyle = ListItemNameSelectedStyle
+	}
+	name := nameStyle.Render(h.Type)
+
+	// Matcher badge
+	matcherBadge := ""
+	if h.Matcher != "" {
+		matcherBadge = lipgloss.NewStyle().Foreground(colorCyan).Render(fmt.Sprintf(" [%s]", h.Matcher))
+	}
+
+	// Source badge
+	sourceBadge := lipgloss.NewStyle().Foreground(colorFgSubtle).Render(fmt.Sprintf(" (%s)", h.Source))
+
+	// Command (truncated)
+	descStyle := ListItemDescStyle
+	if selected {
+		descStyle = ListItemDescSelectedStyle
+	}
+	cmdText := truncate(h.Command, 40)
+	desc := descStyle.Render(cmdText)
+
+	// Build the row
+	leftPart := "  " + iconStyled + " " + name + matcherBadge + sourceBadge
+
+	// Calculate padding for right-aligned command
+	leftWidth := lipgloss.Width(leftPart)
+	descWidth := lipgloss.Width(desc)
+	padding := m.width - leftWidth - descWidth - 4
+	if padding < 2 {
+		padding = 2
+	}
+
+	row := leftPart + strings.Repeat(" ", padding) + desc
+
+	// Apply selection styling
+	if selected {
+		row = ListItemSelectedStyle.Width(m.width).Render(row)
+	} else {
+		row = ListItemNormalStyle.Width(m.width).Render(row)
+	}
+
+	return row
+}
+
 // renderLogPanel renders the log panel
 func (m *Model) renderLogPanel() string {
 	var logLines []string
@@ -1462,6 +1684,7 @@ func (m *Model) renderKeyHints() string {
 		)
 	case TabCommands, TabRules, TabSkills, TabPrompts:
 		hints = append(hints,
+			struct{ Key, Desc string }{"a", "add"},
 			struct{ Key, Desc string }{"e", "edit"},
 			struct{ Key, Desc string }{"d", "delete"},
 		)
@@ -1481,20 +1704,19 @@ func (m *Model) renderHelpOverlay() string {
   Navigation           Operations           Filters
   ──────────           ──────────           ───────
   j/k     up/down      i      install       f    cycle filter
-  g/G     top/bottom   d      delete        1    all
-  /       search       e      edit          2    installed
-  Esc     clear        Enter  toggle        3    available
-                       s      sync          4    disabled
-  Selection            t      test
-  ─────────            x      tools (exec)  UI
-  Space   toggle                            ──
-  V       select all   Profiles             L    toggle logs
-                       ────────             ?    this help
-                       P      switch        q    quit
-  Tabs
-  ────
+  g/G     top/bottom   a      add new       1    all
+  /       search       d      delete        2    installed
+  Esc     clear        e      edit          3    available
+                       Enter  toggle        4    disabled
+  Selection            s      sync
+  ─────────            t      test          UI
+  Space   toggle       x      tools (exec)  ──
+  V       select all                        L    toggle logs
+                       Profiles             ?    this help
+  Tabs                 ────────             q    quit
+  ────                 P      switch
   Tab/Shift+Tab  next/prev tab
-  F1-F5          jump to tab (Servers/Commands/Rules/Skills/Prompts)
+  F1-F6          jump to tab (Servers/Commands/Rules/Skills/Prompts/Hooks)
 
                        Press any key to close
 `
@@ -1660,6 +1882,28 @@ func (m *Model) renderToolModal() string {
 
 // Helper functions
 
+// adjustCursorForCurrentTab adjusts the cursor after deletion based on the current tab
+func (m *Model) adjustCursorForCurrentTab() {
+	var maxIndex int
+	switch m.activeTab {
+	case TabServers:
+		maxIndex = len(m.filteredItems) - 1
+	case TabCommands:
+		maxIndex = len(m.commands) - 1
+	case TabRules:
+		maxIndex = len(m.rules) - 1
+	case TabSkills:
+		maxIndex = len(m.skills) - 1
+	case TabPrompts:
+		maxIndex = len(m.prompts) - 1
+	case TabHooks:
+		maxIndex = len(m.hooks) - 1
+	}
+	if m.cursor > maxIndex {
+		m.cursor = max(0, maxIndex)
+	}
+}
+
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
@@ -1717,6 +1961,23 @@ type editorFinishedMsg struct {
 type toolExecutedMsg struct {
 	toolName string
 	result   mcpclient.ToolCallResult
+}
+
+type resourceCreatedMsg struct {
+	resourceType string
+	name         string
+	err          error
+}
+
+type resourceEditedMsg struct {
+	resourceType string
+	err          error
+}
+
+type resourceDeletedMsg struct {
+	resourceType string
+	name         string
+	err          error
 }
 
 // Commands
@@ -1930,6 +2191,246 @@ func (m *Model) executeTool(serverName, toolName string, args map[string]any) te
 			result:   result,
 		}
 	}
+}
+
+// Resource CRUD commands
+// These use tea.Exec to properly suspend the TUI while running interactive forms
+
+// formExec wraps a function to implement tea.ExecCommand interface
+type formExec struct {
+	run func() error
+}
+
+func (f formExec) Run() error              { return f.run() }
+func (f formExec) SetStdin(r io.Reader)    {}
+func (f formExec) SetStdout(w io.Writer)   {}
+func (f formExec) SetStderr(w io.Writer)   {}
+
+func (m *Model) createCommand() tea.Cmd {
+	crud := m.resourceCRUD
+	var createdName string
+	return tea.Exec(formExec{run: func() error {
+		cmd, err := crud.CreateCommand()
+		if err != nil {
+			return err
+		}
+		createdName = cmd.Name
+		return nil
+	}}, func(err error) tea.Msg {
+		if err != nil {
+			return resourceCreatedMsg{resourceType: "command", err: err}
+		}
+		return resourceCreatedMsg{resourceType: "command", name: createdName}
+	})
+}
+
+func (m *Model) editCommand(cmd *command.Command) tea.Cmd {
+	crud := m.resourceCRUD
+	c := exec.Command(getEditor(), filepath.Join(crud.cfg.ConfigDir, "commands", cmd.Name+".json"))
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return resourceEditedMsg{resourceType: "command", err: err}
+	})
+}
+
+func (m *Model) deleteCommand(cmd *command.Command) tea.Cmd {
+	crud := m.resourceCRUD
+	cmdName := cmd.Name
+	var deleted bool
+	return tea.Exec(formExec{run: func() error {
+		confirmed, err := ConfirmDelete("command", cmdName)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			return nil
+		}
+		deleted = true
+		return crud.DeleteCommand(cmd)
+	}}, func(err error) tea.Msg {
+		if err != nil {
+			return resourceDeletedMsg{resourceType: "command", err: err}
+		}
+		if !deleted {
+			return resourceDeletedMsg{resourceType: "command", err: nil} // cancelled
+		}
+		return resourceDeletedMsg{resourceType: "command", name: cmdName}
+	})
+}
+
+func (m *Model) createRule() tea.Cmd {
+	crud := m.resourceCRUD
+	var createdName string
+	return tea.Exec(formExec{run: func() error {
+		r, err := crud.CreateRule()
+		if err != nil {
+			return err
+		}
+		createdName = r.Name
+		return nil
+	}}, func(err error) tea.Msg {
+		if err != nil {
+			return resourceCreatedMsg{resourceType: "rule", err: err}
+		}
+		return resourceCreatedMsg{resourceType: "rule", name: createdName}
+	})
+}
+
+func (m *Model) editRule(r *rule.Rule) tea.Cmd {
+	c := exec.Command(getEditor(), r.Path)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return resourceEditedMsg{resourceType: "rule", err: err}
+	})
+}
+
+func (m *Model) deleteRule(r *rule.Rule) tea.Cmd {
+	crud := m.resourceCRUD
+	ruleName := r.Name
+	ruleRef := r
+	var deleted bool
+	return tea.Exec(formExec{run: func() error {
+		confirmed, err := ConfirmDelete("rule", ruleName)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			return nil
+		}
+		deleted = true
+		return crud.DeleteRule(ruleRef)
+	}}, func(err error) tea.Msg {
+		if err != nil {
+			return resourceDeletedMsg{resourceType: "rule", err: err}
+		}
+		if !deleted {
+			return resourceDeletedMsg{resourceType: "rule", err: nil}
+		}
+		return resourceDeletedMsg{resourceType: "rule", name: ruleName}
+	})
+}
+
+func (m *Model) createSkill() tea.Cmd {
+	crud := m.resourceCRUD
+	var createdName string
+	return tea.Exec(formExec{run: func() error {
+		s, err := crud.CreateSkill()
+		if err != nil {
+			return err
+		}
+		createdName = s.Name
+		return nil
+	}}, func(err error) tea.Msg {
+		if err != nil {
+			return resourceCreatedMsg{resourceType: "skill", err: err}
+		}
+		return resourceCreatedMsg{resourceType: "skill", name: createdName}
+	})
+}
+
+func (m *Model) editSkill(s *skill.Skill) tea.Cmd {
+	mainPromptPath := filepath.Join(s.Path, "prompts", "main.md")
+	c := exec.Command(getEditor(), mainPromptPath)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return resourceEditedMsg{resourceType: "skill", err: err}
+	})
+}
+
+func (m *Model) deleteSkill(s *skill.Skill) tea.Cmd {
+	crud := m.resourceCRUD
+	skillName := s.Name
+	skillRef := s
+	var deleted bool
+	return tea.Exec(formExec{run: func() error {
+		confirmed, err := ConfirmDelete("skill", skillName)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			return nil
+		}
+		deleted = true
+		return crud.DeleteSkill(skillRef)
+	}}, func(err error) tea.Msg {
+		if err != nil {
+			return resourceDeletedMsg{resourceType: "skill", err: err}
+		}
+		if !deleted {
+			return resourceDeletedMsg{resourceType: "skill", err: nil}
+		}
+		return resourceDeletedMsg{resourceType: "skill", name: skillName}
+	})
+}
+
+func (m *Model) createPrompt() tea.Cmd {
+	crud := m.resourceCRUD
+	var createdName string
+	return tea.Exec(formExec{run: func() error {
+		p, err := crud.CreatePrompt()
+		if err != nil {
+			return err
+		}
+		createdName = p.Name
+		return nil
+	}}, func(err error) tea.Msg {
+		if err != nil {
+			return resourceCreatedMsg{resourceType: "prompt", err: err}
+		}
+		return resourceCreatedMsg{resourceType: "prompt", name: createdName}
+	})
+}
+
+func (m *Model) editPrompt(p *prompt.Prompt) tea.Cmd {
+	crud := m.resourceCRUD
+	c := exec.Command(getEditor(), filepath.Join(crud.cfg.ConfigDir, "prompts", p.Name+".json"))
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return resourceEditedMsg{resourceType: "prompt", err: err}
+	})
+}
+
+func (m *Model) deletePrompt(p *prompt.Prompt) tea.Cmd {
+	crud := m.resourceCRUD
+	promptName := p.Name
+	promptRef := p
+	var deleted bool
+	return tea.Exec(formExec{run: func() error {
+		confirmed, err := ConfirmDelete("prompt", promptName)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			return nil
+		}
+		deleted = true
+		return crud.DeletePrompt(promptRef)
+	}}, func(err error) tea.Msg {
+		if err != nil {
+			return resourceDeletedMsg{resourceType: "prompt", err: err}
+		}
+		if !deleted {
+			return resourceDeletedMsg{resourceType: "prompt", err: nil}
+		}
+		return resourceDeletedMsg{resourceType: "prompt", name: promptName}
+	})
+}
+
+// getEditor returns the user's preferred editor
+func getEditor() string {
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
+	if editor == "" {
+		// Try common editors
+		for _, e := range []string{"code", "vim", "nano", "vi"} {
+			if _, err := exec.LookPath(e); err == nil {
+				editor = e
+				break
+			}
+		}
+	}
+	if editor == "" {
+		editor = "vi"
+	}
+	return editor
 }
 
 // Run starts the TUI application

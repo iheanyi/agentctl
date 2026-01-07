@@ -168,11 +168,11 @@ func TestResourceTabConstants(t *testing.T) {
 
 func TestTabNames(t *testing.T) {
 	// Verify we have names for all tabs
-	if len(TabNames) != 5 {
-		t.Errorf("TabNames should have 5 entries, got %d", len(TabNames))
+	if len(TabNames) != 6 {
+		t.Errorf("TabNames should have 6 entries, got %d", len(TabNames))
 	}
 
-	expectedNames := []string{"Servers", "Commands", "Rules", "Skills", "Prompts"}
+	expectedNames := []string{"Servers", "Commands", "Rules", "Skills", "Prompts", "Hooks"}
 	for i, name := range expectedNames {
 		if TabNames[i] != name {
 			t.Errorf("TabNames[%d] = %q, want %q", i, TabNames[i], name)
@@ -204,5 +204,8 @@ func TestKeyMapTabBindings(t *testing.T) {
 	}
 	if len(km.Tab5.Keys()) == 0 {
 		t.Error("Tab5 key binding should have keys")
+	}
+	if len(km.Tab6.Keys()) == 0 {
+		t.Error("Tab6 key binding should have keys")
 	}
 }

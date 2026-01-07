@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+
+	"github.com/iheanyi/agentctl/internal/tui"
 )
 
 var (
@@ -23,13 +26,15 @@ across multiple agentic frameworks and developer tools.
 Supported tools: Claude Code, Cursor, Codex, OpenCode, Cline, Windsurf, Zed, Continue
 
 Examples:
-  agentctl install filesystem          # Install MCP server by alias
-  agentctl install github.com/org/mcp  # Install from git URL
+  agentctl                             # Launch interactive TUI
+  agentctl add filesystem              # Add MCP server by alias
+  agentctl add github.com/org/mcp      # Add from git URL
   agentctl sync                        # Sync config to all tools
   agentctl list                        # List installed resources
-  agentctl profile switch work         # Switch to work profile`,
+  agentctl --help                      # Show all commands`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	RunE:          runRoot,
 }
 
 // Execute runs the root command
@@ -61,6 +66,17 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(uiCmd)
 	rootCmd.AddCommand(daemonCmd)
+}
+
+// runRoot handles the default behavior when no subcommand is given
+func runRoot(cmd *cobra.Command, args []string) error {
+	// If we're in a TTY, launch the TUI
+	if isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd()) {
+		return tui.Run()
+	}
+
+	// Otherwise, show help
+	return cmd.Help()
 }
 
 var versionCmd = &cobra.Command{

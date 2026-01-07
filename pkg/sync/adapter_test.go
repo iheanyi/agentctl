@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 )
 
@@ -246,6 +247,167 @@ func TestManagedMarkerConstants(t *testing.T) {
 	}
 	if ManagedValue != "agentctl" {
 		t.Errorf("ManagedValue should be 'agentctl', got %q", ManagedValue)
+	}
+}
+
+func TestParseClaudeCommand(t *testing.T) {
+	tests := []struct {
+		name             string
+		filename         string
+		content          string
+		wantName         string
+		wantDescription  string
+		wantArgumentHint string
+		wantModel        string
+		wantAllowed      []string
+		wantDisallowed   []string
+		wantPrompt       string
+	}{
+		{
+			name:     "simple command without frontmatter",
+			filename: "simple.md",
+			content:  "Just a prompt",
+			wantName: "simple",
+			wantPrompt: "Just a prompt",
+		},
+		{
+			name:     "command with description only",
+			filename: "review.md",
+			content: `---
+description: Review code for issues
+---
+
+Review the following code`,
+			wantName:        "review",
+			wantDescription: "Review code for issues",
+			wantPrompt:      "Review the following code",
+		},
+		{
+			name:     "command with all fields",
+			filename: "full.md",
+			content: `---
+description: Full featured command
+argument-hint: [file.md or feature]
+model: opus
+allowed-tools: [Read, Write, Edit]
+disallowed-tools: [Bash]
+---
+
+Do the thing`,
+			wantName:         "full",
+			wantDescription:  "Full featured command",
+			wantArgumentHint: "[file.md or feature]",
+			wantModel:        "opus",
+			wantAllowed:      []string{"Read", "Write", "Edit"},
+			wantDisallowed:   []string{"Bash"},
+			wantPrompt:       "Do the thing",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := parseClaudeCommand(tt.filename, tt.content)
+
+			if cmd.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", cmd.Name, tt.wantName)
+			}
+			if cmd.Description != tt.wantDescription {
+				t.Errorf("Description = %q, want %q", cmd.Description, tt.wantDescription)
+			}
+			if cmd.ArgumentHint != tt.wantArgumentHint {
+				t.Errorf("ArgumentHint = %q, want %q", cmd.ArgumentHint, tt.wantArgumentHint)
+			}
+			if cmd.Model != tt.wantModel {
+				t.Errorf("Model = %q, want %q", cmd.Model, tt.wantModel)
+			}
+			if len(cmd.AllowedTools) != len(tt.wantAllowed) {
+				t.Errorf("AllowedTools = %v, want %v", cmd.AllowedTools, tt.wantAllowed)
+			}
+			if len(cmd.DisallowedTools) != len(tt.wantDisallowed) {
+				t.Errorf("DisallowedTools = %v, want %v", cmd.DisallowedTools, tt.wantDisallowed)
+			}
+			if cmd.Prompt != tt.wantPrompt {
+				t.Errorf("Prompt = %q, want %q", cmd.Prompt, tt.wantPrompt)
+			}
+		})
+	}
+}
+
+func TestFormatClaudeCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      *command.Command
+		contains []string
+	}{
+		{
+			name: "simple command",
+			cmd: &command.Command{
+				Name:        "test",
+				Description: "Test command",
+				Prompt:      "Do stuff",
+			},
+			contains: []string{"description: Test command", "Do stuff"},
+		},
+		{
+			name: "command with all fields",
+			cmd: &command.Command{
+				Name:            "full",
+				Description:     "Full command",
+				ArgumentHint:    "[file.md]",
+				Model:           "sonnet",
+				AllowedTools:    []string{"Read", "Write"},
+				DisallowedTools: []string{"Bash"},
+				Prompt:          "Execute task",
+			},
+			contains: []string{
+				"description: Full command",
+				"argument-hint: [file.md]",
+				"model: sonnet",
+				"allowed-tools: [Read, Write]",
+				"disallowed-tools: [Bash]",
+				"Execute task",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := formatClaudeCommand(tt.cmd)
+
+			for _, expected := range tt.contains {
+				if !contains(output, expected) {
+					t.Errorf("Output should contain %q, got:\n%s", expected, output)
+				}
+			}
+		})
+	}
+}
+
+func TestParseToolsList(t *testing.T) {
+	tests := []struct {
+		input string
+		want  []string
+	}{
+		{"", nil},
+		{"Read", []string{"Read"}},
+		{"Read, Write", []string{"Read", "Write"}},
+		{"[Read, Write, Edit]", []string{"Read", "Write", "Edit"}},
+		{"[Read]", []string{"Read"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := parseToolsList(tt.input)
+			if len(got) != len(tt.want) {
+				t.Errorf("parseToolsList(%q) = %v, want %v", tt.input, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("parseToolsList(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
 }
 

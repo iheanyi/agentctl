@@ -20,6 +20,7 @@ type keyMap struct {
 
 	// Operations
 	Install  key.Binding
+	Add      key.Binding
 	Delete   key.Binding
 	Edit     key.Binding
 	Toggle   key.Binding
@@ -54,6 +55,7 @@ type keyMap struct {
 	Tab3    key.Binding
 	Tab4    key.Binding
 	Tab5    key.Binding
+	Tab6    key.Binding
 }
 
 // newKeyMap creates a new keyMap with all keybindings configured.
@@ -107,6 +109,10 @@ func newKeyMap() keyMap {
 		Install: key.NewBinding(
 			key.WithKeys("i"),
 			key.WithHelp("i", "install"),
+		),
+		Add: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "add"),
 		),
 		Delete: key.NewBinding(
 			key.WithKeys("d"),
@@ -219,6 +225,10 @@ func newKeyMap() keyMap {
 		Tab5: key.NewBinding(
 			key.WithKeys("F5"),
 			key.WithHelp("F5", "prompts"),
+		),
+		Tab6: key.NewBinding(
+			key.WithKeys("F6"),
+			key.WithHelp("F6", "hooks"),
 		),
 	}
 }

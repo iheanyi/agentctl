@@ -331,6 +331,16 @@ func parseClaudeCommand(filename string, content string) *command.Command {
 				line = strings.TrimSpace(line)
 				if strings.HasPrefix(line, "description:") {
 					cmd.Description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+				} else if strings.HasPrefix(line, "argument-hint:") {
+					cmd.ArgumentHint = strings.TrimSpace(strings.TrimPrefix(line, "argument-hint:"))
+				} else if strings.HasPrefix(line, "model:") {
+					cmd.Model = strings.TrimSpace(strings.TrimPrefix(line, "model:"))
+				} else if strings.HasPrefix(line, "allowed-tools:") {
+					tools := strings.TrimSpace(strings.TrimPrefix(line, "allowed-tools:"))
+					cmd.AllowedTools = parseToolsList(tools)
+				} else if strings.HasPrefix(line, "disallowed-tools:") {
+					tools := strings.TrimSpace(strings.TrimPrefix(line, "disallowed-tools:"))
+					cmd.DisallowedTools = parseToolsList(tools)
 				}
 			}
 			// Rest is the prompt
@@ -343,6 +353,28 @@ func parseClaudeCommand(filename string, content string) *command.Command {
 	return cmd
 }
 
+// parseToolsList parses a YAML list or comma-separated tools string
+func parseToolsList(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	// Handle YAML array format [tool1, tool2]
+	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
+		s = strings.TrimPrefix(s, "[")
+		s = strings.TrimSuffix(s, "]")
+	}
+	parts := strings.Split(s, ",")
+	var tools []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			tools = append(tools, p)
+		}
+	}
+	return tools
+}
+
 // formatClaudeCommand formats a command for Claude Code
 func formatClaudeCommand(cmd *command.Command) string {
 	var sb strings.Builder
@@ -352,6 +384,26 @@ func formatClaudeCommand(cmd *command.Command) string {
 		sb.WriteString("description: ")
 		sb.WriteString(cmd.Description)
 		sb.WriteString("\n")
+	}
+	if cmd.ArgumentHint != "" {
+		sb.WriteString("argument-hint: ")
+		sb.WriteString(cmd.ArgumentHint)
+		sb.WriteString("\n")
+	}
+	if cmd.Model != "" {
+		sb.WriteString("model: ")
+		sb.WriteString(cmd.Model)
+		sb.WriteString("\n")
+	}
+	if len(cmd.AllowedTools) > 0 {
+		sb.WriteString("allowed-tools: [")
+		sb.WriteString(strings.Join(cmd.AllowedTools, ", "))
+		sb.WriteString("]\n")
+	}
+	if len(cmd.DisallowedTools) > 0 {
+		sb.WriteString("disallowed-tools: [")
+		sb.WriteString(strings.Join(cmd.DisallowedTools, ", "))
+		sb.WriteString("]\n")
 	}
 	sb.WriteString("---\n\n")
 	sb.WriteString(cmd.Prompt)

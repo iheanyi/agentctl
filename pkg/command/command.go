@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/iheanyi/agentctl/pkg/jsonutil"
 )
 
 // Arg represents a command argument definition
@@ -27,11 +29,13 @@ type Command struct {
 	Name            string                  `json:"name"`
 	Description     string                  `json:"description"`
 	Prompt          string                  `json:"prompt"`
-	Args            map[string]Arg          `json:"args,omitempty"`
-	AllowedTools    []string                `json:"allowedTools,omitempty"`
-	DisallowedTools []string                `json:"disallowedTools,omitempty"`
-	Overrides       map[string]ToolOverride `json:"overrides,omitempty"`
-	PromptRef       string                  `json:"promptRef,omitempty"` // Reference to a prompt template
+	ArgumentHint    string                  `json:"argumentHint,omitempty"`    // Hint for expected arguments (e.g., "[file.md or feature]")
+	Model           string                  `json:"model,omitempty"`           // Preferred model (opus, sonnet, haiku, gpt-4, etc.)
+	Args            map[string]Arg          `json:"args,omitempty"`            // Structured argument definitions
+	AllowedTools    []string                `json:"allowedTools,omitempty"`    // Tools this command can use
+	DisallowedTools []string                `json:"disallowedTools,omitempty"` // Tools this command cannot use
+	Overrides       map[string]ToolOverride `json:"overrides,omitempty"`       // Per-tool overrides
+	PromptRef       string                  `json:"promptRef,omitempty"`       // Reference to a prompt template
 }
 
 // Load loads a command from a JSON file
@@ -89,7 +93,7 @@ func Save(cmd *Command, dir string) error {
 	}
 
 	path := filepath.Join(dir, cmd.Name+".json")
-	data, err := json.MarshalIndent(cmd, "", "  ")
+	data, err := jsonutil.MarshalIndent(cmd, "", "  ")
 	if err != nil {
 		return err
 	}

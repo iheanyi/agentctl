@@ -1,13 +1,13 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/charmbracelet/huh"
 	"github.com/iheanyi/agentctl/pkg/config"
+	"github.com/iheanyi/agentctl/pkg/jsonutil"
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/spf13/cobra"
 )
@@ -98,7 +98,7 @@ func runNewCommand(cmd *cobra.Command, args []string) error {
 		"disallowedTools": []string{},
 	}
 
-	data, err := json.MarshalIndent(template, "", "  ")
+	data, err := jsonutil.MarshalIndent(template, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ func runNewPrompt(cmd *cobra.Command, args []string) error {
 		"variables":   []string{"input"},
 	}
 
-	data, err := json.MarshalIndent(template, "", "  ")
+	data, err := jsonutil.MarshalIndent(template, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -251,7 +251,7 @@ func runNewSkill(cmd *cobra.Command, args []string) error {
 		"author":      "",
 	}
 
-	data, err := json.MarshalIndent(skillJSON, "", "  ")
+	data, err := jsonutil.MarshalIndent(skillJSON, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -462,7 +462,7 @@ func runInteractiveNewCommand() error {
 		"disallowedTools": []string{},
 	}
 
-	data, err := json.MarshalIndent(template, "", "  ")
+	data, err := jsonutil.MarshalIndent(template, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -641,7 +641,7 @@ func runInteractiveNewPrompt() error {
 		"variables":   []string{"input"},
 	}
 
-	data, err := json.MarshalIndent(template, "", "  ")
+	data, err := jsonutil.MarshalIndent(template, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -730,7 +730,7 @@ func runInteractiveNewSkill() error {
 		"author":      "",
 	}
 
-	data, err := json.MarshalIndent(skillJSON, "", "  ")
+	data, err := jsonutil.MarshalIndent(skillJSON, "", "  ")
 	if err != nil {
 		return err
 	}
