@@ -1,0 +1,17 @@
+[
+  {
+    "id": "156638",
+    "text": "Go's json.MarshalIndent escapes \u003c \u003e \u0026 to Unicode (\\u003c etc.) by default for HTML safety. To preserve literal characters in prompts/templates, use json.Encoder with SetEscapeHTML(false). Created pkg/jsonutil for this.",
+    "created_at": "2026-01-07T17:48:40.765101Z"
+  },
+  {
+    "id": "dcc761",
+    "text": "When using huh forms inside Bubble Tea TUI, use tea.Exec to properly suspend the TUI during form execution. Running forms in goroutines causes stdin conflicts (\"resource temporarily unavailable\").",
+    "created_at": "2026-01-07T17:48:40.816705Z"
+  },
+  {
+    "id": "a7cc22",
+    "text": "Claude Code commands use markdown files with YAML frontmatter. Supported fields: description, argument-hint, model (opus/sonnet/haiku), allowed-tools, disallowed-tools. agentctl's sync adapter translates between JSON and this format.",
+    "created_at": "2026-01-07T17:48:40.86355Z"
+  }
+]
