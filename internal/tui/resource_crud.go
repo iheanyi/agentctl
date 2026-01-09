@@ -695,27 +695,7 @@ func (r *ResourceCRUD) CreateServer() (*mcp.Server, error) {
 	// Analyze input to determine next steps
 	var server *mcp.Server
 
-	// Check for GitHub URL
-	if (strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://")) &&
-		(strings.Contains(input, "github.com/") || strings.HasSuffix(input, ".git")) {
-		server = &mcp.Server{
-			Name: name,
-			Source: mcp.Source{
-				Type: "git",
-				URL:  input,
-			},
-			Transport: mcp.TransportStdio,
-		}
-	} else if strings.Contains(input, "github.com/") { // Shorthand
-		server = &mcp.Server{
-			Name: name,
-			Source: mcp.Source{
-				Type: "git",
-				URL:  "https://" + input,
-			},
-			Transport: mcp.TransportStdio,
-		}
-	} else if strings.HasPrefix(input, "./") || strings.HasPrefix(input, "/") { // Local path
+	if strings.HasPrefix(input, "./") || strings.HasPrefix(input, "/") { // Local path
 		server = &mcp.Server{
 			Name: name,
 			Source: mcp.Source{
