@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "existing-local": {
+      "args": [
+        "-y",
+        "local-server"
+      ],
+      "command": "npx"
+    },
+    "test-server": {
+      "_managedBy": "agentctl",
+      "args": [
+        "hello"
+      ],
+      "command": "echo"
+    },
+    "test-server-2": {
+      "_managedBy": "agentctl",
+      "args": [
+        "-"
+      ],
+      "command": "cat"
+    }
+  }
+}

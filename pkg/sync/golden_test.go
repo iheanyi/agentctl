@@ -664,3 +664,83 @@ func TestGoldenHTTPServerOutput(t *testing.T) {
 		}
 	})
 }
+
+// TestWorkspaceAdapterGoldenFiles runs golden file tests for workspace configs
+func TestWorkspaceAdapterGoldenFiles(t *testing.T) {
+	tests := []struct {
+		adapterName   string
+		workspacePath func(string) string // Returns workspace config path for project dir
+	}{
+		{
+			adapterName: "claude",
+			workspacePath: func(projectDir string) string {
+				return filepath.Join(projectDir, ".mcp.json")
+			},
+		},
+		{
+			adapterName: "cursor",
+			workspacePath: func(projectDir string) string {
+				return filepath.Join(projectDir, ".cursor", "mcp.json")
+			},
+		},
+	}
+
+	// Load minimal test servers
+	servers, err := testdata.LoadFixtureServers("servers_minimal.json")
+	if err != nil {
+		t.Fatalf("Failed to load fixture servers: %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.adapterName+"_workspace", func(t *testing.T) {
+			runWorkspaceGoldenTest(t, tt.adapterName, tt.workspacePath, servers)
+		})
+	}
+}
+
+// runWorkspaceGoldenTest runs a workspace config golden test
+func runWorkspaceGoldenTest(t *testing.T, adapterName string, workspacePathFn func(string) string, servers []*mcp.Server) {
+	t.Helper()
+
+	// Create a temp directory for this test (acts as project dir)
+	projectDir := testdata.CreateTempConfigDir(t)
+
+	// Load input config
+	input, err := testdata.LoadGoldenInput(adapterName, "workspace")
+	if err != nil {
+		t.Fatalf("Failed to load workspace input: %v", err)
+	}
+
+	// Write input config to workspace path
+	workspacePath := workspacePathFn(projectDir)
+	inputBytes, _ := json.MarshalIndent(input, "", "  ")
+	testdata.WriteTestConfig(t, filepath.Dir(workspacePath), filepath.Base(workspacePath), inputBytes)
+
+	// Create workspace adapter and write servers
+	wa := createWorkspaceTestAdapter(adapterName)
+	if wa == nil {
+		t.Fatalf("No workspace adapter for %s", adapterName)
+	}
+
+	if err := wa.WriteWorkspaceServers(projectDir, servers); err != nil {
+		t.Fatalf("WriteWorkspaceServers failed: %v", err)
+	}
+
+	// Read back the config
+	actual := testdata.ReadTestConfig(t, workspacePath)
+
+	// Compare against golden file
+	testdata.AssertGolden(t, adapterName, "workspace", actual)
+}
+
+// createWorkspaceTestAdapter creates a workspace adapter for testing
+func createWorkspaceTestAdapter(adapterName string) WorkspaceAdapter {
+	switch adapterName {
+	case "claude":
+		return &ClaudeAdapter{}
+	case "cursor":
+		return &CursorAdapter{}
+	default:
+		return nil
+	}
+}

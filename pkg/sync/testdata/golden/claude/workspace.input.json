@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "existing-local": {
+      "args": [
+        "-y",
+        "local-server"
+      ],
+      "command": "npx"
+    }
+  }
+}
