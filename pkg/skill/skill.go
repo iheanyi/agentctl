@@ -12,9 +12,12 @@ type Skill struct {
 	Description string            `json:"description,omitempty"`
 	Version     string            `json:"version,omitempty"`
 	Author      string            `json:"author,omitempty"`
-	Prompts     map[string]string `json:"prompts,omitempty"`  // Embedded prompts
-	Files       []string          `json:"files,omitempty"`    // Additional files
-	Path        string            `json:"-"`                  // Directory path (not serialized)
+	Prompts     map[string]string `json:"prompts,omitempty"` // Embedded prompts
+	Files       []string          `json:"files,omitempty"`   // Additional files
+	Path        string            `json:"-"`                 // Directory path (not serialized)
+
+	// Runtime fields (not serialized)
+	Scope string `json:"-"` // "local" or "global" - where this skill came from
 }
 
 // Load loads a skill from a directory

@@ -22,6 +22,9 @@ type Rule struct {
 	Frontmatter *Frontmatter `json:"frontmatter,omitempty"`
 	Content     string       `json:"content"` // Markdown content
 	Path        string       `json:"path"`    // Source file path
+
+	// Runtime fields (not serialized)
+	Scope string `json:"-"` // "local" or "global" - where this rule came from
 }
 
 // Load loads a rule from a markdown file, parsing optional frontmatter

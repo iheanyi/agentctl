@@ -36,6 +36,10 @@ type Command struct {
 	DisallowedTools []string                `json:"disallowedTools,omitempty"` // Tools this command cannot use
 	Overrides       map[string]ToolOverride `json:"overrides,omitempty"`       // Per-tool overrides
 	PromptRef       string                  `json:"promptRef,omitempty"`       // Reference to a prompt template
+
+	// Runtime fields (not serialized)
+	Scope      string `json:"-"` // "local" or "global" - where this command came from
+	SourcePath string `json:"-"` // Path to the source file
 }
 
 // Load loads a command from a JSON file
