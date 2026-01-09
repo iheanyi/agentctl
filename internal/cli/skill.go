@@ -73,17 +73,55 @@ Examples:
 	RunE: runSkillAdd,
 }
 
+var skillCommandCmd = &cobra.Command{
+	Use:   "command <skill-name> <command-name>",
+	Short: "Add a new subcommand to an existing skill",
+	Long: `Add a new subcommand to an existing skill.
+
+This creates a new .md file in the skill directory that can be invoked
+as skill-name:command-name.
+
+Examples:
+  agentctl skill command my-skill review       # Add review subcommand
+  agentctl skill command my-skill test         # Add test subcommand`,
+	Args: cobra.ExactArgs(2),
+	RunE: runSkillCommand,
+}
+
+var skillCopyCmd = &cobra.Command{
+	Use:   "copy <name> --to <scope>",
+	Short: "Copy a skill between global and local scopes",
+	Long: `Copy a skill from one scope to another.
+
+This allows you to:
+- Customize a global skill for a specific project (global → local)
+- Promote a project skill to be available everywhere (local → global)
+
+Examples:
+  agentctl skill copy my-skill --to local    # Copy global skill to project
+  agentctl skill copy my-skill --to global   # Copy local skill to global`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSkillCopy,
+}
+
 var skillScope string
+var skillCopyTo string
 
 func init() {
 	// Add scope flag to skill commands
 	skillCmd.PersistentFlags().StringVarP(&skillScope, "scope", "s", "", "Config scope: local, global (default: global)")
+
+	// Add --to flag for copy command
+	skillCopyCmd.Flags().StringVar(&skillCopyTo, "to", "", "Target scope: local or global (required)")
+	skillCopyCmd.MarkFlagRequired("to")
 
 	// Add subcommands
 	skillCmd.AddCommand(skillShowCmd)
 	skillCmd.AddCommand(skillEditCmd)
 	skillCmd.AddCommand(skillRemoveCmd)
 	skillCmd.AddCommand(skillAddCmd)
+	skillCmd.AddCommand(skillCommandCmd)
+	skillCmd.AddCommand(skillCopyCmd)
 
 	// Register with root
 	rootCmd.AddCommand(skillCmd)
@@ -127,25 +165,62 @@ func runSkillShow(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Print skill information
-	out.Println("Skill: %s", s.Name)
+	// Print skill header with scope indicator
+	scopeIndicator := "[G]"
+	if s.Scope == "local" {
+		scopeIndicator = "[L]"
+	}
+	out.Println("%s Skill: %s", scopeIndicator, s.Name)
 	out.Println("")
 
 	if s.Description != "" {
 		out.Println("Description: %s", s.Description)
-		out.Println("")
 	}
 
-	out.Println("Scope: %s", scopeLabel(s.Scope))
-	out.Println("Path: %s", s.Path)
-	out.Println("")
+	out.Println("Scope:       %s", scopeLabel(s.Scope))
+	out.Println("Path:        %s", s.Path)
 
-	// Print SKILL.md content
+	// Show available commands/invocations
+	out.Println("")
+	out.Println("Invocations:")
 	if s.Content != "" {
-		out.Println("Content:")
+		out.Println("  /%s              (default)", s.Name)
+	}
+	for _, c := range s.Commands {
+		desc := ""
+		if c.Description != "" {
+			desc = " - " + c.Description
+		}
+		out.Println("  /%s:%s%s", s.Name, c.Name, desc)
+	}
+
+	// Print default command content
+	if s.Content != "" {
+		out.Println("")
+		out.Println("Default Command (SKILL.md):")
 		out.Println("─────────────────────────────────────────")
 		out.Println("%s", s.Content)
 		out.Println("─────────────────────────────────────────")
+	}
+
+	// Print subcommands
+	if len(s.Commands) > 0 {
+		out.Println("")
+		out.Println("Subcommands:")
+		for _, c := range s.Commands {
+			out.Println("")
+			out.Println("  %s:%s (%s)", s.Name, c.Name, c.FileName)
+			if c.Description != "" {
+				out.Println("  Description: %s", c.Description)
+			}
+			out.Println("  ─────────────────────────────────────")
+			// Indent the content
+			lines := strings.Split(c.Content, "\n")
+			for _, line := range lines {
+				out.Println("  %s", line)
+			}
+			out.Println("  ─────────────────────────────────────")
+		}
 	}
 
 	return nil
@@ -280,8 +355,20 @@ func runSkillAddLocal(sourcePath string, out *output.Writer) error {
 		return fmt.Errorf("failed to copy skill: %w", err)
 	}
 
-	out.Success("Installed skill %q (%s)", s.Name, scopeStr)
+	// Show scope indicator
+	scopeIndicator := "[G]"
+	if scopeStr == "local" {
+		scopeIndicator = "[L]"
+	}
+
+	out.Success("Installed skill %q %s", s.Name, scopeIndicator)
 	out.Info("Location: %s", targetDir)
+	out.Println("")
+	out.Println("Invocations:")
+	out.Println("  /%s", s.Name)
+	for _, c := range s.Commands {
+		out.Println("  /%s:%s", s.Name, c.Name)
+	}
 	out.Println("")
 	out.Println("Run 'agentctl sync' to sync to your tools.")
 
@@ -340,9 +427,21 @@ func runSkillAddGitHub(ghPath string, out *output.Writer) error {
 		return fmt.Errorf("failed to copy skill: %w", err)
 	}
 
-	out.Success("Installed skill %q (%s)", s.Name, scopeStr)
+	// Show scope indicator
+	scopeIndicator := "[G]"
+	if scopeStr == "local" {
+		scopeIndicator = "[L]"
+	}
+
+	out.Success("Installed skill %q %s", s.Name, scopeIndicator)
 	out.Info("Location: %s", targetDir)
 	out.Info("Source: %s", ghPath)
+	out.Println("")
+	out.Println("Invocations:")
+	out.Println("  /%s", s.Name)
+	for _, c := range s.Commands {
+		out.Println("  /%s:%s", s.Name, c.Name)
+	}
 	out.Println("")
 	out.Println("Run 'agentctl sync' to sync to your tools.")
 
@@ -468,4 +567,118 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.Chmod(dst, info.Mode())
+}
+
+func runSkillCommand(cmd *cobra.Command, args []string) error {
+	skillName := args[0]
+	commandName := args[1]
+	out := output.DefaultWriter()
+
+	s, err := findSkill(skillName)
+	if err != nil {
+		return err
+	}
+
+	// Check if command already exists
+	if s.GetCommand(commandName) != nil {
+		return fmt.Errorf("command %q already exists in skill %q", commandName, skillName)
+	}
+
+	// Create the new command
+	newCmd := &skill.Command{
+		Name:        commandName,
+		Description: fmt.Sprintf("Description for %s command", commandName),
+		FileName:    commandName + ".md",
+	}
+
+	// Add and save the command
+	if err := s.AddCommand(newCmd); err != nil {
+		return err
+	}
+
+	if err := s.SaveCommand(newCmd); err != nil {
+		return fmt.Errorf("failed to save command: %w", err)
+	}
+
+	// Show scope indicator
+	scopeIndicator := "[G]"
+	if s.Scope == "local" {
+		scopeIndicator = "[L]"
+	}
+
+	out.Success("Added command %q to skill %q %s", commandName, skillName, scopeIndicator)
+	out.Info("File: %s/%s", s.Path, newCmd.FileName)
+	out.Println("")
+	out.Println("Edit the command file to customize the prompt.")
+	out.Println("Invoke with: /%s:%s", skillName, commandName)
+
+	return nil
+}
+
+// runSkillCopy copies a skill between global and local scopes
+func runSkillCopy(cmd *cobra.Command, args []string) error {
+	out := output.DefaultWriter()
+	name := args[0]
+
+	// Validate target scope
+	targetScope, err := config.ParseScope(skillCopyTo)
+	if err != nil {
+		return fmt.Errorf("invalid --to value: %s (must be 'local' or 'global')", skillCopyTo)
+	}
+
+	// Load config
+	cfg, err := config.LoadWithProject()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Check if we're in a project for local scope
+	if targetScope == config.ScopeLocal && cfg.ProjectPath == "" {
+		return fmt.Errorf("cannot copy to local scope: not in a project (no .agentctl.json found)")
+	}
+
+	// Find the skill
+	s, err := findSkill(name)
+	if err != nil {
+		return err
+	}
+
+	// Check if skill is already in target scope
+	if s.Scope == string(targetScope) {
+		return fmt.Errorf("skill %q is already in %s scope", name, targetScope)
+	}
+
+	// Determine target directory
+	var targetDir string
+	if targetScope == config.ScopeLocal {
+		targetDir = filepath.Join(filepath.Dir(cfg.ProjectPath), ".agentctl", "skills", name)
+	} else {
+		targetDir = filepath.Join(cfg.ConfigDir, "skills", name)
+	}
+
+	// Check if skill already exists in target
+	if _, err := os.Stat(targetDir); err == nil {
+		return fmt.Errorf("skill %q already exists in %s scope at %s", name, targetScope, targetDir)
+	}
+
+	// Copy the skill directory
+	if err := copyDir(s.Path, targetDir); err != nil {
+		return fmt.Errorf("failed to copy skill: %w", err)
+	}
+
+	// Show result
+	fromIndicator := "[G]"
+	toIndicator := "[L]"
+	if s.Scope == "local" {
+		fromIndicator = "[L]"
+		toIndicator = "[G]"
+	}
+
+	out.Success("Copied skill %q from %s to %s", name, fromIndicator, toIndicator)
+	out.Info("Source: %s", s.Path)
+	out.Info("Target: %s", targetDir)
+	out.Println("")
+	out.Println("The copied skill is independent - changes to one won't affect the other.")
+
+	return nil
 }
