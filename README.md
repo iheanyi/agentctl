@@ -7,7 +7,7 @@ Universal agent configuration manager for MCP servers across multiple agentic to
 
 ## Overview
 
-`agentctl` manages MCP servers, commands, rules, prompts, and skills across 9 agentic frameworks:
+`agentctl` manages MCP servers, commands, rules, prompts, and skills across 10 agentic frameworks:
 
 - **Claude Code** - Anthropic's CLI assistant
 - **Claude Desktop** - Anthropic's desktop app
@@ -18,6 +18,7 @@ Universal agent configuration manager for MCP servers across multiple agentic to
 - **Windsurf** - AI IDE
 - **Zed** - High-performance editor
 - **Continue** - Open-source AI assistant
+- **Gemini** - Google's Gemini CLI
 
 One config, all tools. Install once, sync everywhere.
 
@@ -238,6 +239,7 @@ Different tools support different MCP transports:
 | Windsurf | Yes | Yes |
 | Zed | Yes | Yes |
 | Continue | Yes | Yes |
+| Gemini | Yes | Yes |
 
 When syncing, agentctl automatically filters servers based on transport support.
 

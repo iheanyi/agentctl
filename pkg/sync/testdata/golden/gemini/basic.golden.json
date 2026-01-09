@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "test-server": {
+      "args": [
+        "hello"
+      ],
+      "command": "echo",
+      "_managedBy": "agentctl"
+    },
+    "test-server-2": {
+      "args": [
+        "-"
+      ],
+      "command": "cat",
+      "_managedBy": "agentctl"
+    }
+  }
+}

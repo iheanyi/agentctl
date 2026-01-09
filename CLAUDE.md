@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**agentctl** is a universal agent configuration manager for syncing MCP servers, commands, rules, prompts, and skills across 9 agentic tools: Claude Code, Claude Desktop, Cursor, Codex, OpenCode, Cline, Windsurf, Zed, and Continue.
+**agentctl** is a universal agent configuration manager for syncing MCP servers, commands, rules, prompts, and skills across 10 agentic tools: Claude Code, Claude Desktop, Cursor, Codex, OpenCode, Cline, Windsurf, Zed, Continue, and Gemini.
 
 **Module:** `github.com/iheanyi/agentctl`
 
@@ -106,6 +106,7 @@ type Adapter interface {
 | Windsurf | `~/.windsurf/mcp.json` | `mcpServers` |
 | Zed | `~/.config/zed/settings.json` | `context_servers` |
 | Continue | `~/.continue/config.json` | `mcpServers` |
+| Gemini | `~/.gemini/config.json` | `mcpServers` |
 
 ## Sync Behavior
 
