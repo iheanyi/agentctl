@@ -157,32 +157,14 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Handle git sources: Clone -> Prompt for Command
-	if server.Source.Type == "git" {
-		b := builder.New(cfg.CacheDir())
+	// Handle git sources: Prompt for Command (no clone/build)
+	if server.Source.Type == "git" && server.Command == "" {
+		out.Println("Adding %s (Source: %s)", server.Name, server.Source.URL)
+		out.Println("Please configure the launch command.")
 
-		out.Println("Cloning %s...", server.Source.URL)
-		if err := b.Clone(server); err != nil {
-			return fmt.Errorf("failed to clone: %w", err)
-		}
-
-		// If command/args not explicitly provided, prompt the user
-		if server.Command == "" {
-			serverDir := b.ServerDir(server)
-			
-			// Try to guess command for better UX
-			// Note: Since we didn't auto-build, binaries might not exist yet,
-			// so ResolveCommand might just return the server.Command (empty) or a best guess source file.
-			guessedCmd := b.ResolveCommand(server)
-			
-			out.Println("✅ Cloned to %s", serverDir)
-			out.Println("Please configure the launch command.")
-			out.Println("Note: If this requires building (Go, Rust, etc.), you may need to build it manually in the directory above.")
-
-			// Launch interactive config form
-			if err := runInteractiveConfig(server, guessedCmd); err != nil {
-				return err
-			}
+		// Launch interactive config form
+		if err := runInteractiveConfig(server, ""); err != nil {
+			return err
 		}
 
 		// Update displayed config
@@ -213,13 +195,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			Source:  server.Source.URL,
 			Version: server.Source.Ref,
 		}
-		if server.Source.Type == "git" {
-			// Update commit hash if possible
-			b := builder.New(cfg.CacheDir())
-			if commit, err := b.GetCommit(server); err == nil {
-				entry.Commit = commit
-			}
-		}
+		// Note: We are not cloning, so we don't resolve the commit hash here.
 		lf.Lock(server.Name, entry)
 		_ = lf.Save()
 	}
@@ -252,8 +228,8 @@ func runInteractiveConfig(server *mcp.Server, defaultCmd string) error {
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Command").
-				Description("The command to run this server (absolute path recommended)").
-				Placeholder("node /path/to/index.js").
+				Description("The command to run this server").
+				Placeholder("e.g. npx -y server-pkg, go run ., /path/to/binary").
 				Value(&command).
 				Validate(func(s string) error {
 					if s == "" {
@@ -268,16 +244,6 @@ func runInteractiveConfig(server *mcp.Server, defaultCmd string) error {
 				Value(&argsStr),
 		),
 	)
-
-	// Pre-fill if we have a guess
-	if defaultCmd != "" {
-		// If the guess is just a file (e.g. index.js), we might want to prepend the runner?
-		// For now, just pre-fill what the builder resolved.
-		// NOTE: huh form values are pointers, we can't easily pre-fill the Input field *after* creation 
-		// without accessing the underlying model, but we can set the variable *before*.
-		// However, huh.NewInput().Value(&command) binds the variable. 
-		// To pre-fill, we must set 'command' before run.
-	}
 	
 	// Set default values
 	command = defaultCmd
