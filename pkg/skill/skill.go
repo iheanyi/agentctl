@@ -18,14 +18,32 @@ const (
 	LegacySkillFileName = "skill.json"
 )
 
-// Skill represents a skill/plugin configuration
-// Skills use SKILL.md format with YAML frontmatter (matching Claude Code)
-type Skill struct {
+// Command represents a single command within a skill
+// Each command is a .md file with YAML frontmatter
+type Command struct {
 	Name        string `yaml:"name" json:"name"`
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 
 	// Content is the markdown prompt content (after frontmatter)
 	Content string `yaml:"-" json:"-"`
+
+	// FileName is the source file name (e.g., "review.md")
+	FileName string `yaml:"-" json:"-"`
+}
+
+// Skill represents a skill/plugin configuration
+// Skills use SKILL.md format with YAML frontmatter (matching Claude Code)
+// A skill can have multiple commands (subcommands) via additional .md files
+type Skill struct {
+	Name        string `yaml:"name" json:"name"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+
+	// Content is the markdown prompt content (after frontmatter) for the default command
+	Content string `yaml:"-" json:"-"`
+
+	// Commands are additional subcommands defined in separate .md files
+	// Invoked as skill-name:command-name
+	Commands []*Command `yaml:"-" json:"-"`
 
 	// Path is the directory containing this skill
 	Path string `yaml:"-" json:"-"`
@@ -42,6 +60,7 @@ type Skill struct {
 
 // Load loads a skill from a directory
 // It first tries SKILL.md (Claude Code format), then falls back to skill.json
+// It also loads any additional .md files as subcommands
 func Load(dir string) (*Skill, error) {
 	// Try SKILL.md first (Claude Code format)
 	skillMdPath := filepath.Join(dir, SkillFileName)
@@ -55,6 +74,12 @@ func Load(dir string) (*Skill, error) {
 		if s.Name == "" {
 			s.Name = filepath.Base(dir)
 		}
+
+		// Load additional commands from .md files
+		if err := s.loadCommands(); err != nil {
+			return nil, fmt.Errorf("loading commands: %w", err)
+		}
+
 		return s, nil
 	}
 
@@ -94,6 +119,66 @@ func Load(dir string) (*Skill, error) {
 	}
 
 	return &s, nil
+}
+
+// loadCommands scans the skill directory for additional .md command files
+func (s *Skill) loadCommands() error {
+	entries, err := os.ReadDir(s.Path)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		// Skip SKILL.md (main skill file) and non-.md files
+		if name == SkillFileName || !strings.HasSuffix(strings.ToLower(name), ".md") {
+			continue
+		}
+
+		// Parse the command file
+		data, err := os.ReadFile(filepath.Join(s.Path, name))
+		if err != nil {
+			continue
+		}
+
+		cmd, err := parseCommandMd(data, name)
+		if err != nil {
+			continue // Skip invalid command files
+		}
+
+		s.Commands = append(s.Commands, cmd)
+	}
+
+	return nil
+}
+
+// parseCommandMd parses a command .md file with YAML frontmatter
+func parseCommandMd(data []byte, fileName string) (*Command, error) {
+	frontmatter, content, err := splitFrontmatter(data)
+	if err != nil {
+		return nil, err
+	}
+
+	var cmd Command
+	if len(frontmatter) > 0 {
+		if err := yaml.Unmarshal(frontmatter, &cmd); err != nil {
+			return nil, fmt.Errorf("invalid YAML frontmatter: %w", err)
+		}
+	}
+
+	// Use filename (without .md) as fallback for name
+	if cmd.Name == "" {
+		cmd.Name = strings.TrimSuffix(fileName, ".md")
+	}
+
+	cmd.Content = strings.TrimSpace(content)
+	cmd.FileName = fileName
+
+	return &cmd, nil
 }
 
 // parseSkillMd parses a SKILL.md file with YAML frontmatter
@@ -224,6 +309,116 @@ func (s *Skill) Validate() error {
 		return fmt.Errorf("skill description is required")
 	}
 	return nil
+}
+
+// GetCommand returns a command by name, or nil if not found
+func (s *Skill) GetCommand(name string) *Command {
+	for _, cmd := range s.Commands {
+		if cmd.Name == name {
+			return cmd
+		}
+	}
+	return nil
+}
+
+// AddCommand adds a new command to the skill
+func (s *Skill) AddCommand(cmd *Command) error {
+	// Check for duplicate
+	if s.GetCommand(cmd.Name) != nil {
+		return fmt.Errorf("command %q already exists in skill %q", cmd.Name, s.Name)
+	}
+
+	// Set filename if not set
+	if cmd.FileName == "" {
+		cmd.FileName = cmd.Name + ".md"
+	}
+
+	s.Commands = append(s.Commands, cmd)
+	return nil
+}
+
+// SaveCommand saves a single command to the skill directory
+func (s *Skill) SaveCommand(cmd *Command) error {
+	if s.Path == "" {
+		return fmt.Errorf("skill path not set")
+	}
+
+	// Ensure the skill directory exists
+	if err := os.MkdirAll(s.Path, 0755); err != nil {
+		return fmt.Errorf("creating skill directory: %w", err)
+	}
+
+	content := cmd.ToMarkdown()
+	cmdPath := filepath.Join(s.Path, cmd.FileName)
+
+	if err := os.WriteFile(cmdPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("writing command %s: %w", cmd.FileName, err)
+	}
+
+	return nil
+}
+
+// RemoveCommand removes a command from the skill
+func (s *Skill) RemoveCommand(name string) error {
+	for i, cmd := range s.Commands {
+		if cmd.Name == name {
+			// Remove from slice
+			s.Commands = append(s.Commands[:i], s.Commands[i+1:]...)
+
+			// Delete file if path is set
+			if s.Path != "" && cmd.FileName != "" {
+				cmdPath := filepath.Join(s.Path, cmd.FileName)
+				if err := os.Remove(cmdPath); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("removing command file: %w", err)
+				}
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("command %q not found in skill %q", name, s.Name)
+}
+
+// ToMarkdown converts a command to markdown format with YAML frontmatter
+func (c *Command) ToMarkdown() string {
+	var buf bytes.Buffer
+
+	// Write frontmatter
+	buf.WriteString("---\n")
+	buf.WriteString(fmt.Sprintf("name: %s\n", c.Name))
+	if c.Description != "" {
+		buf.WriteString(fmt.Sprintf("description: %s\n", c.Description))
+	}
+	buf.WriteString("---\n\n")
+
+	// Write content
+	if c.Content != "" {
+		buf.WriteString(c.Content)
+	} else {
+		// Default template content
+		title := c.Name
+		if len(title) > 0 {
+			title = strings.ToUpper(title[:1]) + title[1:]
+		}
+		buf.WriteString(fmt.Sprintf("# %s\n\n", title))
+		buf.WriteString("TODO: Write your command prompt here.\n\n")
+		buf.WriteString("Use $ARGUMENTS to reference user input.\n")
+	}
+
+	return buf.String()
+}
+
+// CommandNames returns the names of all commands in the skill
+func (s *Skill) CommandNames() []string {
+	names := make([]string, len(s.Commands))
+	for i, cmd := range s.Commands {
+		names[i] = cmd.Name
+	}
+	return names
+}
+
+// HasCommands returns true if the skill has any subcommands
+func (s *Skill) HasCommands() bool {
+	return len(s.Commands) > 0
 }
 
 // SkillsDir returns the global skills directory path

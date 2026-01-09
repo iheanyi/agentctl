@@ -136,9 +136,11 @@ type Model struct {
 
 	// Confirm delete modal
 	showConfirmDelete      bool
-	confirmDeleteType      string // "server", "command", "rule", "skill", "prompt"
+	confirmDeleteType      string // "server", "command", "rule", "skill", "prompt", "skill_command"
 	confirmDeleteName      string
 	confirmDeleteConfirmed bool
+	confirmDeleteSkill     *skill.Skill   // Parent skill when deleting a skill command
+	confirmDeleteCmd       *skill.Command // Command to delete (for skill_command type)
 
 	// Prompt editor modal
 	showPromptEditor     bool
@@ -160,6 +162,21 @@ type Model struct {
 	skillEditorVersion textinput.Model
 	skillEditorScope   int // 0=global, 1=local (only shown when in project)
 	skillEditorFocus   int // 0=name, 1=desc, 2=author, 3=version, 4=scope (when in project)
+
+	// Skill detail modal (shows commands/invocations)
+	showSkillDetail    bool
+	skillDetailSkill   *skill.Skill
+	skillDetailCursor  int // For selecting commands within the skill
+
+	// Skill command editor modal (for editing commands within a skill)
+	showSkillCmdEditor    bool
+	skillCmdEditorIsNew   bool
+	skillCmdEditorSkill   *skill.Skill   // Parent skill
+	skillCmdEditorCmd     *skill.Command // Command being edited (nil if new)
+	skillCmdEditorName    textinput.Model
+	skillCmdEditorDesc    textinput.Model
+	skillCmdEditorContent textarea.Model
+	skillCmdEditorFocus   int // 0=name, 1=desc, 2=content
 
 	// Command editor modal
 	showCommandEditor      bool
@@ -298,6 +315,25 @@ func New() (*Model, error) {
 	skillEditorVersion.Prompt = ""
 	skillEditorVersion.CharLimit = 20
 
+	// Skill command editor inputs (for commands within a skill)
+	skillCmdEditorName := textinput.New()
+	skillCmdEditorName.Placeholder = "review"
+	skillCmdEditorName.Prompt = ""
+	skillCmdEditorName.CharLimit = 50
+
+	skillCmdEditorDesc := textinput.New()
+	skillCmdEditorDesc.Placeholder = "What this command does"
+	skillCmdEditorDesc.Prompt = ""
+	skillCmdEditorDesc.CharLimit = 200
+
+	skillCmdEditorContent := textarea.New()
+	skillCmdEditorContent.Placeholder = "Write the prompt for this command...\n\nUse $ARGUMENTS for user input."
+	skillCmdEditorContent.ShowLineNumbers = false
+	skillCmdEditorContent.SetHeight(12)
+	skillCmdEditorContent.SetWidth(60)
+	skillCmdEditorContent.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	skillCmdEditorContent.BlurredStyle.CursorLine = lipgloss.NewStyle()
+
 	// Command editor inputs
 	commandEditorName := textinput.New()
 	commandEditorName.Placeholder = "my-command"
@@ -403,6 +439,10 @@ func New() (*Model, error) {
 		skillEditorDesc:    skillEditorDesc,
 		skillEditorAuthor:  skillEditorAuthor,
 		skillEditorVersion: skillEditorVersion,
+		// Skill command editor
+		skillCmdEditorName:    skillCmdEditorName,
+		skillCmdEditorDesc:    skillCmdEditorDesc,
+		skillCmdEditorContent: skillCmdEditorContent,
 		// Command editor
 		commandEditorName:    commandEditorName,
 		commandEditorDesc:    commandEditorDesc,
@@ -445,33 +485,20 @@ func New() (*Model, error) {
 	return m, nil
 }
 
-// loadAllResources loads commands, rules, skills, and prompts from config directory
+// loadAllResources loads commands, rules, skills, and prompts from config
+// This uses the config's already-loaded resources which include both global and local scopes
 func (m *Model) loadAllResources() {
-	configDir := m.cfg.ConfigDir
+	// Load commands from config (includes both global and local)
+	m.commands = m.cfg.CommandsForScope(config.ScopeAll)
 
-	// Load commands
-	commandsDir := filepath.Join(configDir, "commands")
-	if cmds, err := command.LoadAll(commandsDir); err == nil {
-		m.commands = cmds
-	}
+	// Load rules from config (includes both global and local)
+	m.rules = m.cfg.RulesForScope(config.ScopeAll)
 
-	// Load rules
-	rulesDir := filepath.Join(configDir, "rules")
-	if rules, err := rule.LoadAll(rulesDir); err == nil {
-		m.rules = rules
-	}
+	// Load skills from config (includes both global and local)
+	m.skills = m.cfg.SkillsForScope(config.ScopeAll)
 
-	// Load skills
-	skillsDir := filepath.Join(configDir, "skills")
-	if skills, err := skill.LoadAll(skillsDir); err == nil {
-		m.skills = skills
-	}
-
-	// Load prompts
-	promptsDir := filepath.Join(configDir, "prompts")
-	if prompts, err := prompt.LoadAll(promptsDir); err == nil {
-		m.prompts = prompts
-	}
+	// Load prompts from config (includes both global and local)
+	m.prompts = m.cfg.PromptsForScope(config.ScopeAll)
 
 	// Load hooks (from all supported tools)
 	if hooks, err := hook.LoadAll(); err == nil {
@@ -782,6 +809,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.adjustCursorForCurrentTab()
 		}
 
+	case skillCmdSavedMsg:
+		action := "Created"
+		if !msg.isNew {
+			action = "Updated"
+		}
+		m.addLog("success", fmt.Sprintf("%s command: %s:%s", action, msg.skill.Name, msg.cmdName))
+		m.showSkillCmdEditor = false
+		// Re-open skill detail to show the updated commands
+		m.openSkillDetail(msg.skill)
+
+	case skillCmdDeletedMsg:
+		m.addLog("success", fmt.Sprintf("Deleted command: %s:%s", msg.skill.Name, msg.cmdName))
+		// Adjust cursor if needed
+		if m.skillDetailCursor > 0 {
+			m.skillDetailCursor--
+		}
+		// Re-open skill detail to show updated commands
+		m.openSkillDetail(msg.skill)
+
 	case tea.KeyMsg:
 		// Handle search input mode
 		if m.searching {
@@ -922,6 +968,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle skill editor modal
 		if m.showSkillEditor {
 			return m.handleSkillEditorInput(msg)
+		}
+
+		// Handle skill detail modal
+		if m.showSkillDetail {
+			return m.handleSkillDetailInput(msg)
+		}
+
+		// Handle skill command editor modal
+		if m.showSkillCmdEditor {
+			return m.handleSkillCmdEditorInput(msg)
 		}
 
 		// Handle command editor modal
@@ -1098,8 +1154,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.keys.Toggle):
-			if s := m.selectedServer(); s != nil && s.Status != ServerStatusAvailable {
-				return m, m.toggleServer(s.Name)
+			switch m.activeTab {
+			case TabServers:
+				if s := m.selectedServer(); s != nil && s.Status != ServerStatusAvailable {
+					return m, m.toggleServer(s.Name)
+				}
+			case TabSkills:
+				if m.cursor >= 0 && m.cursor < len(m.skills) {
+					s := m.skills[m.cursor]
+					m.openSkillDetail(s)
+					return m, nil
+				}
 			}
 
 		case key.Matches(msg, m.keys.Sync):
@@ -1262,6 +1327,14 @@ func (m Model) View() string {
 
 	if m.showSkillEditor {
 		return m.renderSkillEditor()
+	}
+
+	if m.showSkillDetail {
+		return m.renderSkillDetail()
+	}
+
+	if m.showSkillCmdEditor {
+		return m.renderSkillCmdEditor()
 	}
 
 	if m.showCommandEditor {
@@ -1786,6 +1859,16 @@ func (m *Model) renderSkillRow(s *skill.Skill, selected bool) string {
 		versionBadge = lipgloss.NewStyle().Foreground(colorCyan).Render(" v" + s.Version)
 	}
 
+	// Command count badge
+	cmdBadge := ""
+	cmdCount := len(s.Commands)
+	if s.Content != "" {
+		cmdCount++ // Include the default command
+	}
+	if cmdCount > 1 {
+		cmdBadge = lipgloss.NewStyle().Foreground(colorPink).Render(fmt.Sprintf(" (%d cmds)", cmdCount))
+	}
+
 	// Description
 	descStyle := ListItemDescStyle
 	if selected {
@@ -1795,10 +1878,10 @@ func (m *Model) renderSkillRow(s *skill.Skill, selected bool) string {
 	if descText == "" && len(s.Prompts) > 0 {
 		descText = fmt.Sprintf("%d prompts", len(s.Prompts))
 	}
-	desc := descStyle.Render(ansi.Truncate(descText, 40, "..."))
+	desc := descStyle.Render(ansi.Truncate(descText, 35, "..."))
 
 	// Build the row
-	leftPart := "  " + icon + " " + scopeIndicator + " " + name + versionBadge
+	leftPart := "  " + icon + " " + scopeIndicator + " " + name + versionBadge + cmdBadge
 
 	// Calculate padding for right-aligned description
 	leftWidth := lipgloss.Width(leftPart)
@@ -2367,23 +2450,30 @@ func (m *Model) renderRuleEditor() string {
 
 	sections = append(sections, "")
 
-	// Scope selector (only shown when in project)
+	// Scope selector - always shown with icons
+	scopeLabel := labelStyle.Render("Scope:")
+	if m.ruleEditorFocus == 4 && m.hasProjectConfig() {
+		scopeLabel = focusedStyle.Render("Scope:")
+	}
+	var scopeOpts strings.Builder
+	scopeIcons := []string{"🌐", "📁"}
+	scopeLabels := []string{"global", "local (project)"}
+
 	if m.hasProjectConfig() {
-		scopeLabel := labelStyle.Render("Scope:")
-		if m.ruleEditorFocus == 4 {
-			scopeLabel = focusedStyle.Render("Scope:")
-		}
-		var scopeOpts strings.Builder
-		for i, name := range scopeNames {
+		for i, label := range scopeLabels {
+			icon := scopeIcons[i]
 			if i == m.ruleEditorScope {
-				scopeOpts.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Render(" " + name + " "))
+				scopeOpts.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Bold(true).Render(" " + icon + " " + label + " "))
 			} else {
-				scopeOpts.WriteString(" " + name + " ")
+				scopeOpts.WriteString(lipgloss.NewStyle().Foreground(colorFgMuted).Render(" " + icon + " " + label + " "))
 			}
 		}
-		sections = append(sections, scopeLabel+" "+scopeOpts.String())
-		sections = append(sections, "")
+	} else {
+		scopeOpts.WriteString(lipgloss.NewStyle().Foreground(colorTeal).Render("🌐 global"))
+		scopeOpts.WriteString(lipgloss.NewStyle().Foreground(colorFgSubtle).Italic(true).Render(" (open a project for local scope)"))
 	}
+	sections = append(sections, scopeLabel+" "+scopeOpts.String())
+	sections = append(sections, "")
 
 	// Hints
 	hints := KeyDescStyle.Render("Tab:next field  Shift+Tab:prev  Ctrl+S:save  e:external editor  Esc:cancel")
@@ -2700,6 +2790,17 @@ func (m *Model) openConfirmDelete(resourceType, name string) {
 	m.confirmDeleteType = resourceType
 	m.confirmDeleteName = name
 	m.confirmDeleteConfirmed = false
+	m.confirmDeleteSkill = nil
+	m.confirmDeleteCmd = nil
+}
+
+func (m *Model) openConfirmDeleteSkillCmd(s *skill.Skill, cmd *skill.Command) {
+	m.showConfirmDelete = true
+	m.confirmDeleteType = "skill_command"
+	m.confirmDeleteName = fmt.Sprintf("%s:%s", s.Name, cmd.Name)
+	m.confirmDeleteConfirmed = false
+	m.confirmDeleteSkill = s
+	m.confirmDeleteCmd = cmd
 }
 
 func (m *Model) executeDelete() tea.Cmd {
@@ -2740,6 +2841,13 @@ func (m *Model) executeDelete() tea.Cmd {
 				if p.Name == m.confirmDeleteName {
 					err = m.resourceCRUD.DeletePrompt(p)
 					break
+				}
+			}
+		case "skill_command":
+			if m.confirmDeleteSkill != nil && m.confirmDeleteCmd != nil {
+				err = m.confirmDeleteSkill.RemoveCommand(m.confirmDeleteCmd.Name)
+				if err == nil {
+					return skillCmdDeletedMsg{skill: m.confirmDeleteSkill, cmdName: m.confirmDeleteCmd.Name}
 				}
 			}
 		}
@@ -2793,22 +2901,30 @@ func (m *Model) renderPromptEditor() string {
 	content.WriteString(m.promptEditorContent.View())
 	content.WriteString("\n\n")
 
-	// Scope selector (only shown when in project)
+	// Scope selector - always shown with icons
+	scopeLabel := "Scope:"
+	if m.promptEditorFocus == 3 && m.hasProjectConfig() {
+		scopeLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Scope:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", scopeLabel))
+
+	scopeIcons := []string{"🌐", "📁"}
+	scopeLabels := []string{"global", "local (project)"}
+
 	if m.hasProjectConfig() {
-		scopeLabel := "Scope:"
-		if m.promptEditorFocus == 3 {
-			scopeLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Scope:")
-		}
-		content.WriteString(fmt.Sprintf("%s ", scopeLabel))
-		for i, name := range scopeNames {
+		for i, label := range scopeLabels {
+			icon := scopeIcons[i]
 			if i == m.promptEditorScope {
-				content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Render(" " + name + " "))
+				content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Bold(true).Render(" " + icon + " " + label + " "))
 			} else {
-				content.WriteString(" " + name + " ")
+				content.WriteString(lipgloss.NewStyle().Foreground(colorFgMuted).Render(" " + icon + " " + label + " "))
 			}
 		}
-		content.WriteString("\n\n")
+	} else {
+		content.WriteString(lipgloss.NewStyle().Foreground(colorTeal).Render("🌐 global"))
+		content.WriteString(lipgloss.NewStyle().Foreground(colorFgSubtle).Italic(true).Render(" (open a project for local scope)"))
 	}
+	content.WriteString("\n\n")
 
 	helpText := "Tab: next field • ←/→: change scope • Ctrl+S: save • Esc: cancel"
 	content.WriteString(KeyDescStyle.Render(helpText))
@@ -3034,22 +3150,33 @@ func (m *Model) renderSkillEditor() string {
 		content.WriteString("\n\n")
 	}
 
-	// Scope selector (only shown when in project)
+	// Scope selector - always shown with icons
+	scopeLabel := "Scope:"
+	if m.skillEditorFocus == 4 && m.hasProjectConfig() {
+		scopeLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Scope:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", scopeLabel))
+
+	// Scope options with icons
+	scopeIcons := []string{"🌐", "📁"}
+	scopeLabels := []string{"global", "local (project)"}
+
 	if m.hasProjectConfig() {
-		scopeLabel := "Scope:"
-		if m.skillEditorFocus == 4 {
-			scopeLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Scope:")
-		}
-		content.WriteString(fmt.Sprintf("%s ", scopeLabel))
-		for i, name := range scopeNames {
+		// Show both options when in project
+		for i, label := range scopeLabels {
+			icon := scopeIcons[i]
 			if i == m.skillEditorScope {
-				content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Render(" " + name + " "))
+				content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Bold(true).Render(" " + icon + " " + label + " "))
 			} else {
-				content.WriteString(" " + name + " ")
+				content.WriteString(lipgloss.NewStyle().Foreground(colorFgMuted).Render(" " + icon + " " + label + " "))
 			}
 		}
-		content.WriteString("\n\n")
+	} else {
+		// Not in project - show global only
+		content.WriteString(lipgloss.NewStyle().Foreground(colorTeal).Render("🌐 global"))
+		content.WriteString(lipgloss.NewStyle().Foreground(colorFgSubtle).Italic(true).Render(" (open a project for local scope)"))
 	}
+	content.WriteString("\n\n")
 
 	helpText := "Tab: next field • ←/→: change scope • Ctrl+S: save • Esc: cancel"
 	content.WriteString(KeyDescStyle.Render(helpText))
@@ -3199,9 +3326,6 @@ func (m *Model) saveSkill() tea.Cmd {
 			if _, err := os.Stat(skillDir); err == nil {
 				return resourceCreatedMsg{resourceType: "skill", err: fmt.Errorf("skill %q already exists", name)}
 			}
-			if err := os.MkdirAll(skillDir, 0755); err != nil {
-				return resourceCreatedMsg{resourceType: "skill", err: err}
-			}
 		}
 
 		if desc == "" {
@@ -3211,6 +3335,7 @@ func (m *Model) saveSkill() tea.Cmd {
 			version = "1.0.0"
 		}
 
+		// Create or update skill using SKILL.md format
 		s := &skill.Skill{
 			Name:        name,
 			Description: desc,
@@ -3219,22 +3344,15 @@ func (m *Model) saveSkill() tea.Cmd {
 			Scope:       string(scope),
 		}
 
-		skillPath := filepath.Join(skillDir, "skill.json")
-		data, err := json.MarshalIndent(s, "", "  ")
-		if err != nil {
-			return resourceCreatedMsg{resourceType: "skill", err: err}
+		// If editing existing skill, preserve the content
+		if !m.skillEditorIsNew && m.skillEditorSkill != nil {
+			s.Content = m.skillEditorSkill.Content
+			s.Commands = m.skillEditorSkill.Commands
 		}
 
-		if err := os.WriteFile(skillPath, data, 0644); err != nil {
+		// Save using SKILL.md format
+		if err := s.Save(skillDir); err != nil {
 			return resourceCreatedMsg{resourceType: "skill", err: err}
-		}
-
-		// Create empty prompt.md if new
-		if m.skillEditorIsNew {
-			promptPath := filepath.Join(skillDir, "prompt.md")
-			if err := os.WriteFile(promptPath, []byte("# "+name+"\n\nAdd your skill prompt here.\n"), 0644); err != nil {
-				return resourceCreatedMsg{resourceType: "skill", err: err}
-			}
 		}
 
 		if m.skillEditorIsNew {
@@ -3242,6 +3360,416 @@ func (m *Model) saveSkill() tea.Cmd {
 		}
 		return resourceEditedMsg{resourceType: "skill"}
 	}
+}
+
+// ============================================================================
+// Skill Detail Modal (shows commands/invocations)
+// ============================================================================
+
+func (m *Model) openSkillDetail(s *skill.Skill) {
+	m.showSkillDetail = true
+	m.skillDetailSkill = s
+	m.skillDetailCursor = 0
+}
+
+func (m *Model) renderSkillDetail() string {
+	s := m.skillDetailSkill
+	if s == nil {
+		return ""
+	}
+
+	var content strings.Builder
+	content.WriteString(ModalTitleStyle.Render("Skill: " + s.Name))
+	content.WriteString("\n\n")
+
+	// Scope indicator
+	scopeIcon := "🌐"
+	scopeLabel := "global"
+	if s.Scope == "local" {
+		scopeIcon = "📁"
+		scopeLabel = "local"
+	}
+	content.WriteString(lipgloss.NewStyle().Foreground(colorFgSubtle).Render(
+		fmt.Sprintf("Scope: %s %s", scopeIcon, scopeLabel)))
+	content.WriteString("\n")
+
+	// Description
+	if s.Description != "" {
+		content.WriteString(lipgloss.NewStyle().Foreground(colorFgSubtle).Render(s.Description))
+		content.WriteString("\n")
+	}
+	content.WriteString("\n")
+
+	// Build list of invocations
+	type invocation struct {
+		name      string
+		desc      string
+		isDefault bool
+	}
+	var invocations []invocation
+
+	// Add default command if skill has content
+	if s.Content != "" {
+		invocations = append(invocations, invocation{
+			name:      "/" + s.Name,
+			desc:      "(default)",
+			isDefault: true,
+		})
+	}
+
+	// Add subcommands
+	for _, cmd := range s.Commands {
+		inv := invocation{
+			name: "/" + s.Name + ":" + cmd.Name,
+			desc: cmd.Description,
+		}
+		invocations = append(invocations, inv)
+	}
+
+	// Render invocations list
+	content.WriteString(lipgloss.NewStyle().Bold(true).Render("Invocations:"))
+	content.WriteString("\n")
+
+	if len(invocations) == 0 {
+		content.WriteString(lipgloss.NewStyle().Foreground(colorFgSubtle).Italic(true).Render("  No commands defined"))
+		content.WriteString("\n")
+	} else {
+		for i, inv := range invocations {
+			prefix := "  "
+			nameStyle := lipgloss.NewStyle().Foreground(colorCyan)
+			descStyle := lipgloss.NewStyle().Foreground(colorFgSubtle)
+
+			if i == m.skillDetailCursor {
+				prefix = "▸ "
+				nameStyle = nameStyle.Bold(true).Background(colorCyan).Foreground(colorBg)
+				descStyle = descStyle.Bold(true)
+			}
+
+			line := prefix + nameStyle.Render(inv.name)
+			if inv.desc != "" {
+				line += " " + descStyle.Render(inv.desc)
+			}
+			content.WriteString(line)
+			content.WriteString("\n")
+		}
+	}
+
+	content.WriteString("\n")
+
+	// Path info
+	content.WriteString(lipgloss.NewStyle().Foreground(colorFgSubtle).Render(
+		fmt.Sprintf("Path: %s", s.Path)))
+	content.WriteString("\n\n")
+
+	helpText := "↑/↓: navigate • Enter/e: edit • a: add command • d: delete • Esc: close"
+	content.WriteString(KeyDescStyle.Render(helpText))
+
+	modal := ModalStyle.Width(70).Render(content.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+func (m *Model) handleSkillDetailInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	s := m.skillDetailSkill
+	if s == nil {
+		m.showSkillDetail = false
+		return m, nil
+	}
+
+	// Calculate number of items and determine if cursor is on default or a command
+	hasDefault := s.Content != ""
+	itemCount := len(s.Commands)
+	if hasDefault {
+		itemCount++
+	}
+
+	// Helper to get the selected command (nil if on default)
+	getSelectedCommand := func() *skill.Command {
+		if hasDefault {
+			if m.skillDetailCursor == 0 {
+				return nil // On default command
+			}
+			return s.Commands[m.skillDetailCursor-1]
+		}
+		if len(s.Commands) > 0 {
+			return s.Commands[m.skillDetailCursor]
+		}
+		return nil
+	}
+
+	switch msg.String() {
+	case "esc", "q":
+		m.showSkillDetail = false
+		return m, nil
+
+	case "up", "k":
+		if m.skillDetailCursor > 0 {
+			m.skillDetailCursor--
+		}
+		return m, nil
+
+	case "down", "j":
+		if m.skillDetailCursor < itemCount-1 {
+			m.skillDetailCursor++
+		}
+		return m, nil
+
+	case "e", "enter":
+		// Edit the selected item
+		cmd := getSelectedCommand()
+		if cmd != nil {
+			// Edit the command
+			m.openSkillCmdEditor(s, cmd, false)
+		} else {
+			// Edit the skill itself (default command content is in SKILL.md)
+			m.showSkillDetail = false
+			m.openSkillEditor(s)
+		}
+		return m, nil
+
+	case "a":
+		// Add a new command to the skill
+		m.openSkillCmdEditor(s, nil, true)
+		return m, nil
+
+	case "d", "x":
+		// Delete the selected command (not the default) - show confirmation first
+		cmd := getSelectedCommand()
+		if cmd != nil {
+			m.openConfirmDeleteSkillCmd(s, cmd)
+		}
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// ============================================================================
+// Skill Command Editor
+// ============================================================================
+
+func (m *Model) openSkillCmdEditor(s *skill.Skill, cmd *skill.Command, isNew bool) {
+	m.showSkillDetail = false
+	m.showSkillCmdEditor = true
+	m.skillCmdEditorIsNew = isNew
+	m.skillCmdEditorSkill = s
+	m.skillCmdEditorCmd = cmd
+	m.skillCmdEditorFocus = 0
+
+	// Reset inputs
+	m.skillCmdEditorName.Reset()
+	m.skillCmdEditorDesc.Reset()
+	m.skillCmdEditorContent.Reset()
+
+	if cmd != nil && !isNew {
+		// Editing existing command
+		m.skillCmdEditorName.SetValue(cmd.Name)
+		m.skillCmdEditorDesc.SetValue(cmd.Description)
+		m.skillCmdEditorContent.SetValue(cmd.Content)
+	}
+
+	m.skillCmdEditorName.Focus()
+}
+
+func (m *Model) renderSkillCmdEditor() string {
+	var content strings.Builder
+
+	title := "Add Command"
+	if !m.skillCmdEditorIsNew {
+		title = "Edit Command"
+	}
+	skillName := ""
+	if m.skillCmdEditorSkill != nil {
+		skillName = m.skillCmdEditorSkill.Name
+	}
+	content.WriteString(ModalTitleStyle.Render(fmt.Sprintf("%s - %s", title, skillName)))
+	content.WriteString("\n\n")
+
+	// Name field
+	nameLabel := "Name:"
+	if m.skillCmdEditorFocus == 0 {
+		nameLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Name:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", nameLabel))
+	content.WriteString(m.skillCmdEditorName.View())
+	content.WriteString("\n")
+	content.WriteString(lipgloss.NewStyle().Foreground(colorFgSubtle).Render("  alphanumeric and dashes only"))
+	content.WriteString("\n\n")
+
+	// Description field
+	descLabel := "Description:"
+	if m.skillCmdEditorFocus == 1 {
+		descLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Description:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", descLabel))
+	content.WriteString(m.skillCmdEditorDesc.View())
+	content.WriteString("\n\n")
+
+	// Content field
+	contentLabel := "Prompt:"
+	if m.skillCmdEditorFocus == 2 {
+		contentLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Prompt:")
+	}
+	content.WriteString(fmt.Sprintf("%s\n", contentLabel))
+	content.WriteString(m.skillCmdEditorContent.View())
+	content.WriteString("\n")
+	content.WriteString(lipgloss.NewStyle().Foreground(colorFgSubtle).Render("  Use $ARGUMENTS for user input"))
+	content.WriteString("\n\n")
+
+	// Help
+	helpText := "Tab: next field • Ctrl+S: save • Esc: cancel"
+	content.WriteString(KeyDescStyle.Render(helpText))
+
+	modal := ModalStyle.Width(70).Render(content.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+func (m *Model) handleSkillCmdEditorInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.showSkillCmdEditor = false
+		// Re-open skill detail
+		if m.skillCmdEditorSkill != nil {
+			m.openSkillDetail(m.skillCmdEditorSkill)
+		}
+		return m, nil
+
+	case "ctrl+s":
+		return m, m.saveSkillCmd()
+
+	case "tab", "shift+tab":
+		// Cycle focus
+		if msg.String() == "tab" {
+			m.skillCmdEditorFocus = (m.skillCmdEditorFocus + 1) % 3
+		} else {
+			m.skillCmdEditorFocus = (m.skillCmdEditorFocus + 2) % 3
+		}
+		// Update focus state
+		m.skillCmdEditorName.Blur()
+		m.skillCmdEditorDesc.Blur()
+		m.skillCmdEditorContent.Blur()
+		switch m.skillCmdEditorFocus {
+		case 0:
+			m.skillCmdEditorName.Focus()
+		case 1:
+			m.skillCmdEditorDesc.Focus()
+		case 2:
+			m.skillCmdEditorContent.Focus()
+		}
+		return m, nil
+	}
+
+	// Update the focused input
+	var cmd tea.Cmd
+	switch m.skillCmdEditorFocus {
+	case 0:
+		m.skillCmdEditorName, cmd = m.skillCmdEditorName.Update(msg)
+	case 1:
+		m.skillCmdEditorDesc, cmd = m.skillCmdEditorDesc.Update(msg)
+	case 2:
+		m.skillCmdEditorContent, cmd = m.skillCmdEditorContent.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m *Model) saveSkillCmd() tea.Cmd {
+	return func() tea.Msg {
+		s := m.skillCmdEditorSkill
+		if s == nil {
+			return resourceCreatedMsg{resourceType: "skill command", err: fmt.Errorf("no skill selected")}
+		}
+
+		name := strings.TrimSpace(m.skillCmdEditorName.Value())
+		desc := strings.TrimSpace(m.skillCmdEditorDesc.Value())
+		content := m.skillCmdEditorContent.Value()
+
+		// Validate name
+		if name == "" {
+			return resourceCreatedMsg{resourceType: "skill command", err: fmt.Errorf("name is required")}
+		}
+
+		// Check alphanumeric and dashes only
+		for _, c := range name {
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-') {
+				return resourceCreatedMsg{resourceType: "skill command", err: fmt.Errorf("name must be alphanumeric with dashes only")}
+			}
+		}
+
+		if m.skillCmdEditorIsNew {
+			// Check for duplicate
+			if s.GetCommand(name) != nil {
+				return resourceCreatedMsg{resourceType: "skill command", err: fmt.Errorf("command %q already exists", name)}
+			}
+
+			// Create new command
+			newCmd := &skill.Command{
+				Name:        name,
+				Description: desc,
+				Content:     content,
+				FileName:    name + ".md",
+			}
+
+			if err := s.AddCommand(newCmd); err != nil {
+				return resourceCreatedMsg{resourceType: "skill command", err: err}
+			}
+
+			if err := s.SaveCommand(newCmd); err != nil {
+				return resourceCreatedMsg{resourceType: "skill command", err: err}
+			}
+
+			return skillCmdSavedMsg{skill: s, cmdName: name, isNew: true}
+		} else {
+			// Update existing command
+			cmd := m.skillCmdEditorCmd
+			if cmd == nil {
+				return resourceCreatedMsg{resourceType: "skill command", err: fmt.Errorf("no command to edit")}
+			}
+
+			// If name changed, need to handle rename
+			oldName := cmd.Name
+			oldFileName := cmd.FileName
+
+			cmd.Name = name
+			cmd.Description = desc
+			cmd.Content = content
+			cmd.FileName = name + ".md"
+
+			// Save the command
+			if err := s.SaveCommand(cmd); err != nil {
+				return resourceCreatedMsg{resourceType: "skill command", err: err}
+			}
+
+			// If name changed, remove old file
+			if oldName != name && s.Path != "" {
+				oldPath := filepath.Join(s.Path, oldFileName)
+				os.Remove(oldPath) // Ignore error if file doesn't exist
+			}
+
+			return skillCmdSavedMsg{skill: s, cmdName: name, isNew: false}
+		}
+	}
+}
+
+// skillCmdSavedMsg is sent when a skill command is saved
+type skillCmdSavedMsg struct {
+	skill   *skill.Skill
+	cmdName string
+	isNew   bool
+}
+
+func (m *Model) deleteSkillCommand(s *skill.Skill, cmd *skill.Command) tea.Cmd {
+	return func() tea.Msg {
+		if err := s.RemoveCommand(cmd.Name); err != nil {
+			return resourceCreatedMsg{resourceType: "skill command", err: fmt.Errorf("failed to delete command: %w", err)}
+		}
+
+		return skillCmdDeletedMsg{skill: s, cmdName: cmd.Name}
+	}
+}
+
+// skillCmdDeletedMsg is sent when a skill command is deleted
+type skillCmdDeletedMsg struct {
+	skill   *skill.Skill
+	cmdName string
 }
 
 // ============================================================================
@@ -3316,22 +3844,30 @@ func (m *Model) renderCommandEditor() string {
 	content.WriteString(m.commandEditorContent.View())
 	content.WriteString("\n\n")
 
-	// Scope selector (only shown when in project)
+	// Scope selector - always shown with icons
+	scopeLabel := "Scope:"
+	if m.commandEditorFocus == 5 && m.hasProjectConfig() {
+		scopeLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Scope:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", scopeLabel))
+
+	scopeIcons := []string{"🌐", "📁"}
+	scopeLabels := []string{"global", "local (project)"}
+
 	if m.hasProjectConfig() {
-		scopeLabel := "Scope:"
-		if m.commandEditorFocus == 5 {
-			scopeLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Scope:")
-		}
-		content.WriteString(fmt.Sprintf("%s ", scopeLabel))
-		for i, name := range scopeNames {
+		for i, label := range scopeLabels {
+			icon := scopeIcons[i]
 			if i == m.commandEditorScope {
-				content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Render(" " + name + " "))
+				content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Bold(true).Render(" " + icon + " " + label + " "))
 			} else {
-				content.WriteString(" " + name + " ")
+				content.WriteString(lipgloss.NewStyle().Foreground(colorFgMuted).Render(" " + icon + " " + label + " "))
 			}
 		}
-		content.WriteString("\n\n")
+	} else {
+		content.WriteString(lipgloss.NewStyle().Foreground(colorTeal).Render("🌐 global"))
+		content.WriteString(lipgloss.NewStyle().Foreground(colorFgSubtle).Italic(true).Render(" (open a project for local scope)"))
 	}
+	content.WriteString("\n\n")
 
 	helpText := "Tab: next • ←/→: change selection • Ctrl+S: save • Esc: cancel"
 	content.WriteString(KeyDescStyle.Render(helpText))
