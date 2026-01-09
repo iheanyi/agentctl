@@ -214,14 +214,55 @@ func (b *Builder) buildNode(dir string, server *mcp.Server) error {
 }
 
 func (b *Builder) buildGo(dir string, server *mcp.Server) error {
+	// Determine build target
+	// 1. Check for cmd/<name>
+	// 2. Check for cmd/<repo-name>
+	// 3. Fallback to root .
+
+	target := "."
+	outputName := "server"
+	
+	cmdDir := filepath.Join(dir, "cmd")
+	if entries, err := os.ReadDir(cmdDir); err == nil {
+		// Look for a directory matching the server name
+		for _, e := range entries {
+			if e.IsDir() && e.Name() == server.Name {
+				target = filepath.Join("cmd", e.Name())
+				outputName = e.Name()
+				break
+			}
+		}
+		
+		// If not found, look for any main package in cmd?
+		// For now, let's just default to the first one if only one exists
+		if target == "." && len(entries) > 0 {
+			for _, e := range entries {
+				if e.IsDir() {
+					// Check if it has main.go
+					if _, err := os.Stat(filepath.Join(cmdDir, e.Name(), "main.go")); err == nil {
+						target = filepath.Join("cmd", e.Name())
+						outputName = e.Name()
+						break
+					}
+				}
+			}
+		}
+	}
+
 	// Build the Go project
-	if err := b.runCommand(dir, "go build -o server ."); err != nil {
+	// go build -o <output> <target>
+	cmd := exec.Command("go", "build", "-o", outputName, target)
+	cmd.Dir = dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
+	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go build failed: %w", err)
 	}
 
 	// Set command to the built binary
 	if server.Command == "" {
-		server.Command = filepath.Join(dir, "server")
+		server.Command = filepath.Join(dir, outputName)
 	}
 
 	return nil
