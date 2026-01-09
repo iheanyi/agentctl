@@ -3181,7 +3181,18 @@ func (m *Model) saveSkill() tea.Cmd {
 			return resourceCreatedMsg{resourceType: "skill", err: fmt.Errorf("name cannot contain spaces or path separators")}
 		}
 
-		skillsDir := filepath.Join(m.cfg.ConfigDir, "skills")
+		// Determine scope and resource directory
+		scope := config.ScopeGlobal
+		resourceDir := m.cfg.ConfigDir
+		if m.skillEditorScope == scopeIndexLocal {
+			scope = config.ScopeLocal
+			// Use project's .agentctl directory for local scope
+			if m.cfg.ProjectPath != "" {
+				resourceDir = filepath.Join(filepath.Dir(m.cfg.ProjectPath), ".agentctl")
+			}
+		}
+
+		skillsDir := filepath.Join(resourceDir, "skills")
 		skillDir := filepath.Join(skillsDir, name)
 
 		if m.skillEditorIsNew {
@@ -3205,6 +3216,7 @@ func (m *Model) saveSkill() tea.Cmd {
 			Description: desc,
 			Author:      author,
 			Version:     version,
+			Scope:       string(scope),
 		}
 
 		skillPath := filepath.Join(skillDir, "skill.json")
@@ -3226,7 +3238,7 @@ func (m *Model) saveSkill() tea.Cmd {
 		}
 
 		if m.skillEditorIsNew {
-			return resourceCreatedMsg{resourceType: "skill", name: name}
+			return resourceCreatedMsg{resourceType: "skill", name: name, scope: string(scope)}
 		}
 		return resourceEditedMsg{resourceType: "skill"}
 	}
