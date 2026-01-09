@@ -676,8 +676,8 @@ func (r *ResourceCRUD) CreateServer() (*mcp.Server, error) {
 				}),
 			huh.NewInput().
 				Title("Source").
-				Description("Registry alias, GitHub URL, or local path").
-				Placeholder("e.g. figma, github.com/user/repo, ./my-server").
+				Description("Registry alias, remote URL, or local path").
+				Placeholder("e.g. figma, https://api.example.com, ./my-server").
 				Value(&input).
 				Validate(func(s string) error {
 					if s == "" {

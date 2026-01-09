@@ -40,6 +40,12 @@ const (
 	HealthChecking  = "◐" // Can be animated with spinner
 )
 
+// Scope indicator symbols
+const (
+	ScopeLocalIndicator  = "[L]"
+	ScopeGlobalIndicator = "[G]"
+)
+
 // App-level styles
 var (
 	// Main application container style
@@ -99,6 +105,17 @@ var (
 	// Checking indicator (spinner) - cyan
 	HealthCheckingStyle = lipgloss.NewStyle().
 				Foreground(colorCyan)
+)
+
+// Scope indicator styles
+var (
+	// Local scope indicator [L] - teal (project-specific)
+	ScopeLocalStyle = lipgloss.NewStyle().
+			Foreground(colorTeal)
+
+	// Global scope indicator [G] - muted (user-wide)
+	ScopeGlobalStyle = lipgloss.NewStyle().
+				Foreground(colorFgMuted)
 )
 
 // List item styles
@@ -421,4 +438,12 @@ func RenderKeyHintsBar(hints []struct{ Key, Desc string }) string {
 	}
 
 	return KeyHintsBarStyle.Render(result)
+}
+
+// RenderScopeIndicator returns a styled scope indicator [L] or [G]
+func RenderScopeIndicator(scope string) string {
+	if scope == "local" {
+		return ScopeLocalStyle.Render(ScopeLocalIndicator)
+	}
+	return ScopeGlobalStyle.Render(ScopeGlobalIndicator)
 }

@@ -4,19 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/iheanyi/agentctl/pkg/aliases"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
@@ -56,6 +59,9 @@ const (
 	FilterDisabled
 )
 
+// FilterModeNames returns the display names for filter modes
+var FilterModeNames = []string{"All", "Installed", "Available", "Disabled"}
+
 // LogEntry represents a single log entry in the log panel
 type LogEntry struct {
 	Time    time.Time
@@ -85,9 +91,9 @@ type Model struct {
 	activeTab ResourceTab
 
 	// State
-	cursor      int
-	filterMode  FilterMode
-	searchQuery string
+	cursor     int
+	filterMode FilterMode
+	searchInput textinput.Model
 	searching   bool
 	profile     string // Current profile name
 
@@ -110,12 +116,97 @@ type Model struct {
 	profileCursor     int
 
 	// Tool testing modal
-	showToolModal    bool
-	toolModalServer  *Server           // Server being tested
-	toolCursor       int               // Selected tool index
-	toolArgInput     string            // Current argument input (JSON)
-	toolResult       *mcpclient.ToolCallResult
-	toolExecuting    bool
+	showToolModal   bool
+	toolModalServer *Server // Server being tested
+	toolCursor      int     // Selected tool index
+	toolArgInput    textinput.Model
+	toolResult      *mcpclient.ToolCallResult
+	toolExecuting   bool
+
+	// Rule editor modal
+	showRuleEditor    bool
+	ruleEditorIsNew   bool            // true if creating new, false if editing
+	ruleEditorRule    *rule.Rule      // nil if new, existing rule if editing
+	ruleEditorName    textinput.Model // Rule name (filename)
+	ruleEditorApplies textinput.Model // Applies pattern (e.g., "*.go")
+	ruleEditorContent textarea.Model  // Markdown content
+	ruleEditorPriority int            // Priority (1-10)
+	ruleEditorScope   int             // 0=global, 1=local (only shown when in project)
+	ruleEditorFocus   int             // Which field is focused (0=name, 1=priority, 2=applies, 3=content, 4=scope when in project)
+
+	// Confirm delete modal
+	showConfirmDelete      bool
+	confirmDeleteType      string // "server", "command", "rule", "skill", "prompt"
+	confirmDeleteName      string
+	confirmDeleteConfirmed bool
+
+	// Prompt editor modal
+	showPromptEditor     bool
+	promptEditorIsNew    bool
+	promptEditorPrompt   *prompt.Prompt
+	promptEditorName     textinput.Model
+	promptEditorDesc     textinput.Model
+	promptEditorContent  textarea.Model
+	promptEditorScope    int // 0=global, 1=local (only shown when in project)
+	promptEditorFocus    int // 0=name, 1=desc, 2=content, 3=scope (when in project)
+
+	// Skill editor modal
+	showSkillEditor    bool
+	skillEditorIsNew   bool
+	skillEditorSkill   *skill.Skill
+	skillEditorName    textinput.Model
+	skillEditorDesc    textinput.Model
+	skillEditorAuthor  textinput.Model
+	skillEditorVersion textinput.Model
+	skillEditorScope   int // 0=global, 1=local (only shown when in project)
+	skillEditorFocus   int // 0=name, 1=desc, 2=author, 3=version, 4=scope (when in project)
+
+	// Command editor modal
+	showCommandEditor      bool
+	commandEditorIsNew     bool
+	commandEditorCommand   *command.Command
+	commandEditorName      textinput.Model
+	commandEditorDesc      textinput.Model
+	commandEditorArgHint   textinput.Model
+	commandEditorModel     int    // 0=default, 1=opus, 2=sonnet, 3=haiku
+	commandEditorContent   textarea.Model
+	commandEditorScope     int // 0=global, 1=local (only shown when in project)
+	commandEditorFocus     int // 0=name, 1=desc, 2=argHint, 3=model, 4=content, 5=scope (when in project)
+
+	// Server editor modal
+	showServerEditor     bool
+	serverEditorIsNew    bool
+	serverEditorServer   *mcp.Server
+	serverEditorName     textinput.Model
+	serverEditorSource   textinput.Model // alias, URL, or path
+	serverEditorCommand  textinput.Model
+	serverEditorArgs     textinput.Model
+	serverEditorTransport int // 0=stdio, 1=http, 2=sse
+	serverEditorScope     int // 0=global, 1=local (only shown when in project)
+	serverEditorFocus    int // 0=name, 1=source, 2=command, 3=args, 4=transport, 5=scope (when in project)
+
+	// Alias wizard modal (multi-step)
+	showAliasWizard      bool
+	aliasWizardIsNew     bool
+	aliasWizardStep      int // 0=basic, 1=type, 2=simple/variants config, 3=git url
+	aliasWizardName      textinput.Model
+	aliasWizardDesc      textinput.Model
+	aliasWizardConfigType int // 0=simple, 1=variants
+	aliasWizardTransport  int // 0=stdio, 1=http, 2=sse
+	aliasWizardRuntime    int // 0=node, 1=python, 2=go, 3=docker
+	aliasWizardPackage    textinput.Model
+	aliasWizardURL        textinput.Model
+	aliasWizardHasLocal   bool
+	aliasWizardHasRemote  bool
+	aliasWizardLocalRuntime int // 0=node, 1=python
+	aliasWizardLocalPackage textinput.Model
+	aliasWizardRemoteTransport int // 0=http, 1=sse
+	aliasWizardRemoteURL  textinput.Model
+	aliasWizardDefaultVariant int // 0=local, 1=remote
+	aliasWizardWantGitURL bool
+	aliasWizardGitURL     textinput.Model
+	aliasWizardFocus      int // current focused field within step
+	aliasWizardExisting   *aliases.Alias // for editing
 
 	// Keys
 	keys keyMap
@@ -132,15 +223,205 @@ func New() (*Model, error) {
 	s.Spinner = spinner.Dot
 	s.Style = SpinnerStyle
 
+	// Search input
+	searchInput := textinput.New()
+	searchInput.Placeholder = "Search..."
+	searchInput.Prompt = "/ "
+	searchInput.PromptStyle = SearchPromptStyle
+	searchInput.TextStyle = SearchInputStyle
+	searchInput.PlaceholderStyle = SearchPlaceholderStyle
+	searchInput.CharLimit = 100
+
+	// Tool argument input
+	toolArgInput := textinput.New()
+	toolArgInput.Placeholder = `{}`
+	toolArgInput.Prompt = "Args (JSON): "
+	toolArgInput.PromptStyle = lipgloss.NewStyle().Foreground(colorCyan)
+	toolArgInput.CharLimit = 500
+
+	// Rule editor inputs
+	ruleEditorName := textinput.New()
+	ruleEditorName.Placeholder = "my-rule"
+	ruleEditorName.Prompt = ""
+	ruleEditorName.CharLimit = 50
+
+	ruleEditorApplies := textinput.New()
+	ruleEditorApplies.Placeholder = "*.go, src/**/*.ts"
+	ruleEditorApplies.Prompt = ""
+	ruleEditorApplies.CharLimit = 100
+
+	ruleEditorContent := textarea.New()
+	ruleEditorContent.Placeholder = "Enter rule content in markdown..."
+	ruleEditorContent.ShowLineNumbers = false
+	ruleEditorContent.SetHeight(10)
+	ruleEditorContent.SetWidth(60)
+	ruleEditorContent.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ruleEditorContent.BlurredStyle.CursorLine = lipgloss.NewStyle()
+
+	// Prompt editor inputs
+	promptEditorName := textinput.New()
+	promptEditorName.Placeholder = "my-prompt"
+	promptEditorName.Prompt = ""
+	promptEditorName.CharLimit = 50
+
+	promptEditorDesc := textinput.New()
+	promptEditorDesc.Placeholder = "Description of this prompt"
+	promptEditorDesc.Prompt = ""
+	promptEditorDesc.CharLimit = 200
+
+	promptEditorContent := textarea.New()
+	promptEditorContent.Placeholder = "You are a {{role}} expert.\n\nAnalyze: {{input}}"
+	promptEditorContent.ShowLineNumbers = false
+	promptEditorContent.SetHeight(10)
+	promptEditorContent.SetWidth(60)
+	promptEditorContent.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	promptEditorContent.BlurredStyle.CursorLine = lipgloss.NewStyle()
+
+	// Skill editor inputs
+	skillEditorName := textinput.New()
+	skillEditorName.Placeholder = "my-skill"
+	skillEditorName.Prompt = ""
+	skillEditorName.CharLimit = 50
+
+	skillEditorDesc := textinput.New()
+	skillEditorDesc.Placeholder = "What this skill does"
+	skillEditorDesc.Prompt = ""
+	skillEditorDesc.CharLimit = 200
+
+	skillEditorAuthor := textinput.New()
+	skillEditorAuthor.Placeholder = "Your name"
+	skillEditorAuthor.Prompt = ""
+	skillEditorAuthor.CharLimit = 100
+
+	skillEditorVersion := textinput.New()
+	skillEditorVersion.Placeholder = "1.0.0"
+	skillEditorVersion.Prompt = ""
+	skillEditorVersion.CharLimit = 20
+
+	// Command editor inputs
+	commandEditorName := textinput.New()
+	commandEditorName.Placeholder = "my-command"
+	commandEditorName.Prompt = ""
+	commandEditorName.CharLimit = 50
+
+	commandEditorDesc := textinput.New()
+	commandEditorDesc.Placeholder = "What this command does"
+	commandEditorDesc.Prompt = ""
+	commandEditorDesc.CharLimit = 200
+
+	commandEditorArgHint := textinput.New()
+	commandEditorArgHint.Placeholder = "[file or description]"
+	commandEditorArgHint.Prompt = ""
+	commandEditorArgHint.CharLimit = 100
+
+	commandEditorContent := textarea.New()
+	commandEditorContent.Placeholder = "Review this code for...\n\n$ARGUMENTS"
+	commandEditorContent.ShowLineNumbers = false
+	commandEditorContent.SetHeight(10)
+	commandEditorContent.SetWidth(60)
+	commandEditorContent.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	commandEditorContent.BlurredStyle.CursorLine = lipgloss.NewStyle()
+
+	// Server editor inputs
+	serverEditorName := textinput.New()
+	serverEditorName.Placeholder = "my-server"
+	serverEditorName.Prompt = ""
+	serverEditorName.CharLimit = 50
+
+	serverEditorSource := textinput.New()
+	serverEditorSource.Placeholder = "alias, URL, or ./path"
+	serverEditorSource.Prompt = ""
+	serverEditorSource.CharLimit = 200
+
+	serverEditorCommand := textinput.New()
+	serverEditorCommand.Placeholder = "npx"
+	serverEditorCommand.Prompt = ""
+	serverEditorCommand.CharLimit = 100
+
+	serverEditorArgs := textinput.New()
+	serverEditorArgs.Placeholder = "-y @modelcontextprotocol/server-filesystem"
+	serverEditorArgs.Prompt = ""
+	serverEditorArgs.CharLimit = 500
+
+	// Alias wizard inputs
+	aliasWizardName := textinput.New()
+	aliasWizardName.Placeholder = "my-alias"
+	aliasWizardName.Prompt = ""
+	aliasWizardName.CharLimit = 50
+
+	aliasWizardDesc := textinput.New()
+	aliasWizardDesc.Placeholder = "Description of the MCP server"
+	aliasWizardDesc.Prompt = ""
+	aliasWizardDesc.CharLimit = 200
+
+	aliasWizardPackage := textinput.New()
+	aliasWizardPackage.Placeholder = "@org/mcp-server"
+	aliasWizardPackage.Prompt = ""
+	aliasWizardPackage.CharLimit = 200
+
+	aliasWizardURL := textinput.New()
+	aliasWizardURL.Placeholder = "https://mcp.example.com/mcp"
+	aliasWizardURL.Prompt = ""
+	aliasWizardURL.CharLimit = 300
+
+	aliasWizardLocalPackage := textinput.New()
+	aliasWizardLocalPackage.Placeholder = "@org/mcp-server"
+	aliasWizardLocalPackage.Prompt = ""
+	aliasWizardLocalPackage.CharLimit = 200
+
+	aliasWizardRemoteURL := textinput.New()
+	aliasWizardRemoteURL.Placeholder = "https://mcp.example.com/mcp"
+	aliasWizardRemoteURL.Prompt = ""
+	aliasWizardRemoteURL.CharLimit = 300
+
+	aliasWizardGitURL := textinput.New()
+	aliasWizardGitURL.Placeholder = "github.com/org/repo"
+	aliasWizardGitURL.Prompt = ""
+	aliasWizardGitURL.CharLimit = 200
+
 	m := &Model{
-		cfg:          cfg,
-		selected:     make(map[string]bool),
-		filterMode:   FilterAll,
-		profile:      "default",
-		logs:         []LogEntry{},
-		keys:         newKeyMap(),
-		spinner:      s,
-		resourceCRUD: NewResourceCRUD(cfg),
+		cfg:               cfg,
+		selected:          make(map[string]bool),
+		filterMode:        FilterAll,
+		profile:           "default",
+		logs:              []LogEntry{},
+		keys:              newKeyMap(),
+		spinner:           s,
+		searchInput:       searchInput,
+		toolArgInput:      toolArgInput,
+		// Rule editor
+		ruleEditorName:    ruleEditorName,
+		ruleEditorApplies: ruleEditorApplies,
+		ruleEditorContent: ruleEditorContent,
+		ruleEditorPriority: 3,
+		// Prompt editor
+		promptEditorName:    promptEditorName,
+		promptEditorDesc:    promptEditorDesc,
+		promptEditorContent: promptEditorContent,
+		// Skill editor
+		skillEditorName:    skillEditorName,
+		skillEditorDesc:    skillEditorDesc,
+		skillEditorAuthor:  skillEditorAuthor,
+		skillEditorVersion: skillEditorVersion,
+		// Command editor
+		commandEditorName:    commandEditorName,
+		commandEditorDesc:    commandEditorDesc,
+		commandEditorArgHint: commandEditorArgHint,
+		commandEditorContent: commandEditorContent,
+		// Server editor
+		serverEditorName:    serverEditorName,
+		serverEditorSource:  serverEditorSource,
+		serverEditorCommand: serverEditorCommand,
+		serverEditorArgs:    serverEditorArgs,
+		// Alias wizard
+		aliasWizardName:         aliasWizardName,
+		aliasWizardDesc:         aliasWizardDesc,
+		aliasWizardPackage:      aliasWizardPackage,
+		aliasWizardURL:          aliasWizardURL,
+		aliasWizardLocalPackage: aliasWizardLocalPackage,
+		aliasWizardRemoteURL:    aliasWizardRemoteURL,
+		aliasWizardGitURL:       aliasWizardGitURL,
+		resourceCRUD:            NewResourceCRUD(cfg),
 	}
 
 	// Load profiles
@@ -286,9 +567,9 @@ func (m *Model) applyFilter() {
 		}
 
 		// Apply search query
-		if m.searchQuery != "" {
-			if !strings.Contains(strings.ToLower(s.Name), strings.ToLower(m.searchQuery)) &&
-				!strings.Contains(strings.ToLower(s.Desc), strings.ToLower(m.searchQuery)) {
+		if m.searchInput.Value() != "" {
+			if !strings.Contains(strings.ToLower(s.Name), strings.ToLower(m.searchInput.Value())) &&
+				!strings.Contains(strings.ToLower(s.Desc), strings.ToLower(m.searchInput.Value())) {
 				continue
 			}
 		}
@@ -400,11 +681,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case serverAddedMsg:
 		if msg.err != nil {
-			m.addLog("error", fmt.Sprintf("Failed to add %s: %v", msg.name, msg.err))
+			m.addLog("error", fmt.Sprintf("Failed to add server: %v", msg.err))
 		} else {
-			m.addLog("success", fmt.Sprintf("Installed %s", msg.name))
+			scopeLabel := ""
+			if msg.scope != "" {
+				scopeLabel = fmt.Sprintf(" (%s)", msg.scope)
+			}
+			m.addLog("success", fmt.Sprintf("Added server: %s%s", msg.name, scopeLabel))
 			m.buildServerList()
 			m.applyFilter()
+			m.showServerEditor = false
 		}
 
 	case serverToggledMsg:
@@ -448,8 +734,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.addLog("error", fmt.Sprintf("Failed to create %s: %v", msg.resourceType, msg.err))
 		} else {
-			m.addLog("success", fmt.Sprintf("Created %s: %s", msg.resourceType, msg.name))
+			scopeLabel := ""
+			if msg.scope != "" {
+				scopeLabel = fmt.Sprintf(" (%s)", msg.scope)
+			}
+			m.addLog("success", fmt.Sprintf("Created %s: %s%s", msg.resourceType, msg.name, scopeLabel))
 			m.loadAllResources()
+			// Close editor modal on successful save
+			switch msg.resourceType {
+			case "rule":
+				m.showRuleEditor = false
+			case "prompt":
+				m.showPromptEditor = false
+			case "skill":
+				m.showSkillEditor = false
+			case "command":
+				m.showCommandEditor = false
+			}
 		}
 
 	case resourceEditedMsg:
@@ -458,6 +759,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.addLog("success", fmt.Sprintf("Edited %s", msg.resourceType))
 			m.loadAllResources()
+			// Close editor modal on successful save
+			switch msg.resourceType {
+			case "rule":
+				m.showRuleEditor = false
+			case "prompt":
+				m.showPromptEditor = false
+			case "skill":
+				m.showSkillEditor = false
+			case "command":
+				m.showCommandEditor = false
+			}
 		}
 
 	case resourceDeletedMsg:
@@ -476,20 +788,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "esc":
 				m.searching = false
-				m.searchQuery = ""
+				m.searchInput.SetValue("")
+				m.searchInput.Blur()
 				m.applyFilter()
 			case "enter":
 				m.searching = false
-			case "backspace":
-				if len(m.searchQuery) > 0 {
-					m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
-					m.applyFilter()
-				}
+				m.searchInput.Blur()
 			default:
-				if len(msg.String()) == 1 {
-					m.searchQuery += msg.String()
-					m.applyFilter()
-				}
+				// Delegate to textinput
+				var cmd tea.Cmd
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				m.applyFilter()
+				return m, cmd
 			}
 			return m, nil
 		}
@@ -542,7 +852,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showToolModal = false
 				m.toolModalServer = nil
 				m.toolResult = nil
-				m.toolArgInput = ""
+				m.toolArgInput.SetValue("")
+				m.toolArgInput.Blur()
 			case "j", "down":
 				if m.toolModalServer != nil && m.toolCursor < len(m.toolModalServer.Tools)-1 {
 					m.toolCursor++
@@ -553,6 +864,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.toolCursor--
 					m.toolResult = nil
 				}
+			case "tab":
+				// Toggle focus between tool list and arg input
+				if m.toolArgInput.Focused() {
+					m.toolArgInput.Blur()
+				} else {
+					m.toolArgInput.Focus()
+				}
 			case "enter":
 				// Execute the selected tool
 				if m.toolModalServer != nil && len(m.toolModalServer.Tools) > 0 {
@@ -562,9 +880,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.addLog("info", fmt.Sprintf("Executing %s...", tool.Name))
 					// Parse JSON args if provided, otherwise use empty map
 					var args map[string]any
-					if m.toolArgInput != "" {
+					argValue := m.toolArgInput.Value()
+					if argValue != "" {
 						// Try to parse as JSON
-						if err := json.Unmarshal([]byte(m.toolArgInput), &args); err != nil {
+						if err := json.Unmarshal([]byte(argValue), &args); err != nil {
 							m.addLog("error", fmt.Sprintf("Invalid JSON args: %v", err))
 							m.toolExecuting = false
 							return m, nil
@@ -574,17 +893,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, m.executeTool(m.toolModalServer.Name, tool.Name, args)
 				}
-			case "backspace":
-				if len(m.toolArgInput) > 0 {
-					m.toolArgInput = m.toolArgInput[:len(m.toolArgInput)-1]
-				}
 			default:
-				// Add to argument input
-				if len(msg.String()) == 1 {
-					m.toolArgInput += msg.String()
+				// If arg input is focused, delegate to textinput
+				if m.toolArgInput.Focused() {
+					var cmd tea.Cmd
+					m.toolArgInput, cmd = m.toolArgInput.Update(msg)
+					return m, cmd
 				}
 			}
 			return m, nil
+		}
+
+		// Handle rule editor modal
+		if m.showRuleEditor {
+			return m.handleRuleEditorInput(msg)
+		}
+
+		// Handle confirm delete modal
+		if m.showConfirmDelete {
+			return m.handleConfirmDeleteInput(msg)
+		}
+
+		// Handle prompt editor modal
+		if m.showPromptEditor {
+			return m.handlePromptEditorInput(msg)
+		}
+
+		// Handle skill editor modal
+		if m.showSkillEditor {
+			return m.handleSkillEditorInput(msg)
+		}
+
+		// Handle command editor modal
+		if m.showCommandEditor {
+			return m.handleCommandEditorInput(msg)
+		}
+
+		// Handle server editor modal
+		if m.showServerEditor {
+			return m.handleServerEditorInput(msg)
+		}
+
+		// Handle alias wizard modal
+		if m.showAliasWizard {
+			return m.handleAliasWizardInput(msg)
 		}
 
 		switch {
@@ -601,7 +953,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.keys.Down):
-			if m.cursor < len(m.filteredItems)-1 {
+			if m.cursor < m.currentTabLength()-1 {
 				m.cursor++
 			}
 
@@ -609,20 +961,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 
 		case key.Matches(msg, m.keys.Bottom):
-			m.cursor = max(0, len(m.filteredItems)-1)
+			m.cursor = max(0, m.currentTabLength()-1)
 
 		case key.Matches(msg, m.keys.PageDown):
-			m.cursor = min(m.cursor+10, len(m.filteredItems)-1)
+			m.cursor = min(m.cursor+10, m.currentTabLength()-1)
 
 		case key.Matches(msg, m.keys.PageUp):
 			m.cursor = max(m.cursor-10, 0)
 
 		case key.Matches(msg, m.keys.Search):
 			m.searching = true
-			m.searchQuery = ""
+			m.searchInput.SetValue("")
+			m.searchInput.Focus()
 
 		case key.Matches(msg, m.keys.Escape):
-			m.searchQuery = ""
+			m.searchInput.SetValue("")
 			m.selected = make(map[string]bool)
 			m.applyFilter()
 
@@ -662,71 +1015,85 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Add new resource based on current tab
 			switch m.activeTab {
 			case TabServers:
-				return m, m.createServer()
+				m.openServerEditor(nil)
+				return m, nil
 			case TabCommands:
-				return m, m.createCommand()
+				m.openCommandEditor(nil)
+				return m, nil
 			case TabRules:
-				return m, m.createRule()
+				m.openRuleEditor(nil)
+				return m, nil
 			case TabSkills:
-				return m, m.createSkill()
+				m.openSkillEditor(nil)
+				return m, nil
 			case TabPrompts:
-				return m, m.createPrompt()
+				m.openPromptEditor(nil)
+				return m, nil
 			}
 
 		case key.Matches(msg, m.keys.Delete):
 			switch m.activeTab {
 			case TabServers:
 				if s := m.selectedServer(); s != nil && s.Status != ServerStatusAvailable {
-					return m, m.deleteServer(s.Name)
+					m.openConfirmDelete("server", s.Name)
+					return m, nil
 				}
 			case TabCommands:
 				if m.cursor >= 0 && m.cursor < len(m.commands) {
 					cmd := m.commands[m.cursor]
-					return m, m.deleteCommand(cmd)
+					m.openConfirmDelete("command", cmd.Name)
+					return m, nil
 				}
 			case TabRules:
 				if m.cursor >= 0 && m.cursor < len(m.rules) {
 					r := m.rules[m.cursor]
-					return m, m.deleteRule(r)
+					m.openConfirmDelete("rule", r.Name)
+					return m, nil
 				}
 			case TabSkills:
 				if m.cursor >= 0 && m.cursor < len(m.skills) {
 					s := m.skills[m.cursor]
-					return m, m.deleteSkill(s)
+					m.openConfirmDelete("skill", s.Name)
+					return m, nil
 				}
 			case TabPrompts:
 				if m.cursor >= 0 && m.cursor < len(m.prompts) {
 					p := m.prompts[m.cursor]
-					return m, m.deletePrompt(p)
+					m.openConfirmDelete("prompt", p.Name)
+					return m, nil
 				}
 			}
 
 		case key.Matches(msg, m.keys.Edit):
 			switch m.activeTab {
 			case TabServers:
-				if s := m.selectedServer(); s != nil && s.Status != ServerStatusAvailable {
-					m.addLog("info", fmt.Sprintf("Opening editor for %s...", s.Name))
-					return m, m.editServer(s.Name)
+				if s := m.selectedServer(); s != nil && s.Status != ServerStatusAvailable && s.ServerConfig != nil {
+					m.openServerEditor(s.ServerConfig)
+					return m, nil
 				}
 			case TabCommands:
 				if m.cursor >= 0 && m.cursor < len(m.commands) {
 					cmd := m.commands[m.cursor]
-					return m, m.editCommand(cmd)
+					m.openCommandEditor(cmd)
+					return m, nil
 				}
 			case TabRules:
 				if m.cursor >= 0 && m.cursor < len(m.rules) {
 					r := m.rules[m.cursor]
-					return m, m.editRule(r)
+					m.openRuleEditor(r)
+					return m, nil
 				}
 			case TabSkills:
 				if m.cursor >= 0 && m.cursor < len(m.skills) {
 					s := m.skills[m.cursor]
-					return m, m.editSkill(s)
+					m.openSkillEditor(s)
+					return m, nil
 				}
 			case TabPrompts:
 				if m.cursor >= 0 && m.cursor < len(m.prompts) {
 					p := m.prompts[m.cursor]
-					return m, m.editPrompt(p)
+					m.openPromptEditor(p)
+					return m, nil
 				}
 			}
 
@@ -771,7 +1138,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.showToolModal = true
 					m.toolModalServer = s
 					m.toolCursor = 0
-					m.toolArgInput = ""
+					m.toolArgInput.SetValue("")
+					m.toolArgInput.Blur()
 					m.toolResult = nil
 				}
 			}
@@ -782,7 +1150,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addLog("info", "Refreshed server list")
 
 		case key.Matches(msg, m.keys.CycleFilter):
-			m.filterMode = (m.filterMode + 1) % 4
+			m.filterMode = (m.filterMode + 1) % FilterMode(len(FilterModeNames))
 			m.applyFilter()
 
 		case key.Matches(msg, m.keys.FilterAll):
@@ -822,12 +1190,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Tab switching
 		case key.Matches(msg, m.keys.NextTab):
-			m.activeTab = (m.activeTab + 1) % 5
+			m.activeTab = (m.activeTab + 1) % ResourceTab(len(TabNames))
 			m.cursor = 0
 
 		case key.Matches(msg, m.keys.PrevTab):
 			if m.activeTab == 0 {
-				m.activeTab = 4
+				m.activeTab = ResourceTab(len(TabNames) - 1)
 			} else {
 				m.activeTab--
 			}
@@ -878,6 +1246,34 @@ func (m Model) View() string {
 
 	if m.showToolModal {
 		return m.renderToolModal()
+	}
+
+	if m.showRuleEditor {
+		return m.renderRuleEditor()
+	}
+
+	if m.showConfirmDelete {
+		return m.renderConfirmDelete()
+	}
+
+	if m.showPromptEditor {
+		return m.renderPromptEditor()
+	}
+
+	if m.showSkillEditor {
+		return m.renderSkillEditor()
+	}
+
+	if m.showCommandEditor {
+		return m.renderCommandEditor()
+	}
+
+	if m.showServerEditor {
+		return m.renderServerEditor()
+	}
+
+	if m.showAliasWizard {
+		return m.renderAliasWizard()
 	}
 
 	var sections []string
@@ -999,8 +1395,7 @@ func (m *Model) renderServerList() string {
 
 	// Search bar if searching
 	if m.searching {
-		searchBar := SearchPromptStyle.Render("/") + SearchInputStyle.Render(m.searchQuery+"█")
-		rows = append(rows, SearchStyle.Width(m.width-4).Render(searchBar))
+		rows = append(rows, SearchStyle.Width(m.width-4).Render(m.searchInput.View()))
 		listHeight--
 	}
 
@@ -1070,6 +1465,12 @@ func (m *Model) renderServerRow(s Server, selected bool) string {
 		statusBadge = StatusDisabledStyle.Render(StatusDisabled)
 	}
 
+	// Scope indicator (only for installed servers)
+	scopeIndicator := ""
+	if s.ServerConfig != nil && s.ServerConfig.Scope != "" {
+		scopeIndicator = " " + RenderScopeIndicator(s.ServerConfig.Scope)
+	}
+
 	// Server name
 	nameStyle := ListItemNameStyle
 	if selected {
@@ -1097,10 +1498,10 @@ func (m *Model) renderServerRow(s Server, selected bool) string {
 	if selected {
 		descStyle = ListItemDescSelectedStyle
 	}
-	desc := descStyle.Render(s.Transport + " · " + truncate(s.Description(), 50))
+	desc := descStyle.Render(s.Transport + " · " + ansi.Truncate(s.Description(), 50, "..."))
 
 	// Build the row
-	leftPart := selectIndicator + statusBadge + " " + name + healthBadge
+	leftPart := selectIndicator + statusBadge + scopeIndicator + " " + name + healthBadge
 
 	// Calculate padding for right-aligned description
 	leftWidth := lipgloss.Width(leftPart)
@@ -1173,6 +1574,9 @@ func (m *Model) renderCommandRow(cmd *command.Command, selected bool) string {
 	// Icon
 	icon := StatusInstalledStyle.Render("⌘")
 
+	// Scope indicator
+	scopeIndicator := RenderScopeIndicator(cmd.Scope)
+
 	// Command name with / prefix
 	nameStyle := ListItemNameStyle
 	if selected {
@@ -1185,10 +1589,10 @@ func (m *Model) renderCommandRow(cmd *command.Command, selected bool) string {
 	if selected {
 		descStyle = ListItemDescSelectedStyle
 	}
-	desc := descStyle.Render(truncate(cmd.Description, 50))
+	desc := descStyle.Render(ansi.Truncate(cmd.Description, 50, "..."))
 
 	// Build the row
-	leftPart := "  " + icon + " " + name
+	leftPart := "  " + icon + " " + scopeIndicator + " " + name
 
 	// Calculate padding for right-aligned description
 	leftWidth := lipgloss.Width(leftPart)
@@ -1261,6 +1665,9 @@ func (m *Model) renderRuleRow(r *rule.Rule, selected bool) string {
 	// Icon
 	icon := StatusInstalledStyle.Render("📜")
 
+	// Scope indicator
+	scopeIndicator := RenderScopeIndicator(r.Scope)
+
 	// Rule name
 	nameStyle := ListItemNameStyle
 	if selected {
@@ -1287,10 +1694,10 @@ func (m *Model) renderRuleRow(r *rule.Rule, selected bool) string {
 			}
 		}
 	}
-	desc := descStyle.Render(truncate(descText, 50))
+	desc := descStyle.Render(ansi.Truncate(descText, 50, "..."))
 
 	// Build the row
-	leftPart := "  " + icon + " " + name
+	leftPart := "  " + icon + " " + scopeIndicator + " " + name
 
 	// Calculate padding for right-aligned description
 	leftWidth := lipgloss.Width(leftPart)
@@ -1363,6 +1770,9 @@ func (m *Model) renderSkillRow(s *skill.Skill, selected bool) string {
 	// Icon
 	icon := StatusInstalledStyle.Render("⚡")
 
+	// Scope indicator
+	scopeIndicator := RenderScopeIndicator(s.Scope)
+
 	// Skill name
 	nameStyle := ListItemNameStyle
 	if selected {
@@ -1385,10 +1795,10 @@ func (m *Model) renderSkillRow(s *skill.Skill, selected bool) string {
 	if descText == "" && len(s.Prompts) > 0 {
 		descText = fmt.Sprintf("%d prompts", len(s.Prompts))
 	}
-	desc := descStyle.Render(truncate(descText, 40))
+	desc := descStyle.Render(ansi.Truncate(descText, 40, "..."))
 
 	// Build the row
-	leftPart := "  " + icon + " " + name + versionBadge
+	leftPart := "  " + icon + " " + scopeIndicator + " " + name + versionBadge
 
 	// Calculate padding for right-aligned description
 	leftWidth := lipgloss.Width(leftPart)
@@ -1461,6 +1871,9 @@ func (m *Model) renderPromptRow(p *prompt.Prompt, selected bool) string {
 	// Icon
 	icon := StatusInstalledStyle.Render("💬")
 
+	// Scope indicator
+	scopeIndicator := RenderScopeIndicator(p.Scope)
+
 	// Prompt name
 	nameStyle := ListItemNameStyle
 	if selected {
@@ -1482,12 +1895,12 @@ func (m *Model) renderPromptRow(p *prompt.Prompt, selected bool) string {
 	descText := p.Description
 	if descText == "" {
 		// Use truncated template as description
-		descText = truncate(strings.ReplaceAll(p.Template, "\n", " "), 40)
+		descText = ansi.Truncate(strings.ReplaceAll(p.Template, "\n", " "), 40, "...")
 	}
-	desc := descStyle.Render(truncate(descText, 40))
+	desc := descStyle.Render(ansi.Truncate(descText, 40, "..."))
 
 	// Build the row
-	leftPart := "  " + icon + " " + name + varsBadge
+	leftPart := "  " + icon + " " + scopeIndicator + " " + name + varsBadge
 
 	// Calculate padding for right-aligned description
 	leftWidth := lipgloss.Width(leftPart)
@@ -1597,7 +2010,7 @@ func (m *Model) renderHookRow(h *hook.Hook, selected bool) string {
 	if selected {
 		descStyle = ListItemDescSelectedStyle
 	}
-	cmdText := truncate(h.Command, 40)
+	cmdText := ansi.Truncate(h.Command, 40, "...")
 	desc := descStyle.Render(cmdText)
 
 	// Build the row
@@ -1723,9 +2136,12 @@ func (m *Model) renderHelpOverlay() string {
                        Press any key to close
 `
 
-	return ModalStyle.
+	modal := ModalStyle.
 		Width(60).
 		Render(ModalTitleStyle.Render("Keyboard Shortcuts") + content)
+
+	// Center the modal in the terminal
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 }
 
 // renderProfilePicker renders the profile quick-switcher modal
@@ -1782,9 +2198,12 @@ func (m *Model) renderProfilePicker() string {
 
 	hints := "\n\n" + KeyDescStyle.Render("j/k:navigate  Enter:select  Esc:cancel")
 
-	return ModalStyle.
+	modal := ModalStyle.
 		Width(40).
 		Render(ModalTitleStyle.Render("Switch Profile") + "\n\n" + content + hints)
+
+	// Center the modal in the terminal
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 }
 
 // renderToolModal renders the tool testing modal
@@ -1811,7 +2230,7 @@ func (m *Model) renderToolModal() string {
 			}
 
 			name := tool.Name
-			desc := truncate(tool.Description, 40)
+			desc := ansi.Truncate(tool.Description, 40, "...")
 
 			row := cursor + name
 			if desc != "" {
@@ -1829,14 +2248,15 @@ func (m *Model) renderToolModal() string {
 	sections = append(sections, "")
 
 	// Argument input
-	argLabel := lipgloss.NewStyle().Foreground(colorCyan).Render("Args (JSON): ")
-	argInput := m.toolArgInput
+	argInputView := m.toolArgInput.View()
 	if m.toolExecuting {
-		argInput += m.spinner.View()
-	} else {
-		argInput += "█"
+		argInputView += " " + m.spinner.View()
 	}
-	sections = append(sections, argLabel+argInput)
+	focusHint := ""
+	if !m.toolArgInput.Focused() {
+		focusHint = lipgloss.NewStyle().Foreground(colorFgSubtle).Render(" (Tab to edit)")
+	}
+	sections = append(sections, argInputView+focusHint)
 
 	// Result display
 	if m.toolResult != nil {
@@ -1848,7 +2268,7 @@ func (m *Model) renderToolModal() string {
 			warnStyle := lipgloss.NewStyle().Foreground(colorYellow)
 			sections = append(sections, warnStyle.Render("Tool returned error"))
 			for _, content := range m.toolResult.Content {
-				sections = append(sections, "  "+truncate(content, 60))
+				sections = append(sections, "  "+ansi.Truncate(content, 60, "..."))
 			}
 		} else {
 			successStyle := lipgloss.NewStyle().Foreground(colorTeal)
@@ -1857,11 +2277,7 @@ func (m *Model) renderToolModal() string {
 				// Wrap long content
 				lines := strings.Split(content, "\n")
 				for _, line := range lines {
-					if len(line) > 60 {
-						sections = append(sections, "  "+line[:60]+"...")
-					} else {
-						sections = append(sections, "  "+line)
-					}
+					sections = append(sections, "  "+ansi.Truncate(line, 60, "..."))
 					if len(sections) > 20 {
 						sections = append(sections, "  ...")
 						break
@@ -1872,49 +2288,1611 @@ func (m *Model) renderToolModal() string {
 	}
 
 	sections = append(sections, "")
-	hints := KeyDescStyle.Render("j/k:select  Enter:execute  Esc:close")
+	hints := KeyDescStyle.Render("j/k:select  Tab:edit args  Enter:execute  Esc:close")
 	sections = append(sections, hints)
 
 	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
-	return ModalStyle.
+	modal := ModalStyle.
 		Width(70).
 		Render(content)
+
+	// Center the modal in the terminal
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+// renderRuleEditor renders the rule editor modal
+func (m *Model) renderRuleEditor() string {
+	var sections []string
+
+	// Title
+	title := "Create New Rule"
+	if !m.ruleEditorIsNew {
+		title = "Edit Rule"
+	}
+	sections = append(sections, ModalTitleStyle.Render(title))
+	sections = append(sections, "")
+
+	// Field labels and inputs
+	focusedStyle := lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
+	labelStyle := lipgloss.NewStyle().Foreground(colorFgMuted)
+	valueStyle := lipgloss.NewStyle().Foreground(colorFg)
+
+	// Name field (only editable for new rules)
+	nameLabel := labelStyle.Render("Name:")
+	if m.ruleEditorFocus == 0 {
+		nameLabel = focusedStyle.Render("Name:")
+	}
+	nameValue := m.ruleEditorName.View()
+	if !m.ruleEditorIsNew {
+		nameValue = valueStyle.Render(m.ruleEditorRule.Name + " (readonly)")
+	}
+	sections = append(sections, nameLabel+" "+nameValue)
+
+	// Priority field
+	priorityLabel := labelStyle.Render("Priority:")
+	if m.ruleEditorFocus == 1 {
+		priorityLabel = focusedStyle.Render("Priority:")
+	}
+	priorityNames := []string{"1-Low", "2", "3-Normal", "4", "5-Medium", "6", "7-High", "8", "9", "10-Critical"}
+	priorityDisplay := priorityNames[m.ruleEditorPriority-1]
+	priorityValue := valueStyle.Render(fmt.Sprintf("< %s >", priorityDisplay))
+	sections = append(sections, priorityLabel+" "+priorityValue)
+
+	// Applies pattern field
+	appliesLabel := labelStyle.Render("Applies:")
+	if m.ruleEditorFocus == 2 {
+		appliesLabel = focusedStyle.Render("Applies:")
+	}
+	sections = append(sections, appliesLabel+" "+m.ruleEditorApplies.View())
+
+	sections = append(sections, "")
+
+	// Content field
+	contentLabel := labelStyle.Render("Content (Markdown):")
+	if m.ruleEditorFocus == 3 {
+		contentLabel = focusedStyle.Render("Content (Markdown):")
+	}
+	sections = append(sections, contentLabel)
+
+	// Style the textarea border based on focus
+	contentStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorFgSubtle).
+		Padding(0, 1)
+	if m.ruleEditorFocus == 3 {
+		contentStyle = contentStyle.BorderForeground(colorCyan)
+	}
+	sections = append(sections, contentStyle.Render(m.ruleEditorContent.View()))
+
+	sections = append(sections, "")
+
+	// Scope selector (only shown when in project)
+	if m.hasProjectConfig() {
+		scopeLabel := labelStyle.Render("Scope:")
+		if m.ruleEditorFocus == 4 {
+			scopeLabel = focusedStyle.Render("Scope:")
+		}
+		var scopeOpts strings.Builder
+		for i, name := range scopeNames {
+			if i == m.ruleEditorScope {
+				scopeOpts.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Render(" " + name + " "))
+			} else {
+				scopeOpts.WriteString(" " + name + " ")
+			}
+		}
+		sections = append(sections, scopeLabel+" "+scopeOpts.String())
+		sections = append(sections, "")
+	}
+
+	// Hints
+	hints := KeyDescStyle.Render("Tab:next field  Shift+Tab:prev  Ctrl+S:save  e:external editor  Esc:cancel")
+	if m.ruleEditorFocus == 1 || m.ruleEditorFocus == 4 {
+		hints = KeyDescStyle.Render("←/→:change selection  Tab:next  Ctrl+S:save  Esc:cancel")
+	}
+	sections = append(sections, hints)
+
+	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
+
+	modal := ModalStyle.
+		Width(70).
+		Render(content)
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+// handleRuleEditorInput handles keyboard input for the rule editor modal
+func (m *Model) handleRuleEditorInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.showRuleEditor = false
+		m.ruleEditorRule = nil
+		return m, nil
+
+	case "ctrl+s":
+		// Save the rule
+		return m, m.saveRule()
+
+	case "e":
+		// Open in external editor (only if editing existing rule)
+		if !m.ruleEditorIsNew && m.ruleEditorRule != nil {
+			m.showRuleEditor = false
+			return m, m.editRuleExternal(m.ruleEditorRule)
+		}
+
+	case "tab":
+		// Move to next field
+		m.cycleRuleEditorFocus(1)
+		return m, nil
+
+	case "shift+tab":
+		// Move to previous field
+		m.cycleRuleEditorFocus(-1)
+		return m, nil
+
+	case "left":
+		// Decrease priority if on priority field
+		if m.ruleEditorFocus == 1 && m.ruleEditorPriority > 1 {
+			m.ruleEditorPriority--
+		}
+		// Cycle scope if on scope field
+		if m.ruleEditorFocus == 4 && m.hasProjectConfig() {
+			m.ruleEditorScope = (m.ruleEditorScope - 1 + len(scopeNames)) % len(scopeNames)
+		}
+		return m, nil
+
+	case "right":
+		// Increase priority if on priority field
+		if m.ruleEditorFocus == 1 && m.ruleEditorPriority < 10 {
+			m.ruleEditorPriority++
+		}
+		// Cycle scope if on scope field
+		if m.ruleEditorFocus == 4 && m.hasProjectConfig() {
+			m.ruleEditorScope = (m.ruleEditorScope + 1) % len(scopeNames)
+		}
+		return m, nil
+
+	default:
+		// Delegate to the focused input
+		var cmd tea.Cmd
+		switch m.ruleEditorFocus {
+		case 0: // Name field (only for new rules)
+			if m.ruleEditorIsNew {
+				m.ruleEditorName, cmd = m.ruleEditorName.Update(msg)
+			}
+		case 2: // Applies field
+			m.ruleEditorApplies, cmd = m.ruleEditorApplies.Update(msg)
+		case 3: // Content field
+			m.ruleEditorContent, cmd = m.ruleEditorContent.Update(msg)
+		}
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+// cycleRuleEditorFocus moves focus between rule editor fields
+func (m *Model) cycleRuleEditorFocus(delta int) {
+	// Blur current field
+	switch m.ruleEditorFocus {
+	case 0:
+		m.ruleEditorName.Blur()
+	case 2:
+		m.ruleEditorApplies.Blur()
+	case 3:
+		m.ruleEditorContent.Blur()
+	}
+
+	// Calculate new focus (skip name field if editing existing rule)
+	maxFocus := 3
+	if m.hasProjectConfig() {
+		maxFocus = 4 // Include scope field when in project
+	}
+	minFocus := 0
+	if !m.ruleEditorIsNew {
+		minFocus = 1 // Skip name field
+	}
+
+	m.ruleEditorFocus += delta
+	if m.ruleEditorFocus > maxFocus {
+		m.ruleEditorFocus = minFocus
+	} else if m.ruleEditorFocus < minFocus {
+		m.ruleEditorFocus = maxFocus
+	}
+
+	// Focus new field
+	switch m.ruleEditorFocus {
+	case 0:
+		m.ruleEditorName.Focus()
+	case 2:
+		m.ruleEditorApplies.Focus()
+	case 3:
+		m.ruleEditorContent.Focus()
+	}
+}
+
+// openRuleEditor opens the rule editor for a new or existing rule
+func (m *Model) openRuleEditor(r *rule.Rule) {
+	m.showRuleEditor = true
+	m.ruleEditorRule = r
+	m.ruleEditorIsNew = (r == nil)
+
+	if r == nil {
+		// New rule - reset all fields
+		m.ruleEditorName.SetValue("")
+		m.ruleEditorApplies.SetValue("*")
+		m.ruleEditorContent.SetValue("# Rule Title\n\nDescribe your guidelines here.\n\n## Guidelines\n\n- Guideline 1\n- Guideline 2\n")
+		m.ruleEditorPriority = 3
+		m.ruleEditorScope = m.defaultScopeIndex()
+		m.ruleEditorFocus = 0
+		m.ruleEditorName.Focus()
+	} else {
+		// Editing existing rule - populate fields
+		m.ruleEditorName.SetValue(r.Name)
+		if r.Frontmatter != nil {
+			m.ruleEditorPriority = r.Frontmatter.Priority
+			if m.ruleEditorPriority < 1 {
+				m.ruleEditorPriority = 1
+			}
+			if m.ruleEditorPriority > 10 {
+				m.ruleEditorPriority = 10
+			}
+			m.ruleEditorApplies.SetValue(r.Frontmatter.Applies)
+		} else {
+			m.ruleEditorPriority = 3
+			m.ruleEditorApplies.SetValue("*")
+		}
+		m.ruleEditorContent.SetValue(r.Content)
+		// Set scope based on existing rule
+		m.ruleEditorScope = scopeIndexGlobal
+		if r.Scope == "local" {
+			m.ruleEditorScope = scopeIndexLocal
+		}
+		m.ruleEditorFocus = 1 // Start on priority since name is readonly
+		m.ruleEditorApplies.Blur()
+		m.ruleEditorContent.Blur()
+	}
+}
+
+// saveRule saves the rule from the editor
+func (m *Model) saveRule() tea.Cmd {
+	return func() tea.Msg {
+		// Determine scope and resource directory
+		scope := config.ScopeGlobal
+		resourceDir := m.cfg.ConfigDir
+		if m.ruleEditorScope == scopeIndexLocal {
+			scope = config.ScopeLocal
+			// Use project's .agentctl directory for local scope
+			if m.cfg.ProjectPath != "" {
+				resourceDir = filepath.Join(filepath.Dir(m.cfg.ProjectPath), ".agentctl")
+			}
+		}
+
+		rulesDir := filepath.Join(resourceDir, "rules")
+
+		// Ensure directory exists
+		if err := os.MkdirAll(rulesDir, 0755); err != nil {
+			return resourceCreatedMsg{resourceType: "rule", err: fmt.Errorf("failed to create rules directory: %w", err)}
+		}
+
+		// Get values
+		name := m.ruleEditorName.Value()
+		if !m.ruleEditorIsNew && m.ruleEditorRule != nil {
+			name = m.ruleEditorRule.Name
+		}
+
+		if name == "" {
+			return resourceCreatedMsg{resourceType: "rule", err: fmt.Errorf("rule name is required")}
+		}
+
+		// Validate name for new rules
+		if m.ruleEditorIsNew && strings.ContainsAny(name, " \t\n/\\") {
+			return resourceCreatedMsg{resourceType: "rule", err: fmt.Errorf("name cannot contain spaces or path separators")}
+		}
+
+		applies := m.ruleEditorApplies.Value()
+		if applies == "" {
+			applies = "*"
+		}
+
+		content := m.ruleEditorContent.Value()
+
+		// Build the rule file content with frontmatter
+		var fileContent strings.Builder
+		fileContent.WriteString("---\n")
+		fileContent.WriteString(fmt.Sprintf("priority: %d\n", m.ruleEditorPriority))
+		fileContent.WriteString(fmt.Sprintf("applies: \"%s\"\n", applies))
+		fileContent.WriteString("---\n\n")
+		fileContent.WriteString(content)
+
+		// Determine path
+		rulePath := filepath.Join(rulesDir, name+".md")
+		if !m.ruleEditorIsNew && m.ruleEditorRule != nil {
+			rulePath = m.ruleEditorRule.Path
+		}
+
+		// Check if file exists for new rules
+		if m.ruleEditorIsNew {
+			if _, err := os.Stat(rulePath); err == nil {
+				return resourceCreatedMsg{resourceType: "rule", err: fmt.Errorf("rule %q already exists", name)}
+			}
+		}
+
+		// Write the file
+		if err := os.WriteFile(rulePath, []byte(fileContent.String()), 0644); err != nil {
+			return resourceCreatedMsg{resourceType: "rule", err: fmt.Errorf("failed to save rule: %w", err)}
+		}
+
+		if m.ruleEditorIsNew {
+			return resourceCreatedMsg{resourceType: "rule", name: name, scope: string(scope)}
+		}
+		return resourceEditedMsg{resourceType: "rule"}
+	}
+}
+
+// editRuleExternal opens a rule in the external editor
+func (m *Model) editRuleExternal(r *rule.Rule) tea.Cmd {
+	c := exec.Command(getEditor(), r.Path)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return resourceEditedMsg{resourceType: "rule", err: err}
+	})
+}
+
+// ============================================================================
+// Confirm Delete Modal
+// ============================================================================
+
+func (m *Model) renderConfirmDelete() string {
+	title := fmt.Sprintf("Delete %s?", m.confirmDeleteType)
+
+	var content strings.Builder
+	content.WriteString(ModalTitleStyle.Render(title))
+	content.WriteString("\n\n")
+	content.WriteString(fmt.Sprintf("Are you sure you want to delete %q?\n", m.confirmDeleteName))
+	content.WriteString(lipgloss.NewStyle().Foreground(colorPink).Render("This action cannot be undone."))
+	content.WriteString("\n\n")
+
+	yesStyle := lipgloss.NewStyle().Foreground(colorPink).Bold(true)
+	noStyle := lipgloss.NewStyle().Foreground(colorTeal).Bold(true)
+
+	if m.confirmDeleteConfirmed {
+		content.WriteString(yesStyle.Render("[Y] Delete"))
+		content.WriteString("  ")
+		content.WriteString(lipgloss.NewStyle().Faint(true).Render("[N] Cancel"))
+	} else {
+		content.WriteString(lipgloss.NewStyle().Faint(true).Render("[Y] Delete"))
+		content.WriteString("  ")
+		content.WriteString(noStyle.Render("[N] Cancel"))
+	}
+	content.WriteString("\n\n")
+	content.WriteString(KeyDescStyle.Render("←/→ to select • Enter to confirm • Esc to cancel"))
+
+	modal := ModalStyle.Width(50).Render(content.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+func (m *Model) handleConfirmDeleteInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.showConfirmDelete = false
+		return m, nil
+	case "left", "right", "h", "l", "tab":
+		m.confirmDeleteConfirmed = !m.confirmDeleteConfirmed
+		return m, nil
+	case "y", "Y":
+		m.confirmDeleteConfirmed = true
+		return m, m.executeDelete()
+	case "n", "N":
+		m.showConfirmDelete = false
+		return m, nil
+	case "enter":
+		if m.confirmDeleteConfirmed {
+			return m, m.executeDelete()
+		}
+		m.showConfirmDelete = false
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *Model) openConfirmDelete(resourceType, name string) {
+	m.showConfirmDelete = true
+	m.confirmDeleteType = resourceType
+	m.confirmDeleteName = name
+	m.confirmDeleteConfirmed = false
+}
+
+func (m *Model) executeDelete() tea.Cmd {
+	m.showConfirmDelete = false
+
+	return func() tea.Msg {
+		var err error
+		switch m.confirmDeleteType {
+		case "server":
+			delete(m.cfg.Servers, m.confirmDeleteName)
+			err = m.cfg.Save()
+			if err == nil {
+				return serverDeletedMsg{name: m.confirmDeleteName}
+			}
+		case "command":
+			for _, cmd := range m.commands {
+				if cmd.Name == m.confirmDeleteName {
+					err = m.resourceCRUD.DeleteCommand(cmd)
+					break
+				}
+			}
+		case "rule":
+			for _, r := range m.rules {
+				if r.Name == m.confirmDeleteName {
+					err = m.resourceCRUD.DeleteRule(r)
+					break
+				}
+			}
+		case "skill":
+			for _, s := range m.skills {
+				if s.Name == m.confirmDeleteName {
+					err = m.resourceCRUD.DeleteSkill(s)
+					break
+				}
+			}
+		case "prompt":
+			for _, p := range m.prompts {
+				if p.Name == m.confirmDeleteName {
+					err = m.resourceCRUD.DeletePrompt(p)
+					break
+				}
+			}
+		}
+		return resourceDeletedMsg{resourceType: m.confirmDeleteType, name: m.confirmDeleteName, err: err}
+	}
+}
+
+// ============================================================================
+// Prompt Editor Modal
+// ============================================================================
+
+func (m *Model) renderPromptEditor() string {
+	title := "Create Prompt"
+	if !m.promptEditorIsNew {
+		title = "Edit Prompt"
+	}
+
+	var content strings.Builder
+	content.WriteString(ModalTitleStyle.Render(title))
+	content.WriteString("\n\n")
+
+	// Name field
+	nameLabel := "Name:"
+	if m.promptEditorFocus == 0 {
+		nameLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Name:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", nameLabel))
+	if m.promptEditorIsNew {
+		content.WriteString(m.promptEditorName.View())
+	} else {
+		content.WriteString(lipgloss.NewStyle().Faint(true).Render(m.promptEditorName.Value() + " (readonly)"))
+	}
+	content.WriteString("\n\n")
+
+	// Description field
+	descLabel := "Description:"
+	if m.promptEditorFocus == 1 {
+		descLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Description:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", descLabel))
+	content.WriteString(m.promptEditorDesc.View())
+	content.WriteString("\n\n")
+
+	// Content field
+	contentLabel := "Template (use {{var}} for placeholders):"
+	if m.promptEditorFocus == 2 {
+		contentLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Template (use {{var}} for placeholders):")
+	}
+	content.WriteString(contentLabel)
+	content.WriteString("\n")
+	content.WriteString(m.promptEditorContent.View())
+	content.WriteString("\n\n")
+
+	// Scope selector (only shown when in project)
+	if m.hasProjectConfig() {
+		scopeLabel := "Scope:"
+		if m.promptEditorFocus == 3 {
+			scopeLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Scope:")
+		}
+		content.WriteString(fmt.Sprintf("%s ", scopeLabel))
+		for i, name := range scopeNames {
+			if i == m.promptEditorScope {
+				content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Render(" " + name + " "))
+			} else {
+				content.WriteString(" " + name + " ")
+			}
+		}
+		content.WriteString("\n\n")
+	}
+
+	helpText := "Tab: next field • ←/→: change scope • Ctrl+S: save • Esc: cancel"
+	content.WriteString(KeyDescStyle.Render(helpText))
+
+	modal := ModalStyle.Width(70).Render(content.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+func (m *Model) handlePromptEditorInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.showPromptEditor = false
+		return m, nil
+	case "tab":
+		m.cyclePromptEditorFocus(1)
+		return m, nil
+	case "shift+tab":
+		m.cyclePromptEditorFocus(-1)
+		return m, nil
+	case "ctrl+s":
+		return m, m.savePrompt()
+	case "left", "h":
+		if m.promptEditorFocus == 3 && m.hasProjectConfig() {
+			m.promptEditorScope = (m.promptEditorScope - 1 + len(scopeNames)) % len(scopeNames)
+			return m, nil
+		}
+	case "right", "l":
+		if m.promptEditorFocus == 3 && m.hasProjectConfig() {
+			m.promptEditorScope = (m.promptEditorScope + 1) % len(scopeNames)
+			return m, nil
+		}
+	}
+
+	// Delegate to focused input
+	var cmd tea.Cmd
+	switch m.promptEditorFocus {
+	case 0:
+		if m.promptEditorIsNew {
+			m.promptEditorName, cmd = m.promptEditorName.Update(msg)
+		}
+	case 1:
+		m.promptEditorDesc, cmd = m.promptEditorDesc.Update(msg)
+	case 2:
+		m.promptEditorContent, cmd = m.promptEditorContent.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m *Model) cyclePromptEditorFocus(delta int) {
+	maxFocus := 2
+	if m.hasProjectConfig() {
+		maxFocus = 3 // Include scope field when in project
+	}
+	if !m.promptEditorIsNew {
+		// Skip name field when editing
+		if m.promptEditorFocus == 1 && delta < 0 {
+			m.promptEditorFocus = maxFocus
+			delta = 0
+		}
+	}
+	m.promptEditorFocus = (m.promptEditorFocus + delta + maxFocus + 1) % (maxFocus + 1)
+	if !m.promptEditorIsNew && m.promptEditorFocus == 0 {
+		m.promptEditorFocus = 1
+	}
+
+	// Update focus state
+	m.promptEditorName.Blur()
+	m.promptEditorDesc.Blur()
+	m.promptEditorContent.Blur()
+
+	switch m.promptEditorFocus {
+	case 0:
+		m.promptEditorName.Focus()
+	case 1:
+		m.promptEditorDesc.Focus()
+	case 2:
+		m.promptEditorContent.Focus()
+	}
+}
+
+func (m *Model) openPromptEditor(p *prompt.Prompt) {
+	m.showPromptEditor = true
+	m.promptEditorIsNew = (p == nil)
+	m.promptEditorPrompt = p
+
+	if p != nil {
+		m.promptEditorName.SetValue(p.Name)
+		m.promptEditorDesc.SetValue(p.Description)
+		m.promptEditorContent.SetValue(p.Template)
+		// Set scope based on existing prompt
+		m.promptEditorScope = scopeIndexGlobal
+		if p.Scope == "local" {
+			m.promptEditorScope = scopeIndexLocal
+		}
+		m.promptEditorFocus = 1
+		m.promptEditorDesc.Focus()
+	} else {
+		m.promptEditorName.SetValue("")
+		m.promptEditorDesc.SetValue("")
+		m.promptEditorContent.SetValue("")
+		m.promptEditorScope = m.defaultScopeIndex()
+		m.promptEditorFocus = 0
+		m.promptEditorName.Focus()
+	}
+	m.promptEditorName.Blur()
+	m.promptEditorDesc.Blur()
+	m.promptEditorContent.Blur()
+
+	if m.promptEditorIsNew {
+		m.promptEditorName.Focus()
+	} else {
+		m.promptEditorDesc.Focus()
+	}
+}
+
+func (m *Model) savePrompt() tea.Cmd {
+	return func() tea.Msg {
+		name := strings.TrimSpace(m.promptEditorName.Value())
+		desc := strings.TrimSpace(m.promptEditorDesc.Value())
+		template := m.promptEditorContent.Value()
+
+		if name == "" {
+			return resourceCreatedMsg{resourceType: "prompt", err: fmt.Errorf("name is required")}
+		}
+		if strings.ContainsAny(name, " \t\n/\\") {
+			return resourceCreatedMsg{resourceType: "prompt", err: fmt.Errorf("name cannot contain spaces or path separators")}
+		}
+
+		// Determine scope and resource directory
+		scope := config.ScopeGlobal
+		resourceDir := m.cfg.ConfigDir
+		if m.promptEditorScope == scopeIndexLocal {
+			scope = config.ScopeLocal
+			// Use project's .agentctl directory for local scope
+			if m.cfg.ProjectPath != "" {
+				resourceDir = filepath.Join(filepath.Dir(m.cfg.ProjectPath), ".agentctl")
+			}
+		}
+
+		promptsDir := filepath.Join(resourceDir, "prompts")
+		if err := os.MkdirAll(promptsDir, 0755); err != nil {
+			return resourceCreatedMsg{resourceType: "prompt", err: err}
+		}
+
+		promptPath := filepath.Join(promptsDir, name+".json")
+
+		if m.promptEditorIsNew {
+			if _, err := os.Stat(promptPath); err == nil {
+				return resourceCreatedMsg{resourceType: "prompt", err: fmt.Errorf("prompt %q already exists", name)}
+			}
+		}
+
+		if desc == "" {
+			desc = "No description"
+		}
+		if template == "" {
+			template = "{{input}}"
+		}
+
+		// Extract variables from template
+		variables := extractTemplateVariables(template)
+
+		p := &prompt.Prompt{
+			Name:        name,
+			Description: desc,
+			Template:    template,
+			Variables:   variables,
+			Scope:       string(scope),
+		}
+
+		data, err := json.MarshalIndent(p, "", "  ")
+		if err != nil {
+			return resourceCreatedMsg{resourceType: "prompt", err: err}
+		}
+
+		if err := os.WriteFile(promptPath, data, 0644); err != nil {
+			return resourceCreatedMsg{resourceType: "prompt", err: err}
+		}
+
+		if m.promptEditorIsNew {
+			return resourceCreatedMsg{resourceType: "prompt", name: name, scope: string(scope)}
+		}
+		return resourceEditedMsg{resourceType: "prompt"}
+	}
+}
+
+// ============================================================================
+// Skill Editor Modal
+// ============================================================================
+
+func (m *Model) renderSkillEditor() string {
+	title := "Create Skill"
+	if !m.skillEditorIsNew {
+		title = "Edit Skill"
+	}
+
+	var content strings.Builder
+	content.WriteString(ModalTitleStyle.Render(title))
+	content.WriteString("\n\n")
+
+	fields := []struct {
+		label string
+		input textinput.Model
+		focus int
+	}{
+		{"Name:", m.skillEditorName, 0},
+		{"Description:", m.skillEditorDesc, 1},
+		{"Author:", m.skillEditorAuthor, 2},
+		{"Version:", m.skillEditorVersion, 3},
+	}
+
+	for _, f := range fields {
+		label := f.label
+		if m.skillEditorFocus == f.focus {
+			label = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render(f.label)
+		}
+		content.WriteString(fmt.Sprintf("%s ", label))
+		if f.focus == 0 && !m.skillEditorIsNew {
+			content.WriteString(lipgloss.NewStyle().Faint(true).Render(f.input.Value() + " (readonly)"))
+		} else {
+			content.WriteString(f.input.View())
+		}
+		content.WriteString("\n\n")
+	}
+
+	// Scope selector (only shown when in project)
+	if m.hasProjectConfig() {
+		scopeLabel := "Scope:"
+		if m.skillEditorFocus == 4 {
+			scopeLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Scope:")
+		}
+		content.WriteString(fmt.Sprintf("%s ", scopeLabel))
+		for i, name := range scopeNames {
+			if i == m.skillEditorScope {
+				content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Render(" " + name + " "))
+			} else {
+				content.WriteString(" " + name + " ")
+			}
+		}
+		content.WriteString("\n\n")
+	}
+
+	helpText := "Tab: next field • ←/→: change scope • Ctrl+S: save • Esc: cancel"
+	content.WriteString(KeyDescStyle.Render(helpText))
+
+	modal := ModalStyle.Width(60).Render(content.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+func (m *Model) handleSkillEditorInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.showSkillEditor = false
+		return m, nil
+	case "tab":
+		m.cycleSkillEditorFocus(1)
+		return m, nil
+	case "shift+tab":
+		m.cycleSkillEditorFocus(-1)
+		return m, nil
+	case "ctrl+s":
+		return m, m.saveSkill()
+	case "left", "right":
+		// Handle scope selection when on scope field (focus 4)
+		if m.skillEditorFocus == 4 && m.hasProjectConfig() {
+			m.skillEditorScope = (m.skillEditorScope + 1) % len(scopeNames)
+			return m, nil
+		}
+	}
+
+	// Delegate to focused input
+	var cmd tea.Cmd
+	switch m.skillEditorFocus {
+	case 0:
+		if m.skillEditorIsNew {
+			m.skillEditorName, cmd = m.skillEditorName.Update(msg)
+		}
+	case 1:
+		m.skillEditorDesc, cmd = m.skillEditorDesc.Update(msg)
+	case 2:
+		m.skillEditorAuthor, cmd = m.skillEditorAuthor.Update(msg)
+	case 3:
+		m.skillEditorVersion, cmd = m.skillEditorVersion.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m *Model) cycleSkillEditorFocus(delta int) {
+	maxFocus := 3
+	// Include scope field when in project
+	if m.hasProjectConfig() {
+		maxFocus = 4
+	}
+	m.skillEditorFocus = (m.skillEditorFocus + delta + maxFocus + 1) % (maxFocus + 1)
+	if !m.skillEditorIsNew && m.skillEditorFocus == 0 {
+		if delta > 0 {
+			m.skillEditorFocus = 1
+		} else {
+			m.skillEditorFocus = maxFocus
+		}
+	}
+
+	m.skillEditorName.Blur()
+	m.skillEditorDesc.Blur()
+	m.skillEditorAuthor.Blur()
+	m.skillEditorVersion.Blur()
+
+	switch m.skillEditorFocus {
+	case 0:
+		m.skillEditorName.Focus()
+	case 1:
+		m.skillEditorDesc.Focus()
+	case 2:
+		m.skillEditorAuthor.Focus()
+	case 3:
+		m.skillEditorVersion.Focus()
+	// case 4 is scope selector - no focus change needed (not a text input)
+	}
+}
+
+func (m *Model) openSkillEditor(s *skill.Skill) {
+	m.showSkillEditor = true
+	m.skillEditorIsNew = (s == nil)
+	m.skillEditorSkill = s
+
+	if s != nil {
+		m.skillEditorName.SetValue(s.Name)
+		m.skillEditorDesc.SetValue(s.Description)
+		m.skillEditorAuthor.SetValue(s.Author)
+		m.skillEditorVersion.SetValue(s.Version)
+		m.skillEditorFocus = 1
+		// Set scope from existing skill
+		if s.Scope == "local" {
+			m.skillEditorScope = scopeIndexLocal
+		} else {
+			m.skillEditorScope = scopeIndexGlobal
+		}
+	} else {
+		m.skillEditorName.SetValue("")
+		m.skillEditorDesc.SetValue("")
+		m.skillEditorAuthor.SetValue("")
+		m.skillEditorVersion.SetValue("1.0.0")
+		m.skillEditorFocus = 0
+		m.skillEditorScope = m.defaultScopeIndex()
+	}
+
+	m.skillEditorName.Blur()
+	m.skillEditorDesc.Blur()
+	m.skillEditorAuthor.Blur()
+	m.skillEditorVersion.Blur()
+
+	if m.skillEditorIsNew {
+		m.skillEditorName.Focus()
+	} else {
+		m.skillEditorDesc.Focus()
+	}
+}
+
+func (m *Model) saveSkill() tea.Cmd {
+	return func() tea.Msg {
+		name := strings.TrimSpace(m.skillEditorName.Value())
+		desc := strings.TrimSpace(m.skillEditorDesc.Value())
+		author := strings.TrimSpace(m.skillEditorAuthor.Value())
+		version := strings.TrimSpace(m.skillEditorVersion.Value())
+
+		if name == "" {
+			return resourceCreatedMsg{resourceType: "skill", err: fmt.Errorf("name is required")}
+		}
+		if strings.ContainsAny(name, " \t\n/\\") {
+			return resourceCreatedMsg{resourceType: "skill", err: fmt.Errorf("name cannot contain spaces or path separators")}
+		}
+
+		skillsDir := filepath.Join(m.cfg.ConfigDir, "skills")
+		skillDir := filepath.Join(skillsDir, name)
+
+		if m.skillEditorIsNew {
+			if _, err := os.Stat(skillDir); err == nil {
+				return resourceCreatedMsg{resourceType: "skill", err: fmt.Errorf("skill %q already exists", name)}
+			}
+			if err := os.MkdirAll(skillDir, 0755); err != nil {
+				return resourceCreatedMsg{resourceType: "skill", err: err}
+			}
+		}
+
+		if desc == "" {
+			desc = "No description"
+		}
+		if version == "" {
+			version = "1.0.0"
+		}
+
+		s := &skill.Skill{
+			Name:        name,
+			Description: desc,
+			Author:      author,
+			Version:     version,
+		}
+
+		skillPath := filepath.Join(skillDir, "skill.json")
+		data, err := json.MarshalIndent(s, "", "  ")
+		if err != nil {
+			return resourceCreatedMsg{resourceType: "skill", err: err}
+		}
+
+		if err := os.WriteFile(skillPath, data, 0644); err != nil {
+			return resourceCreatedMsg{resourceType: "skill", err: err}
+		}
+
+		// Create empty prompt.md if new
+		if m.skillEditorIsNew {
+			promptPath := filepath.Join(skillDir, "prompt.md")
+			if err := os.WriteFile(promptPath, []byte("# "+name+"\n\nAdd your skill prompt here.\n"), 0644); err != nil {
+				return resourceCreatedMsg{resourceType: "skill", err: err}
+			}
+		}
+
+		if m.skillEditorIsNew {
+			return resourceCreatedMsg{resourceType: "skill", name: name}
+		}
+		return resourceEditedMsg{resourceType: "skill"}
+	}
+}
+
+// ============================================================================
+// Command Editor Modal
+// ============================================================================
+
+var modelNames = []string{"default", "opus", "sonnet", "haiku"}
+
+func (m *Model) renderCommandEditor() string {
+	title := "Create Command"
+	if !m.commandEditorIsNew {
+		title = "Edit Command"
+	}
+
+	var content strings.Builder
+	content.WriteString(ModalTitleStyle.Render(title))
+	content.WriteString("\n\n")
+
+	// Name field
+	nameLabel := "Name:"
+	if m.commandEditorFocus == 0 {
+		nameLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Name:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", nameLabel))
+	if m.commandEditorIsNew {
+		content.WriteString(m.commandEditorName.View())
+	} else {
+		content.WriteString(lipgloss.NewStyle().Faint(true).Render(m.commandEditorName.Value() + " (readonly)"))
+	}
+	content.WriteString("\n\n")
+
+	// Description field
+	descLabel := "Description:"
+	if m.commandEditorFocus == 1 {
+		descLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Description:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", descLabel))
+	content.WriteString(m.commandEditorDesc.View())
+	content.WriteString("\n\n")
+
+	// Argument hint field
+	argLabel := "Argument Hint:"
+	if m.commandEditorFocus == 2 {
+		argLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Argument Hint:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", argLabel))
+	content.WriteString(m.commandEditorArgHint.View())
+	content.WriteString("\n\n")
+
+	// Model selector
+	modelLabel := "Model:"
+	if m.commandEditorFocus == 3 {
+		modelLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Model:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", modelLabel))
+	for i, name := range modelNames {
+		if i == m.commandEditorModel {
+			content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Render(" " + name + " "))
+		} else {
+			content.WriteString(" " + name + " ")
+		}
+	}
+	content.WriteString("\n\n")
+
+	// Prompt content
+	promptLabel := "Prompt (use $ARGUMENTS for input):"
+	if m.commandEditorFocus == 4 {
+		promptLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Prompt (use $ARGUMENTS for input):")
+	}
+	content.WriteString(promptLabel)
+	content.WriteString("\n")
+	content.WriteString(m.commandEditorContent.View())
+	content.WriteString("\n\n")
+
+	// Scope selector (only shown when in project)
+	if m.hasProjectConfig() {
+		scopeLabel := "Scope:"
+		if m.commandEditorFocus == 5 {
+			scopeLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Scope:")
+		}
+		content.WriteString(fmt.Sprintf("%s ", scopeLabel))
+		for i, name := range scopeNames {
+			if i == m.commandEditorScope {
+				content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Render(" " + name + " "))
+			} else {
+				content.WriteString(" " + name + " ")
+			}
+		}
+		content.WriteString("\n\n")
+	}
+
+	helpText := "Tab: next • ←/→: change selection • Ctrl+S: save • Esc: cancel"
+	content.WriteString(KeyDescStyle.Render(helpText))
+
+	modal := ModalStyle.Width(70).Render(content.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+func (m *Model) handleCommandEditorInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.showCommandEditor = false
+		return m, nil
+	case "tab":
+		m.cycleCommandEditorFocus(1)
+		return m, nil
+	case "shift+tab":
+		m.cycleCommandEditorFocus(-1)
+		return m, nil
+	case "ctrl+s":
+		return m, m.saveCommand()
+	case "left", "h":
+		if m.commandEditorFocus == 3 {
+			m.commandEditorModel = (m.commandEditorModel - 1 + len(modelNames)) % len(modelNames)
+			return m, nil
+		}
+		if m.commandEditorFocus == 5 && m.hasProjectConfig() {
+			m.commandEditorScope = (m.commandEditorScope - 1 + len(scopeNames)) % len(scopeNames)
+			return m, nil
+		}
+	case "right", "l":
+		if m.commandEditorFocus == 3 {
+			m.commandEditorModel = (m.commandEditorModel + 1) % len(modelNames)
+			return m, nil
+		}
+		if m.commandEditorFocus == 5 && m.hasProjectConfig() {
+			m.commandEditorScope = (m.commandEditorScope + 1) % len(scopeNames)
+			return m, nil
+		}
+	}
+
+	// Delegate to focused input
+	var cmd tea.Cmd
+	switch m.commandEditorFocus {
+	case 0:
+		if m.commandEditorIsNew {
+			m.commandEditorName, cmd = m.commandEditorName.Update(msg)
+		}
+	case 1:
+		m.commandEditorDesc, cmd = m.commandEditorDesc.Update(msg)
+	case 2:
+		m.commandEditorArgHint, cmd = m.commandEditorArgHint.Update(msg)
+	case 4:
+		m.commandEditorContent, cmd = m.commandEditorContent.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m *Model) cycleCommandEditorFocus(delta int) {
+	maxFocus := 4
+	if m.hasProjectConfig() {
+		maxFocus = 5 // Include scope field when in project
+	}
+	m.commandEditorFocus = (m.commandEditorFocus + delta + maxFocus + 1) % (maxFocus + 1)
+	if !m.commandEditorIsNew && m.commandEditorFocus == 0 {
+		if delta > 0 {
+			m.commandEditorFocus = 1
+		} else {
+			m.commandEditorFocus = maxFocus
+		}
+	}
+
+	m.commandEditorName.Blur()
+	m.commandEditorDesc.Blur()
+	m.commandEditorArgHint.Blur()
+	m.commandEditorContent.Blur()
+
+	switch m.commandEditorFocus {
+	case 0:
+		m.commandEditorName.Focus()
+	case 1:
+		m.commandEditorDesc.Focus()
+	case 2:
+		m.commandEditorArgHint.Focus()
+	case 4:
+		m.commandEditorContent.Focus()
+	}
+}
+
+func (m *Model) openCommandEditor(c *command.Command) {
+	m.showCommandEditor = true
+	m.commandEditorIsNew = (c == nil)
+	m.commandEditorCommand = c
+
+	if c != nil {
+		m.commandEditorName.SetValue(c.Name)
+		m.commandEditorDesc.SetValue(c.Description)
+		m.commandEditorArgHint.SetValue(c.ArgumentHint)
+		m.commandEditorContent.SetValue(c.Prompt)
+		m.commandEditorModel = 0
+		for i, name := range modelNames {
+			if name == c.Model || (c.Model == "" && name == "default") {
+				m.commandEditorModel = i
+				break
+			}
+		}
+		// Set scope based on existing command
+		m.commandEditorScope = scopeIndexGlobal
+		if c.Scope == "local" {
+			m.commandEditorScope = scopeIndexLocal
+		}
+		m.commandEditorFocus = 1
+	} else {
+		m.commandEditorName.SetValue("")
+		m.commandEditorDesc.SetValue("")
+		m.commandEditorArgHint.SetValue("")
+		m.commandEditorContent.SetValue("")
+		m.commandEditorModel = 0
+		m.commandEditorScope = m.defaultScopeIndex()
+		m.commandEditorFocus = 0
+	}
+
+	m.commandEditorName.Blur()
+	m.commandEditorDesc.Blur()
+	m.commandEditorArgHint.Blur()
+	m.commandEditorContent.Blur()
+
+	if m.commandEditorIsNew {
+		m.commandEditorName.Focus()
+	} else {
+		m.commandEditorDesc.Focus()
+	}
+}
+
+func (m *Model) saveCommand() tea.Cmd {
+	return func() tea.Msg {
+		name := strings.TrimSpace(m.commandEditorName.Value())
+		desc := strings.TrimSpace(m.commandEditorDesc.Value())
+		argHint := strings.TrimSpace(m.commandEditorArgHint.Value())
+		promptText := m.commandEditorContent.Value()
+		model := modelNames[m.commandEditorModel]
+		if model == "default" {
+			model = ""
+		}
+
+		if name == "" {
+			return resourceCreatedMsg{resourceType: "command", err: fmt.Errorf("name is required")}
+		}
+		if strings.ContainsAny(name, " \t\n/") {
+			return resourceCreatedMsg{resourceType: "command", err: fmt.Errorf("name cannot contain spaces or slashes")}
+		}
+
+		// Determine scope and resource directory
+		scope := config.ScopeGlobal
+		resourceDir := m.cfg.ConfigDir
+		if m.commandEditorScope == scopeIndexLocal {
+			scope = config.ScopeLocal
+			// Use project's .agentctl directory for local scope
+			if m.cfg.ProjectPath != "" {
+				resourceDir = filepath.Join(filepath.Dir(m.cfg.ProjectPath), ".agentctl")
+			}
+		}
+
+		commandsDir := filepath.Join(resourceDir, "commands")
+		if err := os.MkdirAll(commandsDir, 0755); err != nil {
+			return resourceCreatedMsg{resourceType: "command", err: err}
+		}
+
+		commandPath := filepath.Join(commandsDir, name+".json")
+
+		if m.commandEditorIsNew {
+			if _, err := os.Stat(commandPath); err == nil {
+				return resourceCreatedMsg{resourceType: "command", err: fmt.Errorf("command %q already exists", name)}
+			}
+		}
+
+		if desc == "" {
+			desc = "No description"
+		}
+		if promptText == "" {
+			promptText = "$ARGUMENTS"
+		}
+
+		cmd := &command.Command{
+			Name:         name,
+			Description:  desc,
+			ArgumentHint: argHint,
+			Model:        model,
+			Prompt:       promptText,
+			Scope:        string(scope),
+		}
+
+		data, err := json.MarshalIndent(cmd, "", "  ")
+		if err != nil {
+			return resourceCreatedMsg{resourceType: "command", err: err}
+		}
+
+		if err := os.WriteFile(commandPath, data, 0644); err != nil {
+			return resourceCreatedMsg{resourceType: "command", err: err}
+		}
+
+		if m.commandEditorIsNew {
+			return resourceCreatedMsg{resourceType: "command", name: name, scope: string(scope)}
+		}
+		return resourceEditedMsg{resourceType: "command"}
+	}
+}
+
+// ============================================================================
+// Server Editor Modal
+// ============================================================================
+
+var transportNames = []string{"stdio", "http", "sse"}
+var scopeNames = []string{"global", "local"}
+
+// Scope index constants
+const (
+	scopeIndexGlobal = 0
+	scopeIndexLocal  = 1
+)
+
+// hasProjectConfig returns true if we're in a project with .agentctl.json
+func (m *Model) hasProjectConfig() bool {
+	return m.cfg.ProjectPath != ""
+}
+
+// defaultScopeIndex returns the default scope index (1=local if in project, 0=global otherwise)
+func (m *Model) defaultScopeIndex() int {
+	if m.hasProjectConfig() {
+		return 1 // local
+	}
+	return 0 // global
+}
+
+func (m *Model) renderServerEditor() string {
+	title := "Add Server"
+	if !m.serverEditorIsNew {
+		title = "Edit Server"
+	}
+
+	var content strings.Builder
+	content.WriteString(ModalTitleStyle.Render(title))
+	content.WriteString("\n\n")
+
+	// Name field
+	nameLabel := "Name:"
+	if m.serverEditorFocus == 0 {
+		nameLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Name:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", nameLabel))
+	if m.serverEditorIsNew {
+		content.WriteString(m.serverEditorName.View())
+	} else {
+		content.WriteString(lipgloss.NewStyle().Faint(true).Render(m.serverEditorName.Value() + " (readonly)"))
+	}
+	content.WriteString("\n\n")
+
+	// Source field
+	sourceLabel := "Source (alias, URL, or path):"
+	if m.serverEditorFocus == 1 {
+		sourceLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Source (alias, URL, or path):")
+	}
+	content.WriteString(fmt.Sprintf("%s ", sourceLabel))
+	content.WriteString(m.serverEditorSource.View())
+	content.WriteString("\n\n")
+
+	// Command field (for stdio)
+	cmdLabel := "Command (for stdio):"
+	if m.serverEditorFocus == 2 {
+		cmdLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Command (for stdio):")
+	}
+	content.WriteString(fmt.Sprintf("%s ", cmdLabel))
+	content.WriteString(m.serverEditorCommand.View())
+	content.WriteString("\n\n")
+
+	// Args field
+	argsLabel := "Arguments:"
+	if m.serverEditorFocus == 3 {
+		argsLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Arguments:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", argsLabel))
+	content.WriteString(m.serverEditorArgs.View())
+	content.WriteString("\n\n")
+
+	// Transport selector
+	transportLabel := "Transport:"
+	if m.serverEditorFocus == 4 {
+		transportLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Transport:")
+	}
+	content.WriteString(fmt.Sprintf("%s ", transportLabel))
+	for i, name := range transportNames {
+		if i == m.serverEditorTransport {
+			content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Render(" " + name + " "))
+		} else {
+			content.WriteString(" " + name + " ")
+		}
+	}
+	content.WriteString("\n\n")
+
+	// Scope selector (only shown when in project)
+	if m.hasProjectConfig() {
+		scopeLabel := "Scope:"
+		if m.serverEditorFocus == 5 {
+			scopeLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Scope:")
+		}
+		content.WriteString(fmt.Sprintf("%s ", scopeLabel))
+		for i, name := range scopeNames {
+			if i == m.serverEditorScope {
+				content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Render(" " + name + " "))
+			} else {
+				content.WriteString(" " + name + " ")
+			}
+		}
+		content.WriteString("\n\n")
+	}
+
+	helpText := "Tab: next • ←/→: change selection • Ctrl+S: save • Esc: cancel"
+	content.WriteString(KeyDescStyle.Render(helpText))
+
+	modal := ModalStyle.Width(70).Render(content.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+func (m *Model) handleServerEditorInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.showServerEditor = false
+		return m, nil
+	case "tab":
+		m.cycleServerEditorFocus(1)
+		return m, nil
+	case "shift+tab":
+		m.cycleServerEditorFocus(-1)
+		return m, nil
+	case "ctrl+s":
+		return m, m.saveServer()
+	case "left", "h":
+		if m.serverEditorFocus == 4 {
+			m.serverEditorTransport = (m.serverEditorTransport - 1 + len(transportNames)) % len(transportNames)
+			return m, nil
+		}
+		if m.serverEditorFocus == 5 && m.hasProjectConfig() {
+			m.serverEditorScope = (m.serverEditorScope - 1 + len(scopeNames)) % len(scopeNames)
+			return m, nil
+		}
+	case "right", "l":
+		if m.serverEditorFocus == 4 {
+			m.serverEditorTransport = (m.serverEditorTransport + 1) % len(transportNames)
+			return m, nil
+		}
+		if m.serverEditorFocus == 5 && m.hasProjectConfig() {
+			m.serverEditorScope = (m.serverEditorScope + 1) % len(scopeNames)
+			return m, nil
+		}
+	}
+
+	// Delegate to focused input
+	var cmd tea.Cmd
+	switch m.serverEditorFocus {
+	case 0:
+		if m.serverEditorIsNew {
+			m.serverEditorName, cmd = m.serverEditorName.Update(msg)
+		}
+	case 1:
+		m.serverEditorSource, cmd = m.serverEditorSource.Update(msg)
+	case 2:
+		m.serverEditorCommand, cmd = m.serverEditorCommand.Update(msg)
+	case 3:
+		m.serverEditorArgs, cmd = m.serverEditorArgs.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m *Model) cycleServerEditorFocus(delta int) {
+	maxFocus := 4
+	if m.hasProjectConfig() {
+		maxFocus = 5 // Include scope field when in project
+	}
+	m.serverEditorFocus = (m.serverEditorFocus + delta + maxFocus + 1) % (maxFocus + 1)
+	if !m.serverEditorIsNew && m.serverEditorFocus == 0 {
+		if delta > 0 {
+			m.serverEditorFocus = 1
+		} else {
+			m.serverEditorFocus = maxFocus
+		}
+	}
+
+	m.serverEditorName.Blur()
+	m.serverEditorSource.Blur()
+	m.serverEditorCommand.Blur()
+	m.serverEditorArgs.Blur()
+
+	switch m.serverEditorFocus {
+	case 0:
+		m.serverEditorName.Focus()
+	case 1:
+		m.serverEditorSource.Focus()
+	case 2:
+		m.serverEditorCommand.Focus()
+	case 3:
+		m.serverEditorArgs.Focus()
+	}
+}
+
+func (m *Model) openServerEditor(s *mcp.Server) {
+	m.showServerEditor = true
+	m.serverEditorIsNew = (s == nil)
+	m.serverEditorServer = s
+
+	if s != nil {
+		m.serverEditorName.SetValue(s.Name)
+		if s.URL != "" {
+			m.serverEditorSource.SetValue(s.URL)
+		} else if s.Source.Alias != "" {
+			m.serverEditorSource.SetValue(s.Source.Alias)
+		} else {
+			m.serverEditorSource.SetValue("")
+		}
+		m.serverEditorCommand.SetValue(s.Command)
+		m.serverEditorArgs.SetValue(strings.Join(s.Args, " "))
+		m.serverEditorTransport = 0
+		for i, name := range transportNames {
+			if name == string(s.Transport) {
+				m.serverEditorTransport = i
+				break
+			}
+		}
+		// Set scope based on existing server
+		m.serverEditorScope = scopeIndexGlobal
+		if s.Scope == "local" {
+			m.serverEditorScope = scopeIndexLocal
+		}
+		m.serverEditorFocus = 1
+	} else {
+		m.serverEditorName.SetValue("")
+		m.serverEditorSource.SetValue("")
+		m.serverEditorCommand.SetValue("")
+		m.serverEditorArgs.SetValue("")
+		m.serverEditorTransport = 0
+		m.serverEditorScope = m.defaultScopeIndex()
+		m.serverEditorFocus = 0
+	}
+
+	m.serverEditorName.Blur()
+	m.serverEditorSource.Blur()
+	m.serverEditorCommand.Blur()
+	m.serverEditorArgs.Blur()
+
+	if m.serverEditorIsNew {
+		m.serverEditorName.Focus()
+	} else {
+		m.serverEditorSource.Focus()
+	}
+}
+
+func (m *Model) saveServer() tea.Cmd {
+	return func() tea.Msg {
+		name := strings.TrimSpace(m.serverEditorName.Value())
+		source := strings.TrimSpace(m.serverEditorSource.Value())
+		command := strings.TrimSpace(m.serverEditorCommand.Value())
+		args := strings.TrimSpace(m.serverEditorArgs.Value())
+		transport := mcp.Transport(transportNames[m.serverEditorTransport])
+
+		if name == "" {
+			return serverAddedMsg{err: fmt.Errorf("name is required")}
+		}
+
+		if m.serverEditorIsNew {
+			if _, exists := m.cfg.Servers[name]; exists {
+				return serverAddedMsg{err: fmt.Errorf("server %q already exists", name)}
+			}
+		}
+
+		server := &mcp.Server{
+			Name:      name,
+			Transport: transport,
+		}
+
+		// Determine source type and configure server
+		if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+			server.URL = source
+			server.Source = mcp.Source{Type: "remote", URL: source}
+		} else if strings.HasPrefix(source, "./") || strings.HasPrefix(source, "/") {
+			server.Source = mcp.Source{Type: "local", URL: source}
+			server.Command = command
+			if args != "" {
+				server.Args = strings.Fields(args)
+			}
+		} else if source != "" {
+			// Assume alias
+			server.Source = mcp.Source{Type: "alias", Alias: source}
+		} else {
+			// Manual command
+			server.Source = mcp.Source{Type: "manual"}
+			server.Command = command
+			if args != "" {
+				server.Args = strings.Fields(args)
+			}
+		}
+
+		// Determine scope and save to appropriate config
+		scope := config.ScopeGlobal
+		if m.serverEditorScope == scopeIndexLocal {
+			scope = config.ScopeLocal
+		}
+		server.Scope = string(scope)
+
+		// Load the scoped config, add server, and save
+		scopedCfg, err := config.LoadScoped(scope)
+		if err != nil {
+			return serverAddedMsg{err: fmt.Errorf("failed to load %s config: %w", scope, err)}
+		}
+		if scopedCfg.Servers == nil {
+			scopedCfg.Servers = make(map[string]*mcp.Server)
+		}
+		scopedCfg.Servers[name] = server
+		if err := scopedCfg.Save(); err != nil {
+			return serverAddedMsg{err: err}
+		}
+
+		// Also update the merged config in memory
+		if m.cfg.Servers == nil {
+			m.cfg.Servers = make(map[string]*mcp.Server)
+		}
+		m.cfg.Servers[name] = server
+
+		return serverAddedMsg{name: name, scope: string(scope)}
+	}
+}
+
+// Helper function to extract template variables
+func extractTemplateVariables(template string) []string {
+	re := regexp.MustCompile(`\{\{(\w+)\}\}`)
+	matches := re.FindAllStringSubmatch(template, -1)
+
+	seen := make(map[string]bool)
+	var variables []string
+	for _, match := range matches {
+		if len(match) > 1 && !seen[match[1]] {
+			seen[match[1]] = true
+			variables = append(variables, match[1])
+		}
+	}
+	return variables
 }
 
 // Helper functions
 
-// adjustCursorForCurrentTab adjusts the cursor after deletion based on the current tab
-func (m *Model) adjustCursorForCurrentTab() {
-	var maxIndex int
+// currentTabLength returns the number of items in the current tab
+func (m *Model) currentTabLength() int {
 	switch m.activeTab {
 	case TabServers:
-		maxIndex = len(m.filteredItems) - 1
+		return len(m.filteredItems)
 	case TabCommands:
-		maxIndex = len(m.commands) - 1
+		return len(m.commands)
 	case TabRules:
-		maxIndex = len(m.rules) - 1
+		return len(m.rules)
 	case TabSkills:
-		maxIndex = len(m.skills) - 1
+		return len(m.skills)
 	case TabPrompts:
-		maxIndex = len(m.prompts) - 1
+		return len(m.prompts)
 	case TabHooks:
-		maxIndex = len(m.hooks) - 1
+		return len(m.hooks)
 	}
+	return 0
+}
+
+// adjustCursorForCurrentTab adjusts the cursor after deletion based on the current tab
+func (m *Model) adjustCursorForCurrentTab() {
+	maxIndex := m.currentTabLength() - 1
 	if m.cursor > maxIndex {
 		m.cursor = max(0, maxIndex)
 	}
-}
-
-func truncate(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) <= maxLen {
-		return s
-	}
-	if maxLen < 3 {
-		return string(runes[:maxLen])
-	}
-	return string(runes[:maxLen-3]) + "..."
 }
 
 func max(a, b int) int {
@@ -1950,8 +3928,9 @@ type syncCompletedMsg struct {
 }
 
 type serverAddedMsg struct {
-	name string
-	err  error
+	name  string
+	scope string
+	err   error
 }
 
 type serverToggledMsg struct {
@@ -1972,6 +3951,7 @@ type toolExecutedMsg struct {
 type resourceCreatedMsg struct {
 	resourceType string
 	name         string
+	scope        string
 	err          error
 }
 
@@ -2034,10 +4014,20 @@ func (m *Model) testServer(name string) tea.Cmd {
 }
 
 func (m *Model) testAllServers() tea.Cmd {
-	return func() tea.Msg {
-		// This just starts the batch - individual results will come via testServer
-		return syncCompletedMsg{errors: make(map[string]error)}
+	// Collect all installed servers and mark them as checking
+	var cmds []tea.Cmd
+	for i := range m.allServers {
+		if m.allServers[i].Status == ServerStatusInstalled {
+			m.allServers[i].Health = HealthStatusChecking
+			name := m.allServers[i].Name
+			cmds = append(cmds, m.testServer(name))
+		}
 	}
+	m.applyFilter()
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) syncAll() tea.Cmd {
@@ -2199,242 +4189,9 @@ func (m *Model) executeTool(serverName, toolName string, args map[string]any) te
 	}
 }
 
-// Resource CRUD commands
-// These use tea.Exec to properly suspend the TUI while running interactive forms
-
-// formExec wraps a function to implement tea.ExecCommand interface
-type formExec struct {
-	run func() error
-}
-
-func (f formExec) Run() error              { return f.run() }
-func (f formExec) SetStdin(r io.Reader)    {}
-func (f formExec) SetStdout(w io.Writer)   {}
-func (f formExec) SetStderr(w io.Writer)   {}
-
-func (m *Model) createServer() tea.Cmd {
-	crud := m.resourceCRUD
-	var createdName string
-	return tea.Exec(formExec{run: func() error {
-		s, err := crud.CreateServer()
-		if err != nil {
-			return err
-		}
-		createdName = s.Name
-		return nil
-	}}, func(err error) tea.Msg {
-		if err != nil {
-			return serverAddedMsg{name: "new server", err: err}
-		}
-		return serverAddedMsg{name: createdName, err: nil}
-	})
-}
-
-func (m *Model) createCommand() tea.Cmd {
-	crud := m.resourceCRUD
-	var createdName string
-	return tea.Exec(formExec{run: func() error {
-		cmd, err := crud.CreateCommand()
-		if err != nil {
-			return err
-		}
-		createdName = cmd.Name
-		return nil
-	}}, func(err error) tea.Msg {
-		if err != nil {
-			return resourceCreatedMsg{resourceType: "command", err: err}
-		}
-		return resourceCreatedMsg{resourceType: "command", name: createdName}
-	})
-}
-
-func (m *Model) editCommand(cmd *command.Command) tea.Cmd {
-	crud := m.resourceCRUD
-	c := exec.Command(getEditor(), filepath.Join(crud.cfg.ConfigDir, "commands", cmd.Name+".json"))
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return resourceEditedMsg{resourceType: "command", err: err}
-	})
-}
-
-func (m *Model) deleteCommand(cmd *command.Command) tea.Cmd {
-	crud := m.resourceCRUD
-	cmdName := cmd.Name
-	var deleted bool
-	return tea.Exec(formExec{run: func() error {
-		confirmed, err := ConfirmDelete("command", cmdName)
-		if err != nil {
-			return err
-		}
-		if !confirmed {
-			return nil
-		}
-		deleted = true
-		return crud.DeleteCommand(cmd)
-	}}, func(err error) tea.Msg {
-		if err != nil {
-			return resourceDeletedMsg{resourceType: "command", err: err}
-		}
-		if !deleted {
-			return resourceDeletedMsg{resourceType: "command", err: nil} // cancelled
-		}
-		return resourceDeletedMsg{resourceType: "command", name: cmdName}
-	})
-}
-
-func (m *Model) createRule() tea.Cmd {
-	crud := m.resourceCRUD
-	var createdName string
-	return tea.Exec(formExec{run: func() error {
-		r, err := crud.CreateRule()
-		if err != nil {
-			return err
-		}
-		createdName = r.Name
-		return nil
-	}}, func(err error) tea.Msg {
-		if err != nil {
-			return resourceCreatedMsg{resourceType: "rule", err: err}
-		}
-		return resourceCreatedMsg{resourceType: "rule", name: createdName}
-	})
-}
-
-func (m *Model) editRule(r *rule.Rule) tea.Cmd {
-	c := exec.Command(getEditor(), r.Path)
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return resourceEditedMsg{resourceType: "rule", err: err}
-	})
-}
-
-func (m *Model) deleteRule(r *rule.Rule) tea.Cmd {
-	crud := m.resourceCRUD
-	ruleName := r.Name
-	ruleRef := r
-	var deleted bool
-	return tea.Exec(formExec{run: func() error {
-		confirmed, err := ConfirmDelete("rule", ruleName)
-		if err != nil {
-			return err
-		}
-		if !confirmed {
-			return nil
-		}
-		deleted = true
-		return crud.DeleteRule(ruleRef)
-	}}, func(err error) tea.Msg {
-		if err != nil {
-			return resourceDeletedMsg{resourceType: "rule", err: err}
-		}
-		if !deleted {
-			return resourceDeletedMsg{resourceType: "rule", err: nil}
-		}
-		return resourceDeletedMsg{resourceType: "rule", name: ruleName}
-	})
-}
-
-func (m *Model) createSkill() tea.Cmd {
-	crud := m.resourceCRUD
-	var createdName string
-	return tea.Exec(formExec{run: func() error {
-		s, err := crud.CreateSkill()
-		if err != nil {
-			return err
-		}
-		createdName = s.Name
-		return nil
-	}}, func(err error) tea.Msg {
-		if err != nil {
-			return resourceCreatedMsg{resourceType: "skill", err: err}
-		}
-		return resourceCreatedMsg{resourceType: "skill", name: createdName}
-	})
-}
-
-func (m *Model) editSkill(s *skill.Skill) tea.Cmd {
-	mainPromptPath := filepath.Join(s.Path, "prompts", "main.md")
-	c := exec.Command(getEditor(), mainPromptPath)
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return resourceEditedMsg{resourceType: "skill", err: err}
-	})
-}
-
-func (m *Model) deleteSkill(s *skill.Skill) tea.Cmd {
-	crud := m.resourceCRUD
-	skillName := s.Name
-	skillRef := s
-	var deleted bool
-	return tea.Exec(formExec{run: func() error {
-		confirmed, err := ConfirmDelete("skill", skillName)
-		if err != nil {
-			return err
-		}
-		if !confirmed {
-			return nil
-		}
-		deleted = true
-		return crud.DeleteSkill(skillRef)
-	}}, func(err error) tea.Msg {
-		if err != nil {
-			return resourceDeletedMsg{resourceType: "skill", err: err}
-		}
-		if !deleted {
-			return resourceDeletedMsg{resourceType: "skill", err: nil}
-		}
-		return resourceDeletedMsg{resourceType: "skill", name: skillName}
-	})
-}
-
-func (m *Model) createPrompt() tea.Cmd {
-	crud := m.resourceCRUD
-	var createdName string
-	return tea.Exec(formExec{run: func() error {
-		p, err := crud.CreatePrompt()
-		if err != nil {
-			return err
-		}
-		createdName = p.Name
-		return nil
-	}}, func(err error) tea.Msg {
-		if err != nil {
-			return resourceCreatedMsg{resourceType: "prompt", err: err}
-		}
-		return resourceCreatedMsg{resourceType: "prompt", name: createdName}
-	})
-}
-
-func (m *Model) editPrompt(p *prompt.Prompt) tea.Cmd {
-	crud := m.resourceCRUD
-	c := exec.Command(getEditor(), filepath.Join(crud.cfg.ConfigDir, "prompts", p.Name+".json"))
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return resourceEditedMsg{resourceType: "prompt", err: err}
-	})
-}
-
-func (m *Model) deletePrompt(p *prompt.Prompt) tea.Cmd {
-	crud := m.resourceCRUD
-	promptName := p.Name
-	promptRef := p
-	var deleted bool
-	return tea.Exec(formExec{run: func() error {
-		confirmed, err := ConfirmDelete("prompt", promptName)
-		if err != nil {
-			return err
-		}
-		if !confirmed {
-			return nil
-		}
-		deleted = true
-		return crud.DeletePrompt(promptRef)
-	}}, func(err error) tea.Msg {
-		if err != nil {
-			return resourceDeletedMsg{resourceType: "prompt", err: err}
-		}
-		if !deleted {
-			return resourceDeletedMsg{resourceType: "prompt", err: nil}
-		}
-		return resourceDeletedMsg{resourceType: "prompt", name: promptName}
-	})
-}
+// Resource CRUD helpers
+// Note: Create/Edit operations now use native bubbles modals (openRuleEditor, openCommandEditor, etc.)
+// The legacy huh-based form wrapper functions have been removed.
 
 // getEditor returns the user's preferred editor
 func getEditor() string {
@@ -2467,4 +4224,24 @@ func Run() error {
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
 	return err
+}
+
+// handleAliasWizardInput handles input for the alias wizard modal
+// TODO: Implement alias wizard functionality
+func (m *Model) handleAliasWizardInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.showAliasWizard = false
+	}
+	return m, nil
+}
+
+// renderAliasWizard renders the alias wizard modal
+// TODO: Implement alias wizard UI
+func (m *Model) renderAliasWizard() string {
+	content := ModalTitleStyle.Render("Alias Wizard (Coming Soon)") + "\n\n"
+	content += "This feature is not yet implemented.\n\n"
+	content += KeyDescStyle.Render("Press Esc to close")
+	modal := ModalStyle.Width(50).Render(content)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 }
