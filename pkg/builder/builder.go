@@ -227,7 +227,7 @@ func (b *Builder) buildGo(dir string, server *mcp.Server) error {
 		// Look for a directory matching the server name
 		for _, e := range entries {
 			if e.IsDir() && e.Name() == server.Name {
-				target = filepath.Join("cmd", e.Name())
+				target = "." + string(filepath.Separator) + filepath.Join("cmd", e.Name())
 				outputName = e.Name()
 				break
 			}
@@ -240,7 +240,7 @@ func (b *Builder) buildGo(dir string, server *mcp.Server) error {
 				if e.IsDir() {
 					// Check if it has main.go
 					if _, err := os.Stat(filepath.Join(cmdDir, e.Name(), "main.go")); err == nil {
-						target = filepath.Join("cmd", e.Name())
+						target = "." + string(filepath.Separator) + filepath.Join("cmd", e.Name())
 						outputName = e.Name()
 						break
 					}
