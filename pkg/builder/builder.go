@@ -56,7 +56,7 @@ func (b *Builder) Clone(server *mcp.Server) error {
 	}
 
 	// Ensure URL has protocol
-	if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "git@") {
+	if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "git@") && !strings.HasPrefix(url, "file://") && !strings.HasPrefix(url, "/") {
 		url = "https://" + url
 	}
 

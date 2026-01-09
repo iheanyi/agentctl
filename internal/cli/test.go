@@ -3,11 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os/exec"
-	"strings"
+	"sort"
+	stdsync "sync"
 	"time"
 
 	"github.com/iheanyi/agentctl/pkg/config"
+	"github.com/iheanyi/agentctl/pkg/mcp"
+	"github.com/iheanyi/agentctl/pkg/mcpclient"
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/secrets"
 	"github.com/spf13/cobra"
@@ -18,8 +20,11 @@ var testCmd = &cobra.Command{
 	Short: "Test MCP server health",
 	Long: `Test if MCP servers are working correctly.
 
-This runs a basic health check by starting each server and
-verifying it responds to initialization.
+This runs a comprehensive health check by:
+1. Connecting to the server
+2. Performing the MCP initialization handshake
+3. Listing available tools
+4. Verifying the server responds correctly
 
 Examples:
   agentctl test                  # Test all installed servers
@@ -33,7 +38,7 @@ var (
 )
 
 func init() {
-	testCmd.Flags().DurationVar(&testTimeout, "timeout", 5*time.Second, "Timeout for each server test")
+	testCmd.Flags().DurationVar(&testTimeout, "timeout", 10*time.Second, "Timeout for each server test")
 }
 
 func runTest(cmd *cobra.Command, args []string) error {
@@ -60,6 +65,9 @@ func runTest(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Sort for consistent output
+	sort.Strings(serversToTest)
+
 	if len(serversToTest) == 0 {
 		out.Println("No servers to test.")
 		return nil
@@ -68,132 +76,79 @@ func runTest(cmd *cobra.Command, args []string) error {
 	out.Println("Testing %d server(s)...", len(serversToTest))
 	out.Println("")
 
-	var passCount, failCount int
+	type testResult struct {
+		name    string
+		healthy bool
+		err     error
+		tools   int
+		latency time.Duration
+		skipped bool
+	}
 
-	for _, name := range serversToTest {
+	results := make([]testResult, len(serversToTest))
+	var wg stdsync.WaitGroup
+
+	for i, name := range serversToTest {
 		server := cfg.Servers[name]
 
 		if server.Disabled {
-			out.Info("%s: skipped (disabled)", name)
+			results[i] = testResult{name: name, skipped: true}
 			continue
 		}
 
-		// Resolve environment variables
-		env := make(map[string]string)
-		if server.Env != nil {
-			var resolveErr error
-			env, resolveErr = secrets.ResolveEnv(server.Env)
-			if resolveErr != nil {
-				out.Error("%s: failed to resolve env - %v", name, resolveErr)
-				failCount++
-				continue
-			}
-		}
-
-		// Try to start the server with timeout
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-
-		cmdArgs := server.Args
-		execCmd := exec.CommandContext(ctx, server.Command, cmdArgs...)
-
-		// Set environment
-		for k, v := range env {
-			execCmd.Env = append(execCmd.Env, fmt.Sprintf("%s=%s", k, v))
-		}
-
-		// Try to start and quickly check if it fails
-		err := execCmd.Start()
-		if err != nil {
-			out.Error("%s: failed to start - %v", name, err)
-			failCount++
-			cancel()
-			continue
-		}
-
-		// Give it a moment to fail or succeed
-		done := make(chan error, 1)
-		go func() {
-			done <- execCmd.Wait()
-		}()
-
-		select {
-		case <-time.After(500 * time.Millisecond):
-			// Server is still running after 500ms, consider it healthy
-			execCmd.Process.Kill()
-			out.Success("%s: healthy", name)
-			passCount++
-		case err := <-done:
-			if err != nil {
-				// Check if it's just a timeout or actual failure
-				if ctx.Err() == context.DeadlineExceeded {
-					out.Success("%s: healthy (timeout)", name)
-					passCount++
-				} else {
-					exitErr, ok := err.(*exec.ExitError)
-					if ok && exitErr.ExitCode() != 0 {
-						out.Error("%s: failed with exit code %d", name, exitErr.ExitCode())
-						failCount++
-					} else {
-						out.Error("%s: failed - %v", name, err)
-						failCount++
-					}
+		wg.Add(1)
+		go func(i int, s *mcp.Server) {
+			defer wg.Done()
+			
+			// Resolve environment variables
+			serverCopy := *s
+			if s.Env != nil {
+				resolvedEnv, err := secrets.ResolveEnv(s.Env)
+				if err != nil {
+					results[i] = testResult{name: s.Name, healthy: false, err: fmt.Errorf("env error: %w", err)}
+					return
 				}
-			} else {
-				// Exited with 0, might be a short-lived command
-				out.Success("%s: healthy (exited 0)", name)
-				passCount++
+				serverCopy.Env = resolvedEnv
 			}
-		case <-ctx.Done():
-			execCmd.Process.Kill()
-			out.Success("%s: healthy", name)
-			passCount++
+
+			// Run health check
+			client := mcpclient.NewClient().WithTimeout(testTimeout)
+			health := client.CheckHealth(context.Background(), &serverCopy)
+
+			results[i] = testResult{
+				name:    s.Name,
+				healthy: health.Healthy,
+				err:     health.Error,
+				tools:   len(health.Tools),
+				latency: health.Latency,
+			}
+		}(i, server)
+	}
+
+	wg.Wait()
+
+	var passCount, failCount int
+
+	for _, res := range results {
+		if res.skipped {
+			out.Info("%s: skipped (disabled)", res.name)
+			continue
 		}
 
-		cancel()
+		if res.healthy {
+			passCount++
+			out.Success("%s: healthy (%d tools, %s)", res.name, res.tools, res.latency.Round(time.Millisecond))
+		} else {
+			failCount++
+			out.Error("%s: failed - %v", res.name, res.err)
+		}
 	}
 
 	out.Println("")
 	if failCount > 0 {
-		out.Println("Results: %d passed, %d failed", passCount, failCount)
-	} else {
-		out.Success("All %d server(s) healthy", passCount)
+		return fmt.Errorf("tests failed: %d passed, %d failed", passCount, failCount)
 	}
-
-	return nil
-}
-
-// checkServerHealth sends a basic JSON-RPC initialization request
-func checkServerHealth(cmd *exec.Cmd) error {
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	// Send initialize request
-	initRequest := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"agentctl","version":"1.0.0"}}}`
-	stdin.Write([]byte(initRequest + "\n"))
-	stdin.Close()
-
-	// Read response with timeout
-	buf := make([]byte, 4096)
-	n, err := stdout.Read(buf)
-	if err != nil {
-		return err
-	}
-
-	response := string(buf[:n])
-	if !strings.Contains(response, "result") {
-		return fmt.Errorf("unexpected response: %s", response)
-	}
-
+	
+	out.Success("All %d server(s) passed deep validation", passCount)
 	return nil
 }
