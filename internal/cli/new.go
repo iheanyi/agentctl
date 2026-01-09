@@ -291,55 +291,37 @@ func runNewSkill(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("skill %q already exists", name)
 	}
 
-	// Create skill directory structure
-	dirs := []string{
-		skillDir,
-		filepath.Join(skillDir, "prompts"),
+	// Create skill directory
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return fmt.Errorf("failed to create skill directory: %w", err)
 	}
 
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
-	}
+	// Create SKILL.md (Claude Code format)
+	skillMd := `---
+name: ` + name + `
+description: Description of this skill
+---
 
-	// Create skill.json
-	skillJSON := map[string]interface{}{
-		"name":        name,
-		"description": "Description of this skill",
-		"version":     "1.0.0",
-		"author":      "",
-	}
+# ` + name + `
 
-	data, err := jsonutil.MarshalIndent(skillJSON, "", "  ")
-	if err != nil {
-		return err
-	}
+This is your skill prompt. It will be sent to the AI when users invoke this skill.
 
-	if err := os.WriteFile(filepath.Join(skillDir, "skill.json"), data, 0644); err != nil {
-		return fmt.Errorf("failed to create skill.json: %w", err)
-	}
+## Instructions
 
-	// Create main prompt
-	mainPrompt := `# ` + name + `
+Add your instructions here. Be specific about:
+- What this skill should do
+- How it should behave
+- What output format to use
 
-This is the main prompt for your skill.
+## Usage
 
-## What This Skill Does
+Use $ARGUMENTS to reference any arguments the user provides when invoking this skill.
 
-Describe what this skill does here.
-
-## How to Use
-
-Explain how to use this skill.
-
-## Examples
-
-Provide usage examples.
+Example: "Analyze $ARGUMENTS and provide feedback."
 `
 
-	if err := os.WriteFile(filepath.Join(skillDir, "prompts", "main.md"), []byte(mainPrompt), 0644); err != nil {
-		return fmt.Errorf("failed to create main prompt: %w", err)
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMd), 0644); err != nil {
+		return fmt.Errorf("failed to create SKILL.md: %w", err)
 	}
 
 	scopeLabel := ""
@@ -349,13 +331,7 @@ Provide usage examples.
 		scopeLabel = " (global)"
 	}
 	out.Success("Created skill %q%s", name, scopeLabel)
-	out.Info("Skill directory: %s", skillDir)
-	out.Println("")
-	out.Println("Files created:")
-	out.List([]string{
-		"skill.json - Skill metadata",
-		"prompts/main.md - Main skill prompt",
-	})
+	out.Info("Edit %s to customize", filepath.Join(skillDir, "SKILL.md"))
 	out.Println("")
 	out.Println("Run 'agentctl sync' to sync to your tools.")
 
@@ -782,19 +758,11 @@ func runInteractiveNewSkill() error {
 		return nil
 	}
 
-	// Create the skill
+	// Create the skill directory
 	skillDir := filepath.Join(skillsDir, name)
 
-	// Create skill directory structure
-	dirs := []string{
-		skillDir,
-		filepath.Join(skillDir, "prompts"),
-	}
-
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return fmt.Errorf("failed to create skill directory: %w", err)
 	}
 
 	// Use default description if not provided
@@ -802,43 +770,32 @@ func runInteractiveNewSkill() error {
 		description = "Description of this skill"
 	}
 
-	// Create skill.json
-	skillJSON := map[string]interface{}{
-		"name":        name,
-		"description": description,
-		"version":     "1.0.0",
-		"author":      "",
-	}
+	// Create SKILL.md (Claude Code format)
+	skillMd := `---
+name: ` + name + `
+description: ` + description + `
+---
 
-	data, err := jsonutil.MarshalIndent(skillJSON, "", "  ")
-	if err != nil {
-		return err
-	}
+# ` + name + `
 
-	if err := os.WriteFile(filepath.Join(skillDir, "skill.json"), data, 0644); err != nil {
-		return fmt.Errorf("failed to create skill.json: %w", err)
-	}
+This is your skill prompt. It will be sent to the AI when users invoke this skill.
 
-	// Create main prompt
-	mainPrompt := `# ` + name + `
+## Instructions
 
-` + description + `
+Add your instructions here. Be specific about:
+- What this skill should do
+- How it should behave
+- What output format to use
 
-## What This Skill Does
+## Usage
 
-Describe what this skill does here.
+Use $ARGUMENTS to reference any arguments the user provides when invoking this skill.
 
-## How to Use
-
-Explain how to use this skill.
-
-## Examples
-
-Provide usage examples.
+Example: "Analyze $ARGUMENTS and provide feedback."
 `
 
-	if err := os.WriteFile(filepath.Join(skillDir, "prompts", "main.md"), []byte(mainPrompt), 0644); err != nil {
-		return fmt.Errorf("failed to create main prompt: %w", err)
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMd), 0644); err != nil {
+		return fmt.Errorf("failed to create SKILL.md: %w", err)
 	}
 
 	scopeLabel := ""
@@ -849,13 +806,7 @@ Provide usage examples.
 	}
 	out.Println("")
 	out.Success("Created skill %q%s", name, scopeLabel)
-	out.Info("Skill directory: %s", skillDir)
-	out.Println("")
-	out.Println("Files created:")
-	out.List([]string{
-		"skill.json - Skill metadata",
-		"prompts/main.md - Main skill prompt",
-	})
+	out.Info("Edit %s to customize", filepath.Join(skillDir, "SKILL.md"))
 	out.Println("")
 	out.Println("Run 'agentctl sync' to sync to your tools.")
 

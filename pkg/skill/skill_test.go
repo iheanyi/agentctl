@@ -276,3 +276,433 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
+
+// Tests for SKILL.md format (Claude Code format)
+
+func TestLoadSkillMd(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "skill-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	skillDir := filepath.Join(tmpDir, "my-skill")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatalf("Failed to create skill dir: %v", err)
+	}
+
+	// Create SKILL.md with frontmatter
+	skillMd := `---
+name: my-skill
+description: A test skill for Claude Code
+---
+
+# My Skill
+
+This is the prompt content for my skill.
+
+Use $ARGUMENTS to reference user input.`
+
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMd), 0644); err != nil {
+		t.Fatalf("Failed to write SKILL.md: %v", err)
+	}
+
+	s, err := Load(skillDir)
+	if err != nil {
+		t.Fatalf("Failed to load skill: %v", err)
+	}
+
+	if s.Name != "my-skill" {
+		t.Errorf("Name mismatch: got %q, want %q", s.Name, "my-skill")
+	}
+	if s.Description != "A test skill for Claude Code" {
+		t.Errorf("Description mismatch: got %q", s.Description)
+	}
+	if !contains(s.Content, "This is the prompt content") {
+		t.Errorf("Content should contain prompt text, got: %q", s.Content)
+	}
+	if s.Path != skillDir {
+		t.Errorf("Path mismatch: got %q, want %q", s.Path, skillDir)
+	}
+}
+
+func TestSkillMdTakesPrecedenceOverJson(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "skill-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	skillDir := filepath.Join(tmpDir, "my-skill")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatalf("Failed to create skill dir: %v", err)
+	}
+
+	// Create both SKILL.md and skill.json
+	skillMd := `---
+name: from-md
+description: From SKILL.md
+---
+
+Content from SKILL.md`
+
+	skillJson := `{"name": "from-json", "description": "From skill.json"}`
+
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMd), 0644); err != nil {
+		t.Fatalf("Failed to write SKILL.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "skill.json"), []byte(skillJson), 0644); err != nil {
+		t.Fatalf("Failed to write skill.json: %v", err)
+	}
+
+	s, err := Load(skillDir)
+	if err != nil {
+		t.Fatalf("Failed to load skill: %v", err)
+	}
+
+	// SKILL.md should take precedence
+	if s.Name != "from-md" {
+		t.Errorf("SKILL.md should take precedence, got name %q", s.Name)
+	}
+	if s.Description != "From SKILL.md" {
+		t.Errorf("Description mismatch: got %q", s.Description)
+	}
+}
+
+func TestLoadSkillMdWithoutFrontmatter(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "skill-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	skillDir := filepath.Join(tmpDir, "plain-skill")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatalf("Failed to create skill dir: %v", err)
+	}
+
+	// Create SKILL.md without frontmatter
+	skillMd := `# Plain Skill
+
+Just content, no frontmatter.`
+
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMd), 0644); err != nil {
+		t.Fatalf("Failed to write SKILL.md: %v", err)
+	}
+
+	s, err := Load(skillDir)
+	if err != nil {
+		t.Fatalf("Failed to load skill: %v", err)
+	}
+
+	// Name should fall back to directory name
+	if s.Name != "plain-skill" {
+		t.Errorf("Name should fall back to dir name, got %q", s.Name)
+	}
+	if !contains(s.Content, "Just content") {
+		t.Errorf("Content mismatch: got %q", s.Content)
+	}
+}
+
+func TestSplitFrontmatter(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantFM      string
+		wantContent string
+		wantErr     bool
+	}{
+		{
+			name: "valid frontmatter",
+			input: `---
+name: test
+description: A test
+---
+
+Content here`,
+			wantFM:      "name: test\ndescription: A test",
+			wantContent: "Content here",
+			wantErr:     false,
+		},
+		{
+			name:        "no frontmatter",
+			input:       "Just plain content",
+			wantFM:      "",
+			wantContent: "Just plain content",
+			wantErr:     false,
+		},
+		{
+			name: "unclosed frontmatter",
+			input: `---
+name: test
+no closing delimiter`,
+			wantFM:      "",
+			wantContent: "",
+			wantErr:     true,
+		},
+		{
+			name: "whitespace before frontmatter",
+			input: `
+  ---
+name: test
+---
+
+Content`,
+			wantFM:      "name: test",
+			wantContent: "Content",
+			wantErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fm, content, err := splitFrontmatter([]byte(tt.input))
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if string(fm) != tt.wantFM {
+				t.Errorf("Frontmatter mismatch:\ngot:  %q\nwant: %q", string(fm), tt.wantFM)
+			}
+			if content != tt.wantContent {
+				t.Errorf("Content mismatch:\ngot:  %q\nwant: %q", content, tt.wantContent)
+			}
+		})
+	}
+}
+
+func TestSkillSave(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "skill-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	s := &Skill{
+		Name:        "my-new-skill",
+		Description: "A brand new skill",
+		Content:     "# My New Skill\n\nDo something amazing with $ARGUMENTS.",
+	}
+
+	skillDir := filepath.Join(tmpDir, "my-new-skill")
+	if err := s.Save(skillDir); err != nil {
+		t.Fatalf("Failed to save skill: %v", err)
+	}
+
+	// Verify SKILL.md was created
+	data, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("Failed to read SKILL.md: %v", err)
+	}
+
+	content := string(data)
+	if !contains(content, "---") {
+		t.Error("SKILL.md should contain frontmatter delimiters")
+	}
+	if !contains(content, "name: my-new-skill") {
+		t.Error("SKILL.md should contain name in frontmatter")
+	}
+	if !contains(content, "description: A brand new skill") {
+		t.Error("SKILL.md should contain description in frontmatter")
+	}
+	if !contains(content, "Do something amazing") {
+		t.Error("SKILL.md should contain the content")
+	}
+
+	// Verify path was set
+	if s.Path != skillDir {
+		t.Errorf("Path should be set after save, got %q", s.Path)
+	}
+}
+
+func TestSkillSaveWithDefaultContent(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "skill-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	s := &Skill{
+		Name:        "empty-skill",
+		Description: "A skill with no content",
+		// No Content set
+	}
+
+	skillDir := filepath.Join(tmpDir, "empty-skill")
+	if err := s.Save(skillDir); err != nil {
+		t.Fatalf("Failed to save skill: %v", err)
+	}
+
+	// Verify SKILL.md has default template content
+	data, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("Failed to read SKILL.md: %v", err)
+	}
+
+	content := string(data)
+	if !contains(content, "TODO: Write your skill prompt") {
+		t.Error("SKILL.md should contain default template when content is empty")
+	}
+	if !contains(content, "$ARGUMENTS") {
+		t.Error("SKILL.md should mention $ARGUMENTS in default template")
+	}
+}
+
+func TestSkillToMarkdown(t *testing.T) {
+	s := &Skill{
+		Name:        "test-skill",
+		Description: "Test description",
+		Content:     "Custom content here",
+	}
+
+	md := s.ToMarkdown()
+
+	if !contains(md, "---\n") {
+		t.Error("ToMarkdown should start with frontmatter delimiter")
+	}
+	if !contains(md, "name: test-skill") {
+		t.Error("ToMarkdown should include name")
+	}
+	if !contains(md, "description: Test description") {
+		t.Error("ToMarkdown should include description")
+	}
+	if !contains(md, "Custom content here") {
+		t.Error("ToMarkdown should include content")
+	}
+}
+
+func TestSkillValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		skill   *Skill
+		wantErr bool
+	}{
+		{
+			name:    "valid skill",
+			skill:   &Skill{Name: "test", Description: "A test skill"},
+			wantErr: false,
+		},
+		{
+			name:    "missing name",
+			skill:   &Skill{Description: "A test skill"},
+			wantErr: true,
+		},
+		{
+			name:    "missing description",
+			skill:   &Skill{Name: "test"},
+			wantErr: true,
+		},
+		{
+			name:    "empty skill",
+			skill:   &Skill{},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.skill.Validate()
+			if tt.wantErr && err == nil {
+				t.Error("Expected validation error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("Unexpected validation error: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadAllWithSkillMd(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "skills-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create skill with SKILL.md
+	mdDir := filepath.Join(tmpDir, "md-skill")
+	if err := os.MkdirAll(mdDir, 0755); err != nil {
+		t.Fatalf("Failed to create dir: %v", err)
+	}
+	skillMd := `---
+name: md-skill
+description: From SKILL.md
+---
+
+Content`
+	if err := os.WriteFile(filepath.Join(mdDir, "SKILL.md"), []byte(skillMd), 0644); err != nil {
+		t.Fatalf("Failed to write SKILL.md: %v", err)
+	}
+
+	// Create skill with skill.json (legacy)
+	jsonDir := filepath.Join(tmpDir, "json-skill")
+	if err := os.MkdirAll(jsonDir, 0755); err != nil {
+		t.Fatalf("Failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(jsonDir, "skill.json"), []byte(`{"name": "json-skill"}`), 0644); err != nil {
+		t.Fatalf("Failed to write skill.json: %v", err)
+	}
+
+	skills, err := LoadAll(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to load skills: %v", err)
+	}
+
+	if len(skills) != 2 {
+		t.Errorf("Expected 2 skills, got %d", len(skills))
+	}
+
+	// Check both types loaded
+	names := make(map[string]bool)
+	for _, s := range skills {
+		names[s.Name] = true
+	}
+	if !names["md-skill"] {
+		t.Error("md-skill should be loaded")
+	}
+	if !names["json-skill"] {
+		t.Error("json-skill should be loaded")
+	}
+}
+
+func TestSkillRoundTrip(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "skill-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	original := &Skill{
+		Name:        "roundtrip-skill",
+		Description: "Testing save and load",
+		Content:     "# Round Trip\n\nThis should survive save and load.",
+	}
+
+	skillDir := filepath.Join(tmpDir, "roundtrip-skill")
+	if err := original.Save(skillDir); err != nil {
+		t.Fatalf("Failed to save: %v", err)
+	}
+
+	loaded, err := Load(skillDir)
+	if err != nil {
+		t.Fatalf("Failed to load: %v", err)
+	}
+
+	if loaded.Name != original.Name {
+		t.Errorf("Name mismatch: got %q, want %q", loaded.Name, original.Name)
+	}
+	if loaded.Description != original.Description {
+		t.Errorf("Description mismatch: got %q, want %q", loaded.Description, original.Description)
+	}
+	if loaded.Content != original.Content {
+		t.Errorf("Content mismatch:\ngot:  %q\nwant: %q", loaded.Content, original.Content)
+	}
+}
