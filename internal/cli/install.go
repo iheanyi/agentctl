@@ -171,10 +171,13 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			serverDir := b.ServerDir(server)
 			
 			// Try to guess command for better UX
+			// Note: Since we didn't auto-build, binaries might not exist yet,
+			// so ResolveCommand might just return the server.Command (empty) or a best guess source file.
 			guessedCmd := b.ResolveCommand(server)
 			
 			out.Println("✅ Cloned to %s", serverDir)
-			out.Println("Please configure the launch command:")
+			out.Println("Please configure the launch command.")
+			out.Println("Note: If this requires building (Go, Rust, etc.), you may need to build it manually in the directory above.")
 
 			// Launch interactive config form
 			if err := runInteractiveConfig(server, guessedCmd); err != nil {
