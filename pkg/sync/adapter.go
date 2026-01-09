@@ -1,6 +1,8 @@
 package sync
 
 import (
+	"sync"
+
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/rule"
@@ -100,48 +102,55 @@ type SyncResult struct {
 
 // SyncAll syncs configuration to all detected tools
 func SyncAll(servers []*mcp.Server, commands []*command.Command, rules []*rule.Rule) []SyncResult {
-	var results []SyncResult
+	adapters := Detected()
+	results := make([]SyncResult, len(adapters))
+	var wg sync.WaitGroup
 
-	for _, adapter := range Detected() {
-		result := SyncResult{Tool: adapter.Name()}
+	for i, adapter := range adapters {
+		wg.Add(1)
+		go func(i int, adapter Adapter) {
+			defer wg.Done()
+			result := SyncResult{Tool: adapter.Name()}
 
-		supported := adapter.SupportedResources()
+			supported := adapter.SupportedResources()
 
-		// Sync servers if supported
-		if containsResource(supported, ResourceMCP) && len(servers) > 0 {
-			if err := adapter.WriteServers(servers); err != nil {
-				result.Error = err
-			} else {
-				result.Changes += len(servers)
-			}
-		}
-
-		// Sync commands if supported
-		if containsResource(supported, ResourceCommands) && len(commands) > 0 {
-			if err := adapter.WriteCommands(commands); err != nil {
-				if result.Error == nil {
+			// Sync servers if supported
+			if containsResource(supported, ResourceMCP) && len(servers) > 0 {
+				if err := adapter.WriteServers(servers); err != nil {
 					result.Error = err
+				} else {
+					result.Changes += len(servers)
 				}
-			} else {
-				result.Changes += len(commands)
 			}
-		}
 
-		// Sync rules if supported
-		if containsResource(supported, ResourceRules) && len(rules) > 0 {
-			if err := adapter.WriteRules(rules); err != nil {
-				if result.Error == nil {
-					result.Error = err
+			// Sync commands if supported
+			if containsResource(supported, ResourceCommands) && len(commands) > 0 {
+				if err := adapter.WriteCommands(commands); err != nil {
+					if result.Error == nil {
+						result.Error = err
+					}
+				} else {
+					result.Changes += len(commands)
 				}
-			} else {
-				result.Changes += len(rules)
 			}
-		}
 
-		result.Success = result.Error == nil
-		results = append(results, result)
+			// Sync rules if supported
+			if containsResource(supported, ResourceRules) && len(rules) > 0 {
+				if err := adapter.WriteRules(rules); err != nil {
+					if result.Error == nil {
+						result.Error = err
+					}
+				} else {
+					result.Changes += len(rules)
+				}
+			}
+
+			result.Success = result.Error == nil
+			results[i] = result
+		}(i, adapter)
 	}
 
+	wg.Wait()
 	return results
 }
 

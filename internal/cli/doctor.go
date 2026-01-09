@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	stdsync "sync"
 
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/sync"
@@ -74,9 +75,26 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		{"Docker", "docker", []string{"--version"}, false},
 	}
 
-	for _, rt := range runtimes {
-		version, err := getVersion(rt.command, rt.args)
-		if err != nil {
+	type runtimeResult struct {
+		version string
+		err     error
+	}
+	runtimeResults := make([]runtimeResult, len(runtimes))
+	var rtWg stdsync.WaitGroup
+
+	for i, rt := range runtimes {
+		rtWg.Add(1)
+		go func(i int, cmd string, args []string) {
+			defer rtWg.Done()
+			v, err := getVersion(cmd, args)
+			runtimeResults[i] = runtimeResult{version: v, err: err}
+		}(i, rt.command, rt.args)
+	}
+	rtWg.Wait()
+
+	for i, rt := range runtimes {
+		res := runtimeResults[i]
+		if res.err != nil {
 			if rt.required {
 				fmt.Printf("  ✗ %s: not found (required)\n", rt.name)
 				issues++
@@ -84,7 +102,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  - %s: not found\n", rt.name)
 			}
 		} else {
-			fmt.Printf("  ✓ %s: %s\n", rt.name, version)
+			fmt.Printf("  ✓ %s: %s\n", rt.name, res.version)
 		}
 	}
 	fmt.Println()
@@ -93,21 +111,46 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	fmt.Println("Tools:")
 	adapters := sync.All()
 	detectedCount := 0
-	for _, adapter := range adapters {
-		detected, _ := adapter.Detect()
-		if detected {
+
+	type toolResult struct {
+		detected    bool
+		detectErr   error
+		valid       bool
+		serverCount int
+		configErr   error
+	}
+
+	toolResults := make([]toolResult, len(adapters))
+	var toolWg stdsync.WaitGroup
+
+	for i, adapter := range adapters {
+		toolWg.Add(1)
+		go func(i int, adapter sync.Adapter) {
+			defer toolWg.Done()
+			detected, detectErr := adapter.Detect()
+			res := toolResult{detected: detected, detectErr: detectErr}
+			if detected {
+				res.valid, res.serverCount, res.configErr = validateToolConfig(adapter)
+			}
+			toolResults[i] = res
+		}(i, adapter)
+	}
+	toolWg.Wait()
+
+	for i, adapter := range adapters {
+		res := toolResults[i]
+		if res.detected {
 			detectedCount++
-			configValid, serverCount, configErr := validateToolConfig(adapter)
 			path := shortenPath(adapter.ConfigPath())
 
-			if configErr != nil {
+			if res.configErr != nil {
 				fmt.Printf("  ✗ %s: %s\n", adapter.Name(), path)
-				fmt.Printf("      Error: %v\n", configErr)
+				fmt.Printf("      Error: %v\n", res.configErr)
 				issues++
-			} else if !configValid {
+			} else if !res.valid {
 				fmt.Printf("  ⚠ %s: %s (config issues)\n", adapter.Name(), path)
 			} else {
-				fmt.Printf("  ✓ %s: %s (%d servers)\n", adapter.Name(), path, serverCount)
+				fmt.Printf("  ✓ %s: %s (%d servers)\n", adapter.Name(), path, res.serverCount)
 			}
 		} else if doctorVerbose {
 			fmt.Printf("  - %s: not installed\n", adapter.Name())
