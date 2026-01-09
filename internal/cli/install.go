@@ -157,7 +157,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Handle git sources (need to clone/build)
+	// Handle git sources: Clone -> Prompt for Command
 	if server.Source.Type == "git" {
 		b := builder.New(cfg.CacheDir())
 
@@ -166,18 +166,26 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to clone: %w", err)
 		}
 
-		out.Println("Building...")
-		if err := b.Build(server); err != nil {
-			return fmt.Errorf("failed to build: %w", err)
-		}
-
+		// If command/args not explicitly provided, prompt the user
 		if server.Command == "" {
-			server.Command = b.ResolveCommand(server)
+			serverDir := b.ServerDir(server)
+			
+			// Try to guess command for better UX
+			guessedCmd := b.ResolveCommand(server)
+			
+			out.Println("✅ Cloned to %s", serverDir)
+			out.Println("Please configure the launch command:")
+
+			// Launch interactive config form
+			if err := runInteractiveConfig(server, guessedCmd); err != nil {
+				return err
+			}
 		}
 
-		// Update displayed config after resolving command
+		// Update displayed config
 		configJSON = formatMCPConfig(server.Name, server)
-		out.Println("Resolved config:")
+		out.Println("")
+		out.Println("Config to be added:")
 		out.Println("%s", configJSON)
 		out.Println("")
 	}
@@ -202,6 +210,13 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			Source:  server.Source.URL,
 			Version: server.Source.Ref,
 		}
+		if server.Source.Type == "git" {
+			// Update commit hash if possible
+			b := builder.New(cfg.CacheDir())
+			if commit, err := b.GetCommit(server); err == nil {
+				entry.Commit = commit
+			}
+		}
 		lf.Lock(server.Name, entry)
 		_ = lf.Save()
 	}
@@ -223,6 +238,57 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	updates := checkForUpdates(cfg, lf, server.Name)
 	showUpdateHint(updates, out)
 
+	return nil
+}
+
+// runInteractiveConfig launches a form to configure command/args for a cloned repo
+func runInteractiveConfig(server *mcp.Server, defaultCmd string) error {
+	var command, argsStr string
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Command").
+				Description("The command to run this server (absolute path recommended)").
+				Placeholder("node /path/to/index.js").
+				Value(&command).
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("command is required")
+					}
+					return nil
+				}),
+			huh.NewInput().
+				Title("Arguments").
+				Description("Arguments (space separated)").
+				Placeholder("--verbose").
+				Value(&argsStr),
+		),
+	)
+
+	// Pre-fill if we have a guess
+	if defaultCmd != "" {
+		// If the guess is just a file (e.g. index.js), we might want to prepend the runner?
+		// For now, just pre-fill what the builder resolved.
+		// NOTE: huh form values are pointers, we can't easily pre-fill the Input field *after* creation 
+		// without accessing the underlying model, but we can set the variable *before*.
+		// However, huh.NewInput().Value(&command) binds the variable. 
+		// To pre-fill, we must set 'command' before run.
+	}
+	
+	// Set default values
+	command = defaultCmd
+
+	if err := form.Run(); err != nil {
+		return err
+	}
+
+	server.Command = command
+	if argsStr != "" {
+		server.Args = strings.Fields(argsStr)
+	}
+	server.Transport = mcp.TransportStdio
+	
 	return nil
 }
 
