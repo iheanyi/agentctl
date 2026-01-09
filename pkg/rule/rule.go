@@ -2,6 +2,7 @@ package rule
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strings"
 
@@ -131,9 +132,7 @@ func Save(r *Rule, dir string) error {
 	if r.Frontmatter != nil {
 		content.WriteString("---\n")
 		if r.Frontmatter.Priority != 0 {
-			content.WriteString("priority: ")
-			content.WriteString(strings.TrimSpace(yaml.Node{Value: string(rune(r.Frontmatter.Priority))}.Value))
-			content.WriteString("\n")
+			content.WriteString(fmt.Sprintf("priority: %d\n", r.Frontmatter.Priority))
 		}
 		if len(r.Frontmatter.Tools) > 0 {
 			content.WriteString("tools: [")
