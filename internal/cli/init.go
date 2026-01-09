@@ -39,6 +39,7 @@ func init() {
 func runInit(cmd *cobra.Command, args []string) error {
 	var configDir string
 	var configPath string
+	var resourceDir string
 
 	if initLocal {
 		// Project-local config
@@ -48,10 +49,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 		configPath = filepath.Join(cwd, ".agentctl.json")
 		configDir = cwd
+		resourceDir = filepath.Join(cwd, ".agentctl") // Local resources go in .agentctl/
 	} else {
 		// Global config
 		configDir = config.DefaultConfigDir()
 		configPath = filepath.Join(configDir, "agentctl.json")
+		resourceDir = configDir // Global resources go in config dir
 	}
 
 	// Check if config already exists
@@ -63,12 +66,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Create directory structure
 	dirs := []string{
 		configDir,
-		filepath.Join(configDir, "servers"),
-		filepath.Join(configDir, "commands"),
-		filepath.Join(configDir, "rules"),
-		filepath.Join(configDir, "prompts"),
-		filepath.Join(configDir, "skills"),
-		filepath.Join(configDir, "profiles"),
+		resourceDir,
+		filepath.Join(resourceDir, "servers"),
+		filepath.Join(resourceDir, "commands"),
+		filepath.Join(resourceDir, "rules"),
+		filepath.Join(resourceDir, "prompts"),
+		filepath.Join(resourceDir, "skills"),
+		filepath.Join(resourceDir, "profiles"),
 	}
 
 	for _, dir := range dirs {
