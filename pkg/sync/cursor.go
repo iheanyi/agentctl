@@ -255,3 +255,144 @@ func (a *CursorAdapter) saveRawConfig(raw map[string]interface{}) error {
 
 	return os.WriteFile(path, data, 0644)
 }
+
+// WorkspaceAdapter implementation for Cursor
+
+// SupportsWorkspace returns true - Cursor supports .cursor/mcp.json in project root
+func (a *CursorAdapter) SupportsWorkspace() bool {
+	return true
+}
+
+// WorkspaceConfigPath returns the path to .cursor/mcp.json in the project directory
+func (a *CursorAdapter) WorkspaceConfigPath(projectDir string) string {
+	return filepath.Join(projectDir, ".cursor", "mcp.json")
+}
+
+// ReadWorkspaceServers reads MCP servers from the project's .cursor/mcp.json file
+func (a *CursorAdapter) ReadWorkspaceServers(projectDir string) ([]*mcp.Server, error) {
+	path := a.WorkspaceConfigPath(projectDir)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+
+	var servers []*mcp.Server
+	for name, v := range mcpServers {
+		serverData, ok := v.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		server := &mcp.Server{
+			Name:  name,
+			Scope: "local",
+		}
+
+		if cmd, ok := serverData["command"].(string); ok {
+			server.Command = cmd
+		}
+
+		if args, ok := serverData["args"].([]interface{}); ok {
+			for _, arg := range args {
+				if str, ok := arg.(string); ok {
+					server.Args = append(server.Args, str)
+				}
+			}
+		}
+
+		if envData, ok := serverData["env"].(map[string]interface{}); ok {
+			server.Env = make(map[string]string)
+			for k, ev := range envData {
+				if str, ok := ev.(string); ok {
+					server.Env[k] = str
+				}
+			}
+		}
+
+		servers = append(servers, server)
+	}
+
+	return servers, nil
+}
+
+// WriteWorkspaceServers writes MCP servers to the project's .cursor/mcp.json file
+func (a *CursorAdapter) WriteWorkspaceServers(projectDir string, servers []*mcp.Server) error {
+	path := a.WorkspaceConfigPath(projectDir)
+
+	// Load existing config if present
+	var raw map[string]interface{}
+	if data, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(data, &raw); err != nil {
+			raw = make(map[string]interface{})
+		}
+	} else {
+		raw = make(map[string]interface{})
+	}
+
+	// Get or create mcpServers section
+	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
+	if !ok {
+		mcpServers = make(map[string]interface{})
+	}
+
+	// Remove old agentctl-managed entries
+	for name, v := range mcpServers {
+		if serverData, ok := v.(map[string]interface{}); ok {
+			if managedBy, ok := serverData["_managedBy"].(string); ok && managedBy == ManagedValue {
+				delete(mcpServers, name)
+			}
+		}
+	}
+
+	// Add new servers (only stdio - Cursor doesn't support HTTP/SSE)
+	for _, server := range FilterStdioServers(servers) {
+		name := server.Name
+		if server.Namespace != "" {
+			name = server.Namespace
+		}
+
+		serverCfg := map[string]interface{}{
+			"command":    server.Command,
+			"_managedBy": ManagedValue,
+		}
+
+		if len(server.Args) > 0 {
+			serverCfg["args"] = server.Args
+		}
+
+		if len(server.Env) > 0 {
+			serverCfg["env"] = server.Env
+		}
+
+		mcpServers[name] = serverCfg
+	}
+
+	raw["mcpServers"] = mcpServers
+
+	// Ensure directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0644)
+}

@@ -58,6 +58,40 @@ type Adapter interface {
 	WriteRules(rules []*rule.Rule) error
 }
 
+// WorkspaceAdapter is an optional interface for adapters that support
+// project-level (workspace) configurations in addition to global configs.
+// Tools like Claude Code (.mcp.json) and Cursor (.cursor/mcp.json) support this.
+type WorkspaceAdapter interface {
+	Adapter
+
+	// SupportsWorkspace returns true if this tool has workspace-level config support
+	SupportsWorkspace() bool
+
+	// WorkspaceConfigPath returns the path to the workspace config file for a given project
+	WorkspaceConfigPath(projectDir string) string
+
+	// ReadWorkspaceServers reads MCP servers from the workspace config
+	ReadWorkspaceServers(projectDir string) ([]*mcp.Server, error)
+
+	// WriteWorkspaceServers writes MCP servers to the workspace config
+	WriteWorkspaceServers(projectDir string, servers []*mcp.Server) error
+}
+
+// SupportsWorkspace checks if an adapter implements WorkspaceAdapter
+func SupportsWorkspace(a Adapter) bool {
+	wa, ok := a.(WorkspaceAdapter)
+	return ok && wa.SupportsWorkspace()
+}
+
+// AsWorkspaceAdapter returns the adapter as a WorkspaceAdapter if supported
+func AsWorkspaceAdapter(a Adapter) (WorkspaceAdapter, bool) {
+	wa, ok := a.(WorkspaceAdapter)
+	if !ok || !wa.SupportsWorkspace() {
+		return nil, false
+	}
+	return wa, true
+}
+
 // Registry holds all registered adapters
 var registry = make(map[string]Adapter)
 
