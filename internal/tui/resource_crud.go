@@ -12,6 +12,7 @@ import (
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/jsonutil"
+	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/prompt"
 	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/skill"
@@ -647,4 +648,201 @@ func ConfirmDelete(resourceType, name string) (bool, error) {
 	}
 
 	return confirm, nil
+}
+
+// CreateServer creates a new server via interactive form
+func (r *ResourceCRUD) CreateServer() (*mcp.Server, error) {
+	var name, input string
+	var transport string
+	var commandStr, argsStr string
+
+	// Step 1: Get server name and input (URL or Alias)
+	form1 := huh.NewForm(
+		huh.NewGroup(
+			huh.NewNote().Title("Add New Server"),
+			huh.NewInput().
+				Title("Name").
+				Description("Unique identifier for this server").
+				Placeholder("my-server").
+				Value(&name).
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("name is required")
+					}
+					if _, exists := r.cfg.Servers[s]; exists {
+						return fmt.Errorf("server %q already exists", s)
+					}
+					return nil
+				}),
+			huh.NewInput().
+				Title("Source").
+				Description("Registry alias, GitHub URL, or local path").
+				Placeholder("e.g. figma, github.com/user/repo, ./my-server").
+				Value(&input).
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("source is required")
+					}
+					return nil
+				}),
+		),
+	)
+
+	if err := form1.Run(); err != nil {
+		return nil, err
+	}
+
+	// Analyze input to determine next steps
+	var server *mcp.Server
+
+	// Check for GitHub URL
+	if (strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://")) &&
+		(strings.Contains(input, "github.com/") || strings.HasSuffix(input, ".git")) {
+		server = &mcp.Server{
+			Name: name,
+			Source: mcp.Source{
+				Type: "git",
+				URL:  input,
+			},
+			Transport: mcp.TransportStdio,
+		}
+	} else if strings.Contains(input, "github.com/") { // Shorthand
+		server = &mcp.Server{
+			Name: name,
+			Source: mcp.Source{
+				Type: "git",
+				URL:  "https://" + input,
+			},
+			Transport: mcp.TransportStdio,
+		}
+	} else if strings.HasPrefix(input, "./") || strings.HasPrefix(input, "/") { // Local path
+		server = &mcp.Server{
+			Name: name,
+			Source: mcp.Source{
+				Type: "local",
+				URL:  input,
+			},
+			Transport: mcp.TransportStdio,
+		}
+		// Prompt for command if local
+		formCmd := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Command").
+					Description("Command to run").
+					Placeholder("npx").
+					Value(&commandStr),
+				huh.NewInput().
+					Title("Arguments").
+					Description("Command arguments").
+					Placeholder("-y package").
+					Value(&argsStr),
+			),
+		)
+		if err := formCmd.Run(); err != nil {
+			return nil, err
+		}
+		server.Command = commandStr
+		if argsStr != "" {
+			server.Args = strings.Fields(argsStr)
+		}
+	} else if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") { // Remote HTTP/SSE
+		// Prompt for transport type
+		formTransport := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Transport").
+					Options(
+						huh.NewOption("HTTP", "http"),
+						huh.NewOption("SSE", "sse"),
+					).
+					Value(&transport),
+			),
+		)
+		if err := formTransport.Run(); err != nil {
+			return nil, err
+		}
+		server = &mcp.Server{
+			Name: name,
+			Source: mcp.Source{
+				Type: "remote",
+				URL:  input,
+			},
+			URL:       input,
+			Transport: mcp.Transport(transport),
+		}
+	} else {
+		// Assume alias or manual stdio
+		// Check if it looks like an alias (no spaces, etc)
+		// For simplicity, we'll offer a choice: Registry/Alias or Manual Command
+		var sourceType string
+		formSource := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Source Type").
+					Options(
+						huh.NewOption("Registry Alias (e.g. figma)", "alias"),
+						huh.NewOption("Manual Command (stdio)", "manual"),
+					).
+					Value(&sourceType),
+			),
+		)
+		if err := formSource.Run(); err != nil {
+			return nil, err
+		}
+
+		if sourceType == "alias" {
+			// treat input as alias
+			server = &mcp.Server{
+				Name: name,
+				Source: mcp.Source{
+					Type:  "alias",
+					Alias: input,
+				},
+			}
+			// We'll let the builder/sync logic resolve it later or failed if invalid
+		} else {
+			// Manual command
+			formCmd := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title("Command").
+						Description("Command to run").
+						Placeholder("npx").
+						Value(&commandStr),
+					huh.NewInput().
+						Title("Arguments").
+						Description("Command arguments").
+						Placeholder("-y package").
+						Value(&argsStr),
+				),
+			)
+			if err := formCmd.Run(); err != nil {
+				return nil, err
+			}
+			server = &mcp.Server{
+				Name: name,
+				Source: mcp.Source{
+					Type: "manual",
+				},
+				Transport: mcp.TransportStdio,
+				Command:   commandStr,
+			}
+			if argsStr != "" {
+				server.Args = strings.Fields(argsStr)
+			}
+		}
+	}
+
+	// Add to config
+	if r.cfg.Servers == nil {
+		r.cfg.Servers = make(map[string]*mcp.Server)
+	}
+	r.cfg.Servers[name] = server
+
+	if err := r.cfg.Save(); err != nil {
+		return nil, err
+	}
+
+	return server, nil
 }

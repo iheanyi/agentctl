@@ -661,6 +661,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Add):
 			// Add new resource based on current tab
 			switch m.activeTab {
+			case TabServers:
+				return m, m.createServer()
 			case TabCommands:
 				return m, m.createCommand()
 			case TabRules:
@@ -2205,6 +2207,24 @@ func (f formExec) Run() error              { return f.run() }
 func (f formExec) SetStdin(r io.Reader)    {}
 func (f formExec) SetStdout(w io.Writer)   {}
 func (f formExec) SetStderr(w io.Writer)   {}
+
+func (m *Model) createServer() tea.Cmd {
+	crud := m.resourceCRUD
+	var createdName string
+	return tea.Exec(formExec{run: func() error {
+		s, err := crud.CreateServer()
+		if err != nil {
+			return err
+		}
+		createdName = s.Name
+		return nil
+	}}, func(err error) tea.Msg {
+		if err != nil {
+			return serverAddedMsg{name: "new server", err: err}
+		}
+		return serverAddedMsg{name: createdName, err: nil}
+	})
+}
 
 func (m *Model) createCommand() tea.Cmd {
 	crud := m.resourceCRUD

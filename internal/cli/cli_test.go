@@ -31,10 +31,12 @@ func TestPathToName(t *testing.T) {
 
 func TestParseAddTarget(t *testing.T) {
 	tests := []struct {
-		name     string
-		target   string
-		wantType string
-		wantErr  bool
+		name       string
+		target     string
+		wantType   string
+		wantTransp string
+		wantSource string
+		wantErr    bool
 	}{
 		{
 			name:     "local path ./",
@@ -52,9 +54,37 @@ func TestParseAddTarget(t *testing.T) {
 			wantType: "local",
 		},
 		{
-			name:     "git URL",
+			name:     "git URL shorthand",
 			target:   "github.com/org/repo",
 			wantType: "git",
+		},
+		{
+			name:       "GitHub HTTP URL",
+			target:     "https://github.com/user/repo",
+			wantType:   "git",
+			wantTransp: "stdio",
+			wantSource: "https://github.com/user/repo",
+		},
+		{
+			name:       "GitHub HTTP URL with .git",
+			target:     "https://github.com/user/repo.git",
+			wantType:   "git",
+			wantTransp: "stdio",
+			wantSource: "https://github.com/user/repo.git",
+		},
+		{
+			name:       "GitLab HTTP URL with .git",
+			target:     "https://gitlab.com/user/repo.git",
+			wantType:   "git",
+			wantTransp: "stdio",
+			wantSource: "https://gitlab.com/user/repo.git",
+		},
+		{
+			name:       "Remote MCP HTTP",
+			target:     "https://mcp.example.com/api",
+			wantType:   "remote",
+			wantTransp: "http",
+			wantSource: "https://mcp.example.com/api",
 		},
 		{
 			name:     "alias",
@@ -82,6 +112,12 @@ func TestParseAddTarget(t *testing.T) {
 			}
 			if server.Source.Type != tt.wantType {
 				t.Errorf("Source.Type = %q, want %q", server.Source.Type, tt.wantType)
+			}
+			if tt.wantTransp != "" && string(server.Transport) != tt.wantTransp {
+				t.Errorf("Transport = %q, want %q", server.Transport, tt.wantTransp)
+			}
+			if tt.wantSource != "" && server.Source.URL != tt.wantSource {
+				t.Errorf("Source.URL = %q, want %q", server.Source.URL, tt.wantSource)
 			}
 		})
 	}
