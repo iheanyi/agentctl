@@ -486,8 +486,11 @@ func New() (*Model, error) {
 }
 
 // loadAllResources loads commands, rules, skills, and prompts from config
-// This uses the config's already-loaded resources which include both global and local scopes
+// This reloads from disk to reflect any changes made during the session
 func (m *Model) loadAllResources() {
+	// Reload resources from disk to pick up any changes
+	_ = m.cfg.ReloadResources()
+
 	// Load commands from config (includes both global and local)
 	m.commands = m.cfg.CommandsForScope(config.ScopeAll)
 

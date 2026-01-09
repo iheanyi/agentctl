@@ -412,6 +412,24 @@ func (c *Config) LocalResourceDir() string {
 	return filepath.Join(filepath.Dir(c.ProjectPath), ".agentctl")
 }
 
+// ReloadResources reloads all resources from disk (global and local)
+// This should be called after creating, editing, or deleting resources
+func (c *Config) ReloadResources() error {
+	// Reset loaded resources
+	c.LoadedCommands = nil
+	c.LoadedRules = nil
+	c.LoadedPrompts = nil
+	c.LoadedSkills = nil
+
+	// Reload global resources
+	if err := c.loadResourcesWithScope(string(ScopeGlobal)); err != nil {
+		return err
+	}
+
+	// Reload local resources
+	return c.loadLocalResources()
+}
+
 // ActiveServers returns the list of non-disabled servers
 func (c *Config) ActiveServers() []*mcp.Server {
 	var servers []*mcp.Server
