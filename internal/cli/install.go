@@ -513,6 +513,20 @@ func parseAddTarget(target string) (*mcp.Server, error) {
 		}, nil
 	}
 
+	// Check if it's a git URL via https (common for GitHub/GitLab)
+	if (strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://")) &&
+		(strings.Contains(target, "github.com/") || strings.HasSuffix(target, ".git")) {
+		return &mcp.Server{
+			Name: pathToName(target),
+			Source: mcp.Source{
+				Type: "git",
+				URL:  target,
+				Ref:  version,
+			},
+			Transport: mcp.TransportStdio,
+		}, nil
+	}
+
 	// Check if it's a remote MCP URL (http/https)
 	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
 		return &mcp.Server{
