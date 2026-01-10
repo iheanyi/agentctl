@@ -450,15 +450,25 @@ func (r *ResourceCRUD) DeletePrompt(p *prompt.Prompt) error {
 	return os.Remove(promptPath)
 }
 
-// CreateSkill creates a new skill via interactive form
+// CreateSkill creates a new skill via interactive wizard
+// The wizard allows defining the skill and adding multiple commands before saving
 func (r *ResourceCRUD) CreateSkill() (*skill.Skill, error) {
-	skillsDir := filepath.Join(r.cfg.ConfigDir, "skills")
+	var name, description, version, author, scopeChoice string
 
-	var name, description, version, author string
+	// Determine available scope options
+	hasProjectConfig := r.cfg.ProjectPath != ""
+	scopeOptions := []huh.Option[string]{
+		huh.NewOption("[G] Global (user-wide)", "global"),
+	}
+	if hasProjectConfig {
+		scopeOptions = append(scopeOptions, huh.NewOption("[L] Local (project-only)", "local"))
+	}
 
-	form := huh.NewForm(
+	// Build form groups for skill metadata
+	var skillContent string
+	groups := []*huh.Group{
 		huh.NewGroup(
-			huh.NewNote().Title("Create New Skill"),
+			huh.NewNote().Title("Create New Skill").Description("Step 1: Define the skill"),
 			huh.NewInput().
 				Title("Name").
 				Description("A short identifier for this skill (becomes directory name)").
@@ -471,15 +481,11 @@ func (r *ResourceCRUD) CreateSkill() (*skill.Skill, error) {
 					if strings.ContainsAny(s, " \t\n/\\") {
 						return fmt.Errorf("name cannot contain spaces or path separators")
 					}
-					skillDir := filepath.Join(skillsDir, s)
-					if _, err := os.Stat(skillDir); err == nil {
-						return fmt.Errorf("skill %q already exists", s)
-					}
 					return nil
 				}),
 			huh.NewInput().
 				Title("Description").
-				Description("What does this skill do?").
+				Description("What does this skill do? (shown in help)").
 				Placeholder("Description of this skill").
 				Value(&description),
 		),
@@ -495,24 +501,51 @@ func (r *ResourceCRUD) CreateSkill() (*skill.Skill, error) {
 				Placeholder("Your Name").
 				Value(&author),
 		),
-	)
+		huh.NewGroup(
+			huh.NewText().
+				Title("Default Prompt").
+				Description("The main prompt for this skill (invoked as /skill-name). Use $ARGUMENTS for user input.").
+				Placeholder("Write the default prompt for this skill...\n\nExample:\nYou are an expert at...\n\n$ARGUMENTS").
+				Value(&skillContent).
+				CharLimit(8000).
+				Lines(12),
+		),
+	}
+
+	// Add scope selector if project config exists
+	if hasProjectConfig {
+		groups = append(groups, huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Scope").
+				Description("Where should this skill be saved?").
+				Options(scopeOptions...).
+				Value(&scopeChoice),
+		))
+	} else {
+		scopeChoice = "global"
+	}
+
+	form := huh.NewForm(groups...)
 
 	if err := form.Run(); err != nil {
 		return nil, err
 	}
 
-	// Create the skill directory structure
-	skillDir := filepath.Join(skillsDir, name)
-
-	dirs := []string{
-		skillDir,
-		filepath.Join(skillDir, "prompts"),
+	// Determine skills directory based on scope
+	var skillsDir string
+	var scope string
+	if scopeChoice == "local" && r.cfg.ProjectPath != "" {
+		skillsDir = filepath.Join(filepath.Dir(r.cfg.ProjectPath), ".agentctl", "skills")
+		scope = "local"
+	} else {
+		skillsDir = filepath.Join(r.cfg.ConfigDir, "skills")
+		scope = "global"
 	}
 
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create directory: %w", err)
-		}
+	// Check if skill already exists
+	skillDir := filepath.Join(skillsDir, name)
+	if _, err := os.Stat(skillDir); err == nil {
+		return nil, fmt.Errorf("skill %q already exists in %s scope", name, scope)
 	}
 
 	if description == "" {
@@ -522,79 +555,130 @@ func (r *ResourceCRUD) CreateSkill() (*skill.Skill, error) {
 		version = "1.0.0"
 	}
 
-	// Create skill.json
-	skillJSON := map[string]interface{}{
-		"name":        name,
-		"description": description,
-		"version":     version,
-	}
-	if author != "" {
-		skillJSON["author"] = author
-	}
-
-	data, err := jsonutil.MarshalIndent(skillJSON, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-
-	if err := os.WriteFile(filepath.Join(skillDir, "skill.json"), data, 0644); err != nil {
-		return nil, fmt.Errorf("failed to create skill.json: %w", err)
-	}
-
-	// Create main prompt with better template
-	mainPrompt := fmt.Sprintf(`# %s
-
-%s
-
-## Overview
-
-Describe what this skill does and when it should be used.
-
-## Instructions
-
-1. Step one
-2. Step two
-3. Step three
-
-## Guidelines
-
-- Follow best practices
-- Be thorough and careful
-- Ask for clarification if needed
-
-## Examples
-
-### Example 1: Basic Usage
-
-`+"```"+`
-// Show example input/output here
-`+"```"+`
-
-### Example 2: Advanced Usage
-
-`+"```"+`
-// Show more complex example
-`+"```"+`
-`, name, description)
-
-	if err := os.WriteFile(filepath.Join(skillDir, "prompts", "main.md"), []byte(mainPrompt), 0644); err != nil {
-		return nil, fmt.Errorf("failed to create main prompt: %w", err)
-	}
-
-	return &skill.Skill{
+	// Create skill object
+	s := &skill.Skill{
 		Name:        name,
 		Description: description,
 		Version:     version,
 		Author:      author,
-		Path:        skillDir,
-	}, nil
+		Scope:       scope,
+		Content:     skillContent,
+	}
+
+	// Step 2: Add commands wizard
+	var commands []*skill.Command
+	addMore := true
+
+	for addMore {
+		var wantCommand bool
+		cmdCountLabel := "Add a command to this skill?"
+		if len(commands) > 0 {
+			cmdCountLabel = fmt.Sprintf("Add another command? (%d added so far)", len(commands))
+		}
+
+		confirmForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewNote().Title("Step 2: Add Commands").
+					Description("Commands are subcommands invoked as /skill-name:command-name"),
+				huh.NewConfirm().
+					Title(cmdCountLabel).
+					Value(&wantCommand),
+			),
+		)
+
+		if err := confirmForm.Run(); err != nil {
+			return nil, err
+		}
+
+		if !wantCommand {
+			addMore = false
+			continue
+		}
+
+		// Get command details
+		var cmdName, cmdDesc, cmdContent string
+		existingNames := make(map[string]bool)
+		for _, c := range commands {
+			existingNames[c.Name] = true
+		}
+
+		cmdForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewNote().Title(fmt.Sprintf("Add Command to %q", name)),
+				huh.NewInput().
+					Title("Command Name").
+					Description("Short identifier (e.g., 'review', 'test', 'lint')").
+					Placeholder("command-name").
+					Value(&cmdName).
+					Validate(func(s string) error {
+						if s == "" {
+							return fmt.Errorf("command name is required")
+						}
+						if strings.ContainsAny(s, " \t\n/\\:") {
+							return fmt.Errorf("name cannot contain spaces, colons, or path separators")
+						}
+						if existingNames[s] {
+							return fmt.Errorf("command %q already added", s)
+						}
+						return nil
+					}),
+				huh.NewInput().
+					Title("Description").
+					Description("What does this command do? (shown in help)").
+					Placeholder("Description of this command").
+					Value(&cmdDesc),
+			),
+			huh.NewGroup(
+				huh.NewText().
+					Title("Command Prompt").
+					Description("The instructions for this command. Use $ARGUMENTS for user input.").
+					Placeholder("Write the prompt for this command...\n\nExample:\nReview the following code for best practices:\n\n$ARGUMENTS").
+					Value(&cmdContent).
+					CharLimit(8000).
+					Lines(12),
+			),
+		)
+
+		if err := cmdForm.Run(); err != nil {
+			return nil, err
+		}
+
+		if cmdDesc == "" {
+			cmdDesc = fmt.Sprintf("Description for %s command", cmdName)
+		}
+
+		commands = append(commands, &skill.Command{
+			Name:        cmdName,
+			Description: cmdDesc,
+			Content:     cmdContent,
+			FileName:    cmdName + ".md",
+		})
+	}
+
+	// Save the skill and all commands
+	if err := s.Save(skillDir); err != nil {
+		return nil, fmt.Errorf("failed to create skill: %w", err)
+	}
+	s.Path = skillDir
+
+	// Save each command
+	for _, cmd := range commands {
+		if err := s.AddCommand(cmd); err != nil {
+			return nil, fmt.Errorf("failed to add command %q: %w", cmd.Name, err)
+		}
+		if err := s.SaveCommand(cmd); err != nil {
+			return nil, fmt.Errorf("failed to save command %q: %w", cmd.Name, err)
+		}
+	}
+
+	return s, nil
 }
 
-// EditSkill opens the skill directory in the user's editor
+// EditSkill opens the skill's SKILL.md file in the user's editor
 func (r *ResourceCRUD) EditSkill(s *skill.Skill) error {
-	// Open the main prompt file
-	mainPromptPath := filepath.Join(s.Path, "prompts", "main.md")
-	return r.openInEditor(mainPromptPath)
+	// Open the SKILL.md file
+	skillMdPath := filepath.Join(s.Path, skill.SkillFileName)
+	return r.openInEditor(skillMdPath)
 }
 
 // DeleteSkill deletes a skill
@@ -676,8 +760,8 @@ func (r *ResourceCRUD) CreateServer() (*mcp.Server, error) {
 				}),
 			huh.NewInput().
 				Title("Source").
-				Description("Registry alias, GitHub URL, or local path").
-				Placeholder("e.g. figma, github.com/user/repo, ./my-server").
+				Description("Registry alias, remote URL, or local path").
+				Placeholder("e.g. figma, https://api.example.com, ./my-server").
 				Value(&input).
 				Validate(func(s string) error {
 					if s == "" {

@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -26,6 +27,14 @@ var addCmd = &cobra.Command{
 
 If no arguments are provided, launches an interactive form.
 
+Scope:
+  By default, servers are added to the local project config (.agentctl.json)
+  if it exists, otherwise to the global config (~/.config/agentctl/agentctl.json).
+  Use --scope to explicitly choose local or global.
+
+  Local servers sync to workspace configs (.mcp.json, .cursor/mcp.json).
+  Global servers sync to global tool configs.
+
 MCP Transport Types:
   stdio  - Local server with command/args
   http   - Remote server with URL
@@ -39,6 +48,12 @@ Examples:
   agentctl add figma
   agentctl add filesystem
 
+  # Add to local project config (explicit)
+  agentctl add filesystem --scope local
+
+  # Add to global config (explicit)
+  agentctl add figma --scope global
+
   # Add with explicit URL (http transport)
   agentctl add figma --url https://mcp.figma.com/mcp
 
@@ -48,9 +63,6 @@ Examples:
   # Add with explicit command (stdio transport)
   agentctl add playwright --command npx --args "playwriter@latest"
   agentctl add fs --command npx --args "-y,@modelcontextprotocol/server-filesystem"
-
-  # Add from git URL
-  agentctl add github.com/org/mcp-server
 
   # Preview without adding
   agentctl add figma --dry-run`,
@@ -70,6 +82,7 @@ var (
 	addType        string
 	addDryRun      bool
 	addHeaders     []string
+	addScope       string
 )
 
 func init() {
@@ -86,13 +99,31 @@ func init() {
 	addCmd.Flags().StringVar(&addType, "type", "", "Transport type: stdio, http, or sse")
 	addCmd.Flags().BoolVar(&addDryRun, "dry-run", false, "Preview config without adding")
 	addCmd.Flags().StringArrayVarP(&addHeaders, "header", "H", nil, "HTTP headers (Key: Value)")
+	addCmd.Flags().StringVarP(&addScope, "scope", "s", "", "Config scope: local, global (default: local if .agentctl.json exists)")
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
 	out := output.DefaultWriter()
 
-	// Load config
-	cfg, err := config.Load()
+	// Determine effective scope
+	var scope config.Scope
+	if addScope != "" {
+		var err error
+		scope, err = config.ParseScope(addScope)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Smart default: local if project config exists, otherwise global
+		if config.HasProjectConfig() {
+			scope = config.ScopeLocal
+		} else {
+			scope = config.ScopeGlobal
+		}
+	}
+
+	// Load config for the determined scope
+	cfg, err := config.LoadScoped(scope)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
@@ -179,14 +210,22 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if cfg.Servers == nil {
 		cfg.Servers = make(map[string]*mcp.Server)
 	}
+	// Set the server's scope for tracking
+	server.Scope = string(scope)
 	cfg.Servers[server.Name] = server
 
-	// Save config
-	if err := cfg.Save(); err != nil {
+	// Save config to the appropriate location based on scope
+	if err := cfg.SaveScoped(scope); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	out.Success("Added %s", server.Name)
+	scopeLabel := ""
+	if scope == config.ScopeLocal {
+		scopeLabel = " (local)"
+	} else if scope == config.ScopeGlobal {
+		scopeLabel = " (global)"
+	}
+	out.Success("Added %s%s", server.Name, scopeLabel)
 
 	// Update lockfile
 	lf, err := lockfile.Load(cfg.ConfigDir)
@@ -203,7 +242,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	// Sync to tools
 	if !addNoSync {
 		out.Println("")
-		syncCount := performSync(cfg, server, out, addTarget)
+		syncCount := performScopedSync(cfg, server, scope, out, addTarget)
 		if syncCount > 0 {
 			out.Println("")
 			out.Success("Synced to %d tool(s)", syncCount)
@@ -474,8 +513,10 @@ func formatMCPConfig(name string, server *mcp.Server) string {
 	return string(data)
 }
 
-// performSync syncs config to detected tools and returns count
-func performSync(cfg *config.Config, server *mcp.Server, out *output.Writer, targetTool string) int {
+// performScopedSync syncs a server to tools based on scope
+// Local scope: sync to workspace configs for tools that support it
+// Global scope: sync to global tool configs
+func performScopedSync(cfg *config.Config, server *mcp.Server, scope config.Scope, out *output.Writer, targetTool string) int {
 	out.Println("Syncing to tools...")
 
 	var adapters []sync.Adapter
@@ -490,8 +531,20 @@ func performSync(cfg *config.Config, server *mcp.Server, out *output.Writer, tar
 		adapters = sync.Detected()
 	}
 
-	servers := cfg.ActiveServers()
+	servers := []*mcp.Server{server}
 	syncedCount := 0
+
+	// Get project directory for workspace configs
+	projectDir := ""
+	if scope == config.ScopeLocal {
+		projectDir = cfg.ProjectDir()
+		if projectDir == "" {
+			// Try current working directory
+			if cwd, err := os.Getwd(); err == nil {
+				projectDir = cwd
+			}
+		}
+	}
 
 	for _, adapter := range adapters {
 		detected, err := adapter.Detect()
@@ -516,7 +569,33 @@ func performSync(cfg *config.Config, server *mcp.Server, out *output.Writer, tar
 			}
 		}
 
-		if err := adapter.WriteServers(servers); err != nil {
+		// Handle scoped sync
+		if scope == config.ScopeLocal && projectDir != "" {
+			// Try to use workspace config if adapter supports it
+			if wa, ok := sync.AsWorkspaceAdapter(adapter); ok {
+				workspacePath := wa.WorkspaceConfigPath(projectDir)
+
+				// Read existing workspace servers and merge
+				existingServers, _ := wa.ReadWorkspaceServers(projectDir)
+				mergedServers := mergeServers(existingServers, servers)
+
+				if err := wa.WriteWorkspaceServers(projectDir, mergedServers); err != nil {
+					out.Println("  x %s - %v", toolName, err)
+					continue
+				}
+				out.Println("  + %s (%s)", toolName, workspacePath)
+				syncedCount++
+				continue
+			}
+			// Tool doesn't support workspace configs - warn and sync to global
+			out.Warning("  %s doesn't support workspace configs, syncing to global", toolName)
+		}
+
+		// Global sync: read existing servers and merge
+		existingServers, _ := adapter.ReadServers()
+		mergedServers := mergeServers(existingServers, servers)
+
+		if err := adapter.WriteServers(mergedServers); err != nil {
 			out.Println("  x %s - %v", toolName, err)
 			continue
 		}
@@ -526,6 +605,27 @@ func performSync(cfg *config.Config, server *mcp.Server, out *output.Writer, tar
 	}
 
 	return syncedCount
+}
+
+// mergeServers merges new servers into existing servers, replacing by name
+func mergeServers(existing, new []*mcp.Server) []*mcp.Server {
+	serverMap := make(map[string]*mcp.Server)
+	for _, s := range existing {
+		serverMap[s.Name] = s
+	}
+	for _, s := range new {
+		serverMap[s.Name] = s
+	}
+	result := make([]*mcp.Server, 0, len(serverMap))
+	for _, s := range serverMap {
+		result = append(result, s)
+	}
+	return result
+}
+
+// performSync syncs config to detected tools and returns count (legacy, kept for compatibility)
+func performSync(cfg *config.Config, server *mcp.Server, out *output.Writer, targetTool string) int {
+	return performScopedSync(cfg, server, config.ScopeGlobal, out, targetTool)
 }
 
 func parseAddTarget(target string) (*mcp.Server, error) {
@@ -548,20 +648,6 @@ func parseAddTarget(target string) (*mcp.Server, error) {
 		}, nil
 	}
 
-	// Check if it's a git URL via https (common for GitHub/GitLab)
-	if (strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://")) &&
-		(strings.Contains(target, "github.com/") || strings.HasSuffix(target, ".git")) {
-		return &mcp.Server{
-			Name: pathToName(target),
-			Source: mcp.Source{
-				Type: "git",
-				URL:  target,
-				Ref:  version,
-			},
-			Transport: mcp.TransportStdio,
-		}, nil
-	}
-
 	// Check if it's a remote MCP URL (http/https)
 	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
 		return &mcp.Server{
@@ -572,19 +658,6 @@ func parseAddTarget(target string) (*mcp.Server, error) {
 			},
 			URL:       target,
 			Transport: mcp.TransportHTTP,
-		}, nil
-	}
-
-	// Check if it's a git URL (github.com/..., etc.)
-	if strings.Contains(target, "/") && strings.Contains(target, ".") && !strings.HasPrefix(target, "http") {
-		return &mcp.Server{
-			Name: pathToName(target),
-			Source: mcp.Source{
-				Type: "git",
-				URL:  target,
-				Ref:  version,
-			},
-			Transport: mcp.TransportStdio,
 		}, nil
 	}
 

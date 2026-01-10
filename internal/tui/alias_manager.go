@@ -48,6 +48,28 @@ type AliasManagerModel struct {
 	mode          aliasManagerMode
 	editEntry     *AliasEntry
 	confirmDelete string
+
+	// Wizard state
+	wizardStep       int  // 0=basic, 1=type, 2=config, 3=giturl
+	wizardIsNew      bool // true for add, false for edit
+	wizardFocus      int  // current focused field within step
+	wizardName       textinput.Model
+	wizardDesc       textinput.Model
+	wizardConfigType int  // 0=simple, 1=variants
+	wizardTransport  int  // 0=stdio, 1=http, 2=sse
+	wizardRuntime    int  // 0=node, 1=python, 2=go, 3=docker
+	wizardPackage    textinput.Model
+	wizardURL        textinput.Model
+	wizardHasLocal   bool
+	wizardHasRemote  bool
+	wizardLocalRuntime   int // 0=node, 1=python
+	wizardLocalPackage   textinput.Model
+	wizardRemoteTransport int // 0=http, 1=sse
+	wizardRemoteURL      textinput.Model
+	wizardDefaultVariant int // 0=local, 1=remote
+	wizardWantGitURL     bool
+	wizardGitURL         textinput.Model
+	wizardExistingName   string // for editing - the original name
 }
 
 type aliasManagerMode int
@@ -56,6 +78,7 @@ const (
 	modeList aliasManagerMode = iota
 	modeSearch
 	modeConfirmDelete
+	modeWizard
 )
 
 // AliasManagerKeyMap defines key bindings
@@ -99,9 +122,45 @@ func NewAliasManager() *AliasManagerModel {
 	ti.Placeholder = "Search aliases..."
 	ti.CharLimit = 50
 
+	// Wizard textinputs
+	wizardName := textinput.New()
+	wizardName.Placeholder = "my-alias"
+	wizardName.CharLimit = 50
+
+	wizardDesc := textinput.New()
+	wizardDesc.Placeholder = "Description of what this server does"
+	wizardDesc.CharLimit = 200
+
+	wizardPackage := textinput.New()
+	wizardPackage.Placeholder = "@org/mcp-server"
+	wizardPackage.CharLimit = 200
+
+	wizardURL := textinput.New()
+	wizardURL.Placeholder = "https://mcp.example.com/mcp"
+	wizardURL.CharLimit = 300
+
+	wizardLocalPackage := textinput.New()
+	wizardLocalPackage.Placeholder = "@org/mcp-server"
+	wizardLocalPackage.CharLimit = 200
+
+	wizardRemoteURL := textinput.New()
+	wizardRemoteURL.Placeholder = "https://mcp.example.com/mcp"
+	wizardRemoteURL.CharLimit = 300
+
+	wizardGitURL := textinput.New()
+	wizardGitURL.Placeholder = "github.com/org/repo"
+	wizardGitURL.CharLimit = 200
+
 	m := &AliasManagerModel{
-		searchInput: ti,
-		bundledPath: getBundledAliasesPath(),
+		searchInput:        ti,
+		bundledPath:        getBundledAliasesPath(),
+		wizardName:         wizardName,
+		wizardDesc:         wizardDesc,
+		wizardPackage:      wizardPackage,
+		wizardURL:          wizardURL,
+		wizardLocalPackage: wizardLocalPackage,
+		wizardRemoteURL:    wizardRemoteURL,
+		wizardGitURL:       wizardGitURL,
 	}
 	m.loadAliases()
 	m.applyFilter()
@@ -218,6 +277,8 @@ func (m *AliasManagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		case modeConfirmDelete:
 			return m.updateConfirmDelete(msg)
+		case modeWizard:
+			return m.updateWizard(msg)
 		}
 
 		// List mode keys
@@ -242,11 +303,14 @@ func (m *AliasManagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 
 		case key.Matches(msg, aliasManagerKeys.Add):
-			return m, m.runAddForm()
+			m.openWizard(true, nil)
+			return m, textinput.Blink
 
 		case key.Matches(msg, aliasManagerKeys.Edit):
 			if len(m.filtered) > 0 {
-				return m, m.runEditForm()
+				entry := m.filtered[m.cursor]
+				m.openWizard(false, &entry)
+				return m, textinput.Blink
 			}
 
 		case key.Matches(msg, aliasManagerKeys.Delete):
@@ -274,6 +338,7 @@ func (m *AliasManagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case addAliasMsg:
+		m.mode = modeList // Close wizard
 		m.entries = append(m.entries, AliasEntry{
 			Name:      msg.name,
 			Alias:     msg.alias,
@@ -292,6 +357,7 @@ func (m *AliasManagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case editAliasMsg:
+		m.mode = modeList // Close wizard
 		for i, entry := range m.entries {
 			if entry.Name == msg.oldName {
 				if msg.oldName != msg.name {
@@ -338,9 +404,6 @@ func (m *AliasManagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusIsError = false
 		}
 
-	case formCancelledMsg:
-		m.statusMsg = "Cancelled"
-		m.statusIsError = false
 	}
 
 	return m, tea.Batch(cmds...)
@@ -404,6 +467,11 @@ func (m *AliasManagerModel) updateConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.
 func (m *AliasManagerModel) View() string {
 	if m.quitting {
 		return ""
+	}
+
+	// Render wizard modal if active
+	if m.mode == modeWizard {
+		return m.renderWizard()
 	}
 
 	var b strings.Builder
@@ -627,30 +695,7 @@ type validateResultMsg struct {
 	errors []string
 }
 
-type formCancelledMsg struct{}
-
 // Commands
-
-func (m *AliasManagerModel) runAddForm() tea.Cmd {
-	return func() tea.Msg {
-		name, alias, err := runAliasForm("", aliases.Alias{})
-		if err != nil {
-			return formCancelledMsg{}
-		}
-		return addAliasMsg{name: name, alias: alias}
-	}
-}
-
-func (m *AliasManagerModel) runEditForm() tea.Cmd {
-	entry := m.filtered[m.cursor]
-	return func() tea.Msg {
-		name, alias, err := runAliasForm(entry.Name, entry.Alias)
-		if err != nil {
-			return formCancelledMsg{}
-		}
-		return editAliasMsg{oldName: entry.Name, name: name, alias: alias}
-	}
-}
 
 func (m *AliasManagerModel) runTest() tea.Cmd {
 	entry := m.filtered[m.cursor]
@@ -705,23 +750,888 @@ func validateAlias(name string, alias aliases.Alias) error {
 	return nil
 }
 
-// runAliasForm runs a huh form for adding/editing an alias
-// This is called in a tea.Cmd so it runs outside the main tea loop
-func runAliasForm(existingName string, existing aliases.Alias) (string, aliases.Alias, error) {
-	var result *AliasFormResult
-	var err error
+// Wizard functions
 
-	if existingName == "" {
-		result, err = RunAliasAddForm()
+// openWizard initializes the wizard for add or edit mode
+func (m *AliasManagerModel) openWizard(isNew bool, entry *AliasEntry) {
+	m.mode = modeWizard
+	m.wizardIsNew = isNew
+	m.wizardStep = 0
+	m.wizardFocus = 0
+
+	// Reset all fields
+	m.wizardName.SetValue("")
+	m.wizardDesc.SetValue("")
+	m.wizardConfigType = 0
+	m.wizardTransport = 0
+	m.wizardRuntime = 0
+	m.wizardPackage.SetValue("")
+	m.wizardURL.SetValue("")
+	m.wizardHasLocal = false
+	m.wizardHasRemote = false
+	m.wizardLocalRuntime = 0
+	m.wizardLocalPackage.SetValue("")
+	m.wizardRemoteTransport = 0
+	m.wizardRemoteURL.SetValue("")
+	m.wizardDefaultVariant = 0
+	m.wizardWantGitURL = false
+	m.wizardGitURL.SetValue("")
+	m.wizardExistingName = ""
+
+	// Blur all inputs
+	m.wizardName.Blur()
+	m.wizardDesc.Blur()
+	m.wizardPackage.Blur()
+	m.wizardURL.Blur()
+	m.wizardLocalPackage.Blur()
+	m.wizardRemoteURL.Blur()
+	m.wizardGitURL.Blur()
+
+	if !isNew && entry != nil {
+		// Editing existing alias
+		m.wizardExistingName = entry.Name
+		m.wizardName.SetValue(entry.Name)
+		m.wizardDesc.SetValue(entry.Alias.Description)
+		m.wizardGitURL.SetValue(entry.Alias.URL)
+		m.wizardWantGitURL = entry.Alias.URL != ""
+
+		// Determine config type
+		if len(entry.Alias.Variants) > 0 {
+			m.wizardConfigType = 1 // variants
+			for name, variant := range entry.Alias.Variants {
+				if name == "local" {
+					m.wizardHasLocal = true
+					m.wizardLocalPackage.SetValue(variant.Package)
+					if variant.Runtime == "python" {
+						m.wizardLocalRuntime = 1
+					}
+				} else if name == "remote" {
+					m.wizardHasRemote = true
+					m.wizardRemoteURL.SetValue(variant.MCPURL)
+					if variant.Transport == "sse" {
+						m.wizardRemoteTransport = 1
+					}
+				}
+			}
+			if entry.Alias.DefaultVariant == "remote" {
+				m.wizardDefaultVariant = 1
+			}
+		} else {
+			m.wizardConfigType = 0 // simple
+			m.wizardPackage.SetValue(entry.Alias.Package)
+			m.wizardURL.SetValue(entry.Alias.MCPURL)
+
+			// Determine transport
+			switch entry.Alias.Transport {
+			case "http":
+				m.wizardTransport = 1
+			case "sse":
+				m.wizardTransport = 2
+			default:
+				m.wizardTransport = 0 // stdio
+			}
+
+			// Determine runtime
+			switch entry.Alias.Runtime {
+			case "python":
+				m.wizardRuntime = 1
+			case "go":
+				m.wizardRuntime = 2
+			case "docker":
+				m.wizardRuntime = 3
+			default:
+				m.wizardRuntime = 0 // node
+			}
+		}
+	}
+
+	// Focus the first field
+	m.wizardName.Focus()
+}
+
+// updateWizard handles keyboard input in wizard mode
+func (m *AliasManagerModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg.String() {
+	case "esc":
+		m.mode = modeList
+		m.statusMsg = "Cancelled"
+		m.statusIsError = false
+		return m, nil
+
+	case "ctrl+s":
+		// Save the alias
+		return m, m.saveWizardAlias()
+
+	case "tab", "down":
+		cmd = m.wizardNextField()
+		return m, cmd
+
+	case "shift+tab", "up":
+		cmd = m.wizardPrevField()
+		return m, cmd
+
+	case "enter":
+		// On step 0 (basic info), move to next step
+		// On other steps, either toggle checkboxes or move to next step
+		if m.wizardStep == 0 {
+			if m.wizardFocus == 0 {
+				// Validate name
+				if strings.TrimSpace(m.wizardName.Value()) == "" {
+					m.statusMsg = "Name is required"
+					m.statusIsError = true
+					return m, nil
+				}
+			}
+			m.wizardStep = 1
+			m.wizardFocus = 0
+			return m, nil
+		} else if m.wizardStep == 1 {
+			m.wizardStep = 2
+			m.wizardFocus = 0
+			cmd = m.wizardFocusCurrentField()
+			return m, cmd
+		} else if m.wizardStep == 2 {
+			// If on variants step and focus is on hasLocal/hasRemote toggles
+			if m.wizardConfigType == 1 {
+				if m.wizardFocus == 0 {
+					m.wizardHasLocal = !m.wizardHasLocal
+					return m, nil
+				} else if m.wizardFocus == 1 {
+					m.wizardHasRemote = !m.wizardHasRemote
+					return m, nil
+				}
+			}
+			m.wizardStep = 3
+			m.wizardFocus = 0
+			return m, nil
+		} else if m.wizardStep == 3 {
+			if m.wizardFocus == 0 {
+				m.wizardWantGitURL = !m.wizardWantGitURL
+				if m.wizardWantGitURL {
+					m.wizardFocus = 1
+					m.wizardGitURL.Focus()
+					return m, textinput.Blink
+				}
+			}
+		}
+		return m, nil
+
+	case "left", "h":
+		// Cycle selection left
+		return m, m.wizardCycleLeft()
+
+	case "right", "l":
+		// Cycle selection right
+		return m, m.wizardCycleRight()
+
+	case "backspace":
+		// Go back a step
+		if m.wizardStep > 0 {
+			m.wizardStep--
+			m.wizardFocus = 0
+			cmd = m.wizardFocusCurrentField()
+		}
+		return m, cmd
+
+	default:
+		// Pass to focused input
+		cmd = m.wizardUpdateInput(msg)
+		return m, cmd
+	}
+}
+
+// wizardNextField moves to the next field in the current step
+func (m *AliasManagerModel) wizardNextField() tea.Cmd {
+	maxFields := m.wizardMaxFields()
+	if m.wizardFocus < maxFields-1 {
+		m.wizardFocus++
+	}
+	return m.wizardFocusCurrentField()
+}
+
+// wizardPrevField moves to the previous field in the current step
+func (m *AliasManagerModel) wizardPrevField() tea.Cmd {
+	if m.wizardFocus > 0 {
+		m.wizardFocus--
+	}
+	return m.wizardFocusCurrentField()
+}
+
+// wizardMaxFields returns the number of fields in the current step
+func (m *AliasManagerModel) wizardMaxFields() int {
+	switch m.wizardStep {
+	case 0: // Basic info
+		return 2 // name, desc
+	case 1: // Config type
+		return 1 // simple/variants toggle
+	case 2: // Config details
+		if m.wizardConfigType == 0 { // simple
+			if m.wizardTransport == 0 { // stdio
+				return 3 // transport, runtime, package
+			}
+			return 2 // transport, url
+		}
+		// variants
+		fieldsCount := 2 // hasLocal, hasRemote toggles
+		if m.wizardHasLocal {
+			fieldsCount += 2 // runtime, package
+		}
+		if m.wizardHasRemote {
+			fieldsCount += 2 // transport, url
+		}
+		if m.wizardHasLocal && m.wizardHasRemote {
+			fieldsCount++ // default variant
+		}
+		return fieldsCount
+	case 3: // Git URL
+		return 2 // wantGitURL toggle, gitURL input
+	}
+	return 1
+}
+
+// wizardFocusCurrentField focuses the appropriate input for the current field
+func (m *AliasManagerModel) wizardFocusCurrentField() tea.Cmd {
+	// Blur all inputs first
+	m.wizardName.Blur()
+	m.wizardDesc.Blur()
+	m.wizardPackage.Blur()
+	m.wizardURL.Blur()
+	m.wizardLocalPackage.Blur()
+	m.wizardRemoteURL.Blur()
+	m.wizardGitURL.Blur()
+
+	switch m.wizardStep {
+	case 0:
+		if m.wizardFocus == 0 {
+			m.wizardName.Focus()
+		} else {
+			m.wizardDesc.Focus()
+		}
+	case 2:
+		if m.wizardConfigType == 0 { // simple
+			if m.wizardTransport == 0 { // stdio
+				if m.wizardFocus == 2 {
+					m.wizardPackage.Focus()
+				}
+			} else {
+				if m.wizardFocus == 1 {
+					m.wizardURL.Focus()
+				}
+			}
+		} else { // variants
+			// Calculate which field is focused based on toggles
+			fieldIdx := m.wizardFocus
+			if fieldIdx >= 2 && m.wizardHasLocal {
+				localFieldOffset := fieldIdx - 2
+				if localFieldOffset == 1 {
+					m.wizardLocalPackage.Focus()
+				}
+			}
+			if m.wizardHasLocal && m.wizardHasRemote {
+				remoteStart := 4
+				if fieldIdx >= remoteStart && fieldIdx < remoteStart+2 {
+					remoteFieldOffset := fieldIdx - remoteStart
+					if remoteFieldOffset == 1 {
+						m.wizardRemoteURL.Focus()
+					}
+				}
+			} else if !m.wizardHasLocal && m.wizardHasRemote {
+				remoteStart := 2
+				if fieldIdx >= remoteStart && fieldIdx < remoteStart+2 {
+					remoteFieldOffset := fieldIdx - remoteStart
+					if remoteFieldOffset == 1 {
+						m.wizardRemoteURL.Focus()
+					}
+				}
+			}
+		}
+	case 3:
+		if m.wizardFocus == 1 && m.wizardWantGitURL {
+			m.wizardGitURL.Focus()
+		}
+	}
+
+	return textinput.Blink
+}
+
+// wizardCycleLeft cycles selector left
+func (m *AliasManagerModel) wizardCycleLeft() tea.Cmd {
+	switch m.wizardStep {
+	case 1:
+		if m.wizardConfigType > 0 {
+			m.wizardConfigType--
+		}
+	case 2:
+		if m.wizardConfigType == 0 { // simple
+			if m.wizardFocus == 0 { // transport
+				if m.wizardTransport > 0 {
+					m.wizardTransport--
+				}
+			} else if m.wizardFocus == 1 && m.wizardTransport == 0 { // runtime (only for stdio)
+				if m.wizardRuntime > 0 {
+					m.wizardRuntime--
+				}
+			}
+		} else { // variants
+			m.wizardCycleVariantFieldLeft()
+		}
+	}
+	return nil
+}
+
+// wizardCycleRight cycles selector right
+func (m *AliasManagerModel) wizardCycleRight() tea.Cmd {
+	switch m.wizardStep {
+	case 1:
+		if m.wizardConfigType < 1 {
+			m.wizardConfigType++
+		}
+	case 2:
+		if m.wizardConfigType == 0 { // simple
+			if m.wizardFocus == 0 { // transport
+				if m.wizardTransport < 2 {
+					m.wizardTransport++
+				}
+			} else if m.wizardFocus == 1 && m.wizardTransport == 0 { // runtime (only for stdio)
+				if m.wizardRuntime < 3 {
+					m.wizardRuntime++
+				}
+			}
+		} else { // variants
+			m.wizardCycleVariantFieldRight()
+		}
+	}
+	return nil
+}
+
+func (m *AliasManagerModel) wizardCycleVariantFieldLeft() {
+	fieldIdx := m.wizardFocus
+	if m.wizardHasLocal {
+		if fieldIdx == 2 { // local runtime
+			if m.wizardLocalRuntime > 0 {
+				m.wizardLocalRuntime--
+			}
+		}
+	}
+	if m.wizardHasRemote {
+		remoteStart := 2
+		if m.wizardHasLocal {
+			remoteStart = 4
+		}
+		if fieldIdx == remoteStart { // remote transport
+			if m.wizardRemoteTransport > 0 {
+				m.wizardRemoteTransport--
+			}
+		}
+	}
+	if m.wizardHasLocal && m.wizardHasRemote {
+		defaultStart := 6
+		if fieldIdx == defaultStart { // default variant
+			if m.wizardDefaultVariant > 0 {
+				m.wizardDefaultVariant--
+			}
+		}
+	}
+}
+
+func (m *AliasManagerModel) wizardCycleVariantFieldRight() {
+	fieldIdx := m.wizardFocus
+	if m.wizardHasLocal {
+		if fieldIdx == 2 { // local runtime
+			if m.wizardLocalRuntime < 1 {
+				m.wizardLocalRuntime++
+			}
+		}
+	}
+	if m.wizardHasRemote {
+		remoteStart := 2
+		if m.wizardHasLocal {
+			remoteStart = 4
+		}
+		if fieldIdx == remoteStart { // remote transport
+			if m.wizardRemoteTransport < 1 {
+				m.wizardRemoteTransport++
+			}
+		}
+	}
+	if m.wizardHasLocal && m.wizardHasRemote {
+		defaultStart := 6
+		if fieldIdx == defaultStart { // default variant
+			if m.wizardDefaultVariant < 1 {
+				m.wizardDefaultVariant++
+			}
+		}
+	}
+}
+
+// wizardUpdateInput passes key events to the focused input
+func (m *AliasManagerModel) wizardUpdateInput(msg tea.KeyMsg) tea.Cmd {
+	var cmd tea.Cmd
+	switch m.wizardStep {
+	case 0:
+		if m.wizardFocus == 0 {
+			m.wizardName, cmd = m.wizardName.Update(msg)
+		} else {
+			m.wizardDesc, cmd = m.wizardDesc.Update(msg)
+		}
+	case 2:
+		if m.wizardConfigType == 0 { // simple
+			if m.wizardTransport == 0 { // stdio
+				if m.wizardFocus == 2 {
+					m.wizardPackage, cmd = m.wizardPackage.Update(msg)
+				}
+			} else {
+				if m.wizardFocus == 1 {
+					m.wizardURL, cmd = m.wizardURL.Update(msg)
+				}
+			}
+		} else { // variants
+			if m.wizardHasLocal {
+				if m.wizardFocus == 3 {
+					m.wizardLocalPackage, cmd = m.wizardLocalPackage.Update(msg)
+				}
+			}
+			remoteURLField := 3
+			if m.wizardHasLocal {
+				remoteURLField = 5
+			}
+			if m.wizardHasRemote && m.wizardFocus == remoteURLField {
+				m.wizardRemoteURL, cmd = m.wizardRemoteURL.Update(msg)
+			}
+		}
+	case 3:
+		if m.wizardFocus == 1 {
+			m.wizardGitURL, cmd = m.wizardGitURL.Update(msg)
+		}
+	}
+	return cmd
+}
+
+// renderWizard renders the wizard modal
+func (m *AliasManagerModel) renderWizard() string {
+	var b strings.Builder
+
+	// Title
+	title := "Add New Alias"
+	if !m.wizardIsNew {
+		title = fmt.Sprintf("Edit Alias: %s", m.wizardExistingName)
+	}
+
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("6")).
+		MarginBottom(1)
+	b.WriteString(titleStyle.Render(title))
+	b.WriteString("\n\n")
+
+	// Step indicator
+	steps := []string{"Basic", "Type", "Config", "Git URL"}
+	stepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	activeStepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	for i, step := range steps {
+		if i == m.wizardStep {
+			b.WriteString(activeStepStyle.Render(fmt.Sprintf("[%s]", step)))
+		} else if i < m.wizardStep {
+			b.WriteString(stepStyle.Render(fmt.Sprintf("✓%s", step)))
+		} else {
+			b.WriteString(stepStyle.Render(fmt.Sprintf(" %s ", step)))
+		}
+		if i < len(steps)-1 {
+			b.WriteString(" → ")
+		}
+	}
+	b.WriteString("\n\n")
+
+	// Current step content
+	switch m.wizardStep {
+	case 0:
+		b.WriteString(m.renderWizardStep0())
+	case 1:
+		b.WriteString(m.renderWizardStep1())
+	case 2:
+		b.WriteString(m.renderWizardStep2())
+	case 3:
+		b.WriteString(m.renderWizardStep3())
+	}
+
+	// Status message
+	if m.statusMsg != "" {
+		b.WriteString("\n")
+		var statusStyle lipgloss.Style
+		if m.statusIsError {
+			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+		} else {
+			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+		}
+		b.WriteString(statusStyle.Render(m.statusMsg))
+	}
+
+	// Help
+	b.WriteString("\n\n")
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	b.WriteString(helpStyle.Render("Tab:next  Shift+Tab:prev  ←/→:select  Enter:confirm  Ctrl+S:save  Esc:cancel  Backspace:back"))
+
+	// Center the content
+	content := b.String()
+	modalStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("6")).
+		Padding(1, 2).
+		Width(70)
+	modal := modalStyle.Render(content)
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+func (m *AliasManagerModel) renderWizardStep0() string {
+	var b strings.Builder
+
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7")).Width(15)
+	focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+
+	// Name field
+	nameLabel := "Name:"
+	if m.wizardFocus == 0 {
+		nameLabel = focusStyle.Render("▸ Name:")
+	}
+	b.WriteString(labelStyle.Render(nameLabel))
+	b.WriteString(m.wizardName.View())
+	b.WriteString("\n")
+
+	// Description field
+	descLabel := "Description:"
+	if m.wizardFocus == 1 {
+		descLabel = focusStyle.Render("▸ Description:")
+	}
+	b.WriteString(labelStyle.Render(descLabel))
+	b.WriteString(m.wizardDesc.View())
+
+	return b.String()
+}
+
+func (m *AliasManagerModel) renderWizardStep1() string {
+	var b strings.Builder
+
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	b.WriteString(labelStyle.Render("Configuration Type:"))
+	b.WriteString("\n\n")
+
+	options := []struct {
+		name string
+		desc string
+	}{
+		{"Simple", "Single package or URL"},
+		{"Variants", "Multiple options (local + remote)"},
+	}
+
+	for i, opt := range options {
+		prefix := "  "
+		style := normalStyle
+		if i == m.wizardConfigType {
+			prefix = "▸ "
+			style = selectedStyle
+		}
+		b.WriteString(style.Render(fmt.Sprintf("%s%s - %s", prefix, opt.name, opt.desc)))
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (m *AliasManagerModel) renderWizardStep2() string {
+	if m.wizardConfigType == 0 {
+		return m.renderWizardStep2Simple()
+	}
+	return m.renderWizardStep2Variants()
+}
+
+func (m *AliasManagerModel) renderWizardStep2Simple() string {
+	var b strings.Builder
+
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7")).Width(15)
+	focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	// Transport selector
+	transportLabel := "Transport:"
+	if m.wizardFocus == 0 {
+		transportLabel = focusStyle.Render("▸ Transport:")
+	}
+	b.WriteString(labelStyle.Render(transportLabel))
+	transports := []string{"stdio", "http", "sse"}
+	for i, t := range transports {
+		style := normalStyle
+		if i == m.wizardTransport {
+			style = selectedStyle
+		}
+		b.WriteString(style.Render(fmt.Sprintf(" [%s] ", t)))
+	}
+	b.WriteString("\n")
+
+	if m.wizardTransport == 0 { // stdio
+		// Runtime selector
+		runtimeLabel := "Runtime:"
+		if m.wizardFocus == 1 {
+			runtimeLabel = focusStyle.Render("▸ Runtime:")
+		}
+		b.WriteString(labelStyle.Render(runtimeLabel))
+		runtimes := []string{"node", "python", "go", "docker"}
+		for i, r := range runtimes {
+			style := normalStyle
+			if i == m.wizardRuntime {
+				style = selectedStyle
+			}
+			b.WriteString(style.Render(fmt.Sprintf(" [%s] ", r)))
+		}
+		b.WriteString("\n")
+
+		// Package input
+		pkgLabel := "Package:"
+		if m.wizardFocus == 2 {
+			pkgLabel = focusStyle.Render("▸ Package:")
+		}
+		b.WriteString(labelStyle.Render(pkgLabel))
+		b.WriteString(m.wizardPackage.View())
 	} else {
-		result, err = RunAliasEditForm(existingName, existing)
+		// URL input
+		urlLabel := "URL:"
+		if m.wizardFocus == 1 {
+			urlLabel = focusStyle.Render("▸ URL:")
+		}
+		b.WriteString(labelStyle.Render(urlLabel))
+		b.WriteString(m.wizardURL.View())
 	}
 
-	if err != nil {
-		return "", aliases.Alias{}, err
+	return b.String()
+}
+
+func (m *AliasManagerModel) renderWizardStep2Variants() string {
+	var b strings.Builder
+
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7")).Width(18)
+	focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+
+	fieldIdx := 0
+
+	// Has local toggle
+	localLabel := "Include Local:"
+	if m.wizardFocus == fieldIdx {
+		localLabel = focusStyle.Render("▸ Include Local:")
+	}
+	localCheck := "[ ]"
+	if m.wizardHasLocal {
+		localCheck = checkStyle.Render("[✓]")
+	}
+	b.WriteString(labelStyle.Render(localLabel))
+	b.WriteString(localCheck)
+	b.WriteString("\n")
+	fieldIdx++
+
+	// Has remote toggle
+	remoteLabel := "Include Remote:"
+	if m.wizardFocus == fieldIdx {
+		remoteLabel = focusStyle.Render("▸ Include Remote:")
+	}
+	remoteCheck := "[ ]"
+	if m.wizardHasRemote {
+		remoteCheck = checkStyle.Render("[✓]")
+	}
+	b.WriteString(labelStyle.Render(remoteLabel))
+	b.WriteString(remoteCheck)
+	b.WriteString("\n\n")
+	fieldIdx++
+
+	// Local config if enabled
+	if m.wizardHasLocal {
+		b.WriteString(lipgloss.NewStyle().Bold(true).Render("Local Variant:"))
+		b.WriteString("\n")
+
+		// Runtime selector
+		runtimeLabel := "  Runtime:"
+		if m.wizardFocus == fieldIdx {
+			runtimeLabel = focusStyle.Render("▸ Runtime:")
+		}
+		b.WriteString(labelStyle.Render(runtimeLabel))
+		runtimes := []string{"node", "python"}
+		for i, r := range runtimes {
+			style := normalStyle
+			if i == m.wizardLocalRuntime {
+				style = selectedStyle
+			}
+			b.WriteString(style.Render(fmt.Sprintf(" [%s] ", r)))
+		}
+		b.WriteString("\n")
+		fieldIdx++
+
+		// Package input
+		pkgLabel := "  Package:"
+		if m.wizardFocus == fieldIdx {
+			pkgLabel = focusStyle.Render("▸ Package:")
+		}
+		b.WriteString(labelStyle.Render(pkgLabel))
+		b.WriteString(m.wizardLocalPackage.View())
+		b.WriteString("\n\n")
+		fieldIdx++
 	}
 
-	return result.Name, result.Alias, nil
+	// Remote config if enabled
+	if m.wizardHasRemote {
+		b.WriteString(lipgloss.NewStyle().Bold(true).Render("Remote Variant:"))
+		b.WriteString("\n")
+
+		// Transport selector
+		transportLabel := "  Transport:"
+		if m.wizardFocus == fieldIdx {
+			transportLabel = focusStyle.Render("▸ Transport:")
+		}
+		b.WriteString(labelStyle.Render(transportLabel))
+		transports := []string{"http", "sse"}
+		for i, t := range transports {
+			style := normalStyle
+			if i == m.wizardRemoteTransport {
+				style = selectedStyle
+			}
+			b.WriteString(style.Render(fmt.Sprintf(" [%s] ", t)))
+		}
+		b.WriteString("\n")
+		fieldIdx++
+
+		// URL input
+		urlLabel := "  URL:"
+		if m.wizardFocus == fieldIdx {
+			urlLabel = focusStyle.Render("▸ URL:")
+		}
+		b.WriteString(labelStyle.Render(urlLabel))
+		b.WriteString(m.wizardRemoteURL.View())
+		b.WriteString("\n\n")
+		fieldIdx++
+	}
+
+	// Default variant if both enabled
+	if m.wizardHasLocal && m.wizardHasRemote {
+		defaultLabel := "Default Variant:"
+		if m.wizardFocus == fieldIdx {
+			defaultLabel = focusStyle.Render("▸ Default Variant:")
+		}
+		b.WriteString(labelStyle.Render(defaultLabel))
+		variants := []string{"local", "remote"}
+		for i, v := range variants {
+			style := normalStyle
+			if i == m.wizardDefaultVariant {
+				style = selectedStyle
+			}
+			b.WriteString(style.Render(fmt.Sprintf(" [%s] ", v)))
+		}
+	}
+
+	return b.String()
+}
+
+func (m *AliasManagerModel) renderWizardStep3() string {
+	var b strings.Builder
+
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7")).Width(15)
+	focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+
+	// Want git URL toggle
+	gitLabel := "Add Git URL:"
+	if m.wizardFocus == 0 {
+		gitLabel = focusStyle.Render("▸ Add Git URL:")
+	}
+	gitCheck := "[ ]"
+	if m.wizardWantGitURL {
+		gitCheck = checkStyle.Render("[✓]")
+	}
+	b.WriteString(labelStyle.Render(gitLabel))
+	b.WriteString(gitCheck)
+	b.WriteString("  (optional, link to source repo)")
+	b.WriteString("\n\n")
+
+	if m.wizardWantGitURL {
+		urlLabel := "Git URL:"
+		if m.wizardFocus == 1 {
+			urlLabel = focusStyle.Render("▸ Git URL:")
+		}
+		b.WriteString(labelStyle.Render(urlLabel))
+		b.WriteString(m.wizardGitURL.View())
+	}
+
+	return b.String()
+}
+
+// saveWizardAlias saves the alias from wizard data
+func (m *AliasManagerModel) saveWizardAlias() tea.Cmd {
+	return func() tea.Msg {
+		name := strings.TrimSpace(m.wizardName.Value())
+		if name == "" {
+			m.statusMsg = "Name is required"
+			m.statusIsError = true
+			return nil
+		}
+
+		var alias aliases.Alias
+		alias.Description = strings.TrimSpace(m.wizardDesc.Value())
+
+		if m.wizardConfigType == 0 { // simple
+			transports := []string{"stdio", "http", "sse"}
+			alias.Transport = transports[m.wizardTransport]
+
+			if m.wizardTransport == 0 { // stdio
+				runtimes := []string{"node", "python", "go", "docker"}
+				alias.Runtime = runtimes[m.wizardRuntime]
+				alias.Package = strings.TrimSpace(m.wizardPackage.Value())
+			} else {
+				alias.MCPURL = strings.TrimSpace(m.wizardURL.Value())
+			}
+		} else { // variants
+			alias.Variants = make(map[string]aliases.Variant)
+
+			if m.wizardHasLocal {
+				runtimes := []string{"node", "python"}
+				alias.Variants["local"] = aliases.Variant{
+					Transport: "stdio",
+					Runtime:   runtimes[m.wizardLocalRuntime],
+					Package:   strings.TrimSpace(m.wizardLocalPackage.Value()),
+				}
+			}
+
+			if m.wizardHasRemote {
+				transports := []string{"http", "sse"}
+				alias.Variants["remote"] = aliases.Variant{
+					Transport: transports[m.wizardRemoteTransport],
+					MCPURL:    strings.TrimSpace(m.wizardRemoteURL.Value()),
+				}
+			}
+
+			if m.wizardHasLocal && m.wizardHasRemote {
+				variants := []string{"local", "remote"}
+				alias.DefaultVariant = variants[m.wizardDefaultVariant]
+			} else if m.wizardHasLocal {
+				alias.DefaultVariant = "local"
+			} else {
+				alias.DefaultVariant = "remote"
+			}
+		}
+
+		if m.wizardWantGitURL {
+			alias.URL = strings.TrimSpace(m.wizardGitURL.Value())
+		}
+
+		if m.wizardIsNew {
+			return addAliasMsg{name: name, alias: alias}
+		}
+		return editAliasMsg{oldName: m.wizardExistingName, name: name, alias: alias}
+	}
 }
 
 // RunAliasManager runs the alias manager TUI

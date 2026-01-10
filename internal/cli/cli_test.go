@@ -54,30 +54,16 @@ func TestParseAddTarget(t *testing.T) {
 			wantType: "local",
 		},
 		{
-			name:     "git URL shorthand",
-			target:   "github.com/org/repo",
-			wantType: "git",
+			name:    "git URL shorthand - not supported",
+			target:  "github.com/org/repo",
+			wantErr: true, // GitHub shorthand is no longer supported
 		},
 		{
-			name:       "GitHub HTTP URL",
+			name:       "GitHub HTTP URL - treated as remote MCP",
 			target:     "https://github.com/user/repo",
-			wantType:   "git",
-			wantTransp: "stdio",
+			wantType:   "remote",
+			wantTransp: "http",
 			wantSource: "https://github.com/user/repo",
-		},
-		{
-			name:       "GitHub HTTP URL with .git",
-			target:     "https://github.com/user/repo.git",
-			wantType:   "git",
-			wantTransp: "stdio",
-			wantSource: "https://github.com/user/repo.git",
-		},
-		{
-			name:       "GitLab HTTP URL with .git",
-			target:     "https://gitlab.com/user/repo.git",
-			wantType:   "git",
-			wantTransp: "stdio",
-			wantSource: "https://gitlab.com/user/repo.git",
 		},
 		{
 			name:       "Remote MCP HTTP",

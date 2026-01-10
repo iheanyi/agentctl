@@ -1,8 +1,195 @@
 {
   "version": "v4",
-  "tasks": {},
+  "tasks": {
+    "adapter-workspace-interface": {
+      "status": "done",
+      "priority": 1,
+      "parent_id": "scope-support",
+      "file": "tasks/adapter-workspace-interface.md",
+      "updated_at": "2026-01-09T16:56:17.105964Z"
+    },
+    "claude-workspace": {
+      "status": "done",
+      "priority": 1,
+      "parent_id": "scope-support",
+      "file": "tasks/claude-workspace.md",
+      "updated_at": "2026-01-09T16:58:27.761062Z"
+    },
+    "cli-add-scope": {
+      "status": "done",
+      "priority": 1,
+      "parent_id": "scope-support",
+      "file": "tasks/cli-add-scope.md",
+      "updated_at": "2026-01-09T17:14:59.100743Z"
+    },
+    "cli-list-scope": {
+      "status": "done",
+      "priority": 2,
+      "parent_id": "scope-support",
+      "file": "tasks/cli-list-scope.md",
+      "updated_at": "2026-01-09T17:21:44.524033Z"
+    },
+    "cli-remove-scope": {
+      "status": "done",
+      "priority": 2,
+      "parent_id": "scope-support",
+      "file": "tasks/cli-remove-scope.md",
+      "updated_at": "2026-01-09T17:21:44.411949Z"
+    },
+    "cli-sync-scope": {
+      "status": "done",
+      "priority": 1,
+      "parent_id": "scope-support",
+      "file": "tasks/cli-sync-scope.md",
+      "updated_at": "2026-01-09T17:27:07.015794Z"
+    },
+    "commands-scope": {
+      "status": "done",
+      "priority": 2,
+      "tags": [
+        "scope",
+        "commands"
+      ],
+      "file": "tasks/commands-scope.md",
+      "updated_at": "2026-01-09T17:20:17.06015Z"
+    },
+    "cursor-workspace": {
+      "status": "done",
+      "priority": 1,
+      "parent_id": "scope-support",
+      "file": "tasks/cursor-workspace.md",
+      "updated_at": "2026-01-09T16:58:27.819137Z"
+    },
+    "init-local-dirs": {
+      "status": "done",
+      "priority": 2,
+      "parent_id": "scope-support",
+      "file": "tasks/init-local-dirs.md",
+      "updated_at": "2026-01-09T17:23:00.345913Z"
+    },
+    "new-cmd-scope": {
+      "status": "done",
+      "priority": 2,
+      "parent_id": "scope-support",
+      "file": "tasks/new-cmd-scope.md",
+      "updated_at": "2026-01-09T17:21:44.464931Z"
+    },
+    "project-resources": {
+      "status": "done",
+      "priority": 1,
+      "parent_id": "scope-support",
+      "file": "tasks/project-resources.md",
+      "updated_at": "2026-01-09T17:22:15.994314Z"
+    },
+    "prompts-scope": {
+      "status": "done",
+      "priority": 2,
+      "tags": [
+        "scope",
+        "prompts"
+      ],
+      "file": "tasks/prompts-scope.md",
+      "updated_at": "2026-01-09T17:20:17.119921Z"
+    },
+    "remove-scope": {
+      "status": "done",
+      "priority": 1,
+      "tags": [
+        "scope",
+        "cli"
+      ],
+      "file": "tasks/remove-scope.md",
+      "updated_at": "2026-01-09T17:15:40.970851Z"
+    },
+    "rules-scope": {
+      "status": "done",
+      "priority": 2,
+      "tags": [
+        "scope",
+        "rules"
+      ],
+      "file": "tasks/rules-scope.md",
+      "updated_at": "2026-01-09T17:20:17.001788Z"
+    },
+    "scope-config-methods": {
+      "status": "done",
+      "priority": 1,
+      "parent_id": "scope-support",
+      "file": "tasks/scope-config-methods.md",
+      "updated_at": "2026-01-09T17:00:30.455906Z"
+    },
+    "scope-support": {
+      "status": "done",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "epic"
+      ],
+      "file": "tasks/scope-support.md",
+      "updated_at": "2026-01-09T17:27:51.78841Z"
+    },
+    "scope-tracking": {
+      "status": "done",
+      "priority": 1,
+      "parent_id": "scope-support",
+      "file": "tasks/scope-tracking.md",
+      "updated_at": "2026-01-09T16:58:27.878303Z"
+    },
+    "scope-type": {
+      "status": "done",
+      "priority": 1,
+      "parent_id": "scope-support",
+      "file": "tasks/scope-type.md",
+      "updated_at": "2026-01-09T16:56:17.043879Z"
+    },
+    "scope-unit-tests": {
+      "status": "done",
+      "priority": 2,
+      "parent_id": "scope-support",
+      "file": "tasks/scope-unit-tests.md",
+      "updated_at": "2026-01-09T17:49:12.513483Z"
+    },
+    "skills-scope": {
+      "status": "done",
+      "priority": 2,
+      "tags": [
+        "scope",
+        "skills"
+      ],
+      "file": "tasks/skills-scope.md",
+      "updated_at": "2026-01-09T17:20:17.200567Z"
+    },
+    "sync-warnings": {
+      "status": "done",
+      "priority": 2,
+      "parent_id": "scope-support",
+      "file": "tasks/sync-warnings.md",
+      "updated_at": "2026-01-09T17:27:46.497666Z"
+    },
+    "tui-scope-indicators": {
+      "status": "done",
+      "priority": 2,
+      "parent_id": "scope-support",
+      "file": "tasks/tui-scope-indicators.md",
+      "updated_at": "2026-01-09T17:26:02.022868Z"
+    },
+    "tui-scope-selection": {
+      "status": "done",
+      "priority": 2,
+      "parent_id": "scope-support",
+      "file": "tasks/tui-scope-selection.md",
+      "updated_at": "2026-01-09T18:06:08.774703Z"
+    },
+    "workspace-golden-tests": {
+      "status": "done",
+      "priority": 2,
+      "parent_id": "scope-support",
+      "file": "tasks/workspace-golden-tests.md",
+      "updated_at": "2026-01-09T17:51:06.422605Z"
+    }
+  },
   "archived_count": 0,
-  "learnings_count": 0,
-  "decisions_count": 0,
-  "updated_at": "2026-01-07T17:46:08.879114Z"
+  "learnings_count": 7,
+  "decisions_count": 1,
+  "updated_at": "2026-01-09T18:06:08.774813Z"
 }

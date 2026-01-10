@@ -15,8 +15,18 @@ var listCmd = &cobra.Command{
 	Short:   "List installed resources",
 	Long: `List installed MCP servers, commands, rules, prompts, and skills.
 
+Scope:
+  By default, shows all resources from both local and global configs.
+  Use --scope to filter by config scope.
+
+  Scope indicators in output:
+    [L] = local (project-specific)
+    [G] = global (user-wide)
+
 Examples:
   agentctl list                  # List all resources
+  agentctl list --scope local    # List only local/project resources
+  agentctl list --scope global   # List only global resources
   agentctl list --type servers   # List only servers
   agentctl list --type commands  # List only commands`,
 	RunE: runList,
@@ -25,14 +35,28 @@ Examples:
 var (
 	listType    string
 	listProfile string
+	listScope   string
 )
 
 func init() {
 	listCmd.Flags().StringVarP(&listType, "type", "t", "", "Filter by resource type (servers, commands, rules, prompts, skills)")
 	listCmd.Flags().StringVarP(&listProfile, "profile", "p", "", "List resources from specific profile")
+	listCmd.Flags().StringVarP(&listScope, "scope", "s", "", "Filter by scope: local, global, or all (default: all)")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
+	// Parse scope filter
+	var scope config.Scope
+	if listScope != "" {
+		var err error
+		scope, err = config.ParseScope(listScope)
+		if err != nil {
+			return err
+		}
+	} else {
+		scope = config.ScopeAll
+	}
+
 	// Load config (including project config if present)
 	cfg, err := config.LoadWithProject()
 	if err != nil {
@@ -53,11 +77,13 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	// List servers
 	if listType == "" || listType == "servers" {
-		if len(cfg.Servers) > 0 {
+		// Get servers filtered by scope
+		servers := cfg.ServersForScope(scope)
+		if len(servers) > 0 {
 			fmt.Println("MCP Servers:")
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "  NAME\tSOURCE\tSTATUS")
-			for name, server := range cfg.Servers {
+			fmt.Fprintln(w, "  NAME\tSCOPE\tSOURCE\tSTATUS")
+			for _, server := range servers {
 				status := "enabled"
 				if server.Disabled {
 					status = "disabled"
@@ -68,7 +94,8 @@ func runList(cmd *cobra.Command, args []string) error {
 				} else if server.Source.Alias != "" {
 					sourceInfo = "alias:" + server.Source.Alias
 				}
-				fmt.Fprintf(w, "  %s\t%s\t%s\n", name, sourceInfo, status)
+				scopeIndicator := scopeToIndicator(server.Scope)
+				fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", server.Name, scopeIndicator, sourceInfo, status)
 			}
 			w.Flush()
 			hasOutput = true
@@ -77,56 +104,88 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	// List commands
 	if listType == "" || listType == "commands" {
-		if len(cfg.Commands) > 0 {
+		commands := cfg.CommandsForScope(scope)
+		if len(commands) > 0 {
 			if hasOutput {
 				fmt.Println()
 			}
 			fmt.Println("Commands:")
-			for _, name := range cfg.Commands {
-				fmt.Printf("  %s\n", name)
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  NAME\tSCOPE\tDESCRIPTION")
+			for _, cmd := range commands {
+				scopeIndicator := scopeToIndicator(cmd.Scope)
+				desc := cmd.Description
+				if len(desc) > 40 {
+					desc = desc[:37] + "..."
+				}
+				fmt.Fprintf(w, "  %s\t%s\t%s\n", cmd.Name, scopeIndicator, desc)
 			}
+			w.Flush()
 			hasOutput = true
 		}
 	}
 
 	// List rules
 	if listType == "" || listType == "rules" {
-		if len(cfg.Rules) > 0 {
+		rules := cfg.RulesForScope(scope)
+		if len(rules) > 0 {
 			if hasOutput {
 				fmt.Println()
 			}
 			fmt.Println("Rules:")
-			for _, name := range cfg.Rules {
-				fmt.Printf("  %s\n", name)
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  NAME\tSCOPE\tPATH")
+			for _, r := range rules {
+				scopeIndicator := scopeToIndicator(r.Scope)
+				fmt.Fprintf(w, "  %s\t%s\t%s\n", r.Name, scopeIndicator, r.Path)
 			}
+			w.Flush()
 			hasOutput = true
 		}
 	}
 
 	// List prompts
 	if listType == "" || listType == "prompts" {
-		if len(cfg.Prompts) > 0 {
+		prompts := cfg.PromptsForScope(scope)
+		if len(prompts) > 0 {
 			if hasOutput {
 				fmt.Println()
 			}
 			fmt.Println("Prompts:")
-			for _, name := range cfg.Prompts {
-				fmt.Printf("  %s\n", name)
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  NAME\tSCOPE\tDESCRIPTION")
+			for _, p := range prompts {
+				scopeIndicator := scopeToIndicator(p.Scope)
+				desc := p.Description
+				if len(desc) > 40 {
+					desc = desc[:37] + "..."
+				}
+				fmt.Fprintf(w, "  %s\t%s\t%s\n", p.Name, scopeIndicator, desc)
 			}
+			w.Flush()
 			hasOutput = true
 		}
 	}
 
 	// List skills
 	if listType == "" || listType == "skills" {
-		if len(cfg.Skills) > 0 {
+		skills := cfg.SkillsForScope(scope)
+		if len(skills) > 0 {
 			if hasOutput {
 				fmt.Println()
 			}
 			fmt.Println("Skills:")
-			for _, name := range cfg.Skills {
-				fmt.Printf("  %s\n", name)
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  NAME\tSCOPE\tDESCRIPTION")
+			for _, s := range skills {
+				scopeIndicator := scopeToIndicator(s.Scope)
+				desc := s.Description
+				if len(desc) > 40 {
+					desc = desc[:37] + "..."
+				}
+				fmt.Fprintf(w, "  %s\t%s\t%s\n", s.Name, scopeIndicator, desc)
 			}
+			w.Flush()
 			hasOutput = true
 		}
 	}
@@ -139,4 +198,16 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// scopeToIndicator converts a scope string to a short indicator for display
+func scopeToIndicator(scope string) string {
+	switch scope {
+	case string(config.ScopeLocal):
+		return "[L]"
+	case string(config.ScopeGlobal):
+		return "[G]"
+	default:
+		return "[G]" // Default to global
+	}
 }

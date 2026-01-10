@@ -19,14 +19,21 @@ var newCmd = &cobra.Command{
 
 If no arguments are provided, launches an interactive form.
 
+Scope:
+  By default, creates resources locally (.agentctl/) if .agentctl.json exists,
+  otherwise globally (~/.config/agentctl/). Use --scope to override.
+
 Examples:
   agentctl new                      # Interactive mode
   agentctl new command explain      # Create a new slash command
   agentctl new rule coding-style    # Create a new rule
+  agentctl new rule project-rules --scope local   # Create local rule
   agentctl new prompt review        # Create a new prompt template
   agentctl new skill my-skill       # Create a new skill`,
 	RunE: runNew,
 }
+
+var newScope string
 
 var newCommandCmd = &cobra.Command{
 	Use:   "command <name>",
@@ -61,18 +68,56 @@ func init() {
 	newCmd.AddCommand(newRuleCmd)
 	newCmd.AddCommand(newPromptCmd)
 	newCmd.AddCommand(newSkillCmd)
+
+	// Add scope flag to all new commands
+	newCmd.PersistentFlags().StringVarP(&newScope, "scope", "s", "", "Config scope: local, global (default: local if .agentctl.json exists)")
+}
+
+// getResourceDir returns the directory for creating resources based on scope
+func getResourceDir(resourceType string) (string, config.Scope, error) {
+	// Determine scope
+	var scope config.Scope
+	if newScope != "" {
+		var err error
+		scope, err = config.ParseScope(newScope)
+		if err != nil {
+			return "", "", err
+		}
+	} else {
+		// Smart default: local if project config exists, otherwise global
+		if config.HasProjectConfig() {
+			scope = config.ScopeLocal
+		} else {
+			scope = config.ScopeGlobal
+		}
+	}
+
+	if scope == config.ScopeLocal {
+		// Get current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", "", fmt.Errorf("failed to get working directory: %w", err)
+		}
+		return filepath.Join(cwd, ".agentctl", resourceType), scope, nil
+	}
+
+	// Global scope
+	cfg, err := config.Load()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to load config: %w", err)
+	}
+	return filepath.Join(cfg.ConfigDir, resourceType), scope, nil
 }
 
 func runNewCommand(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
-	cfg, err := config.Load()
+	commandsDir, scope, err := getResourceDir("commands")
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return err
 	}
 
 	out := output.DefaultWriter()
-	commandsDir := filepath.Join(cfg.ConfigDir, "commands")
 
 	if err := os.MkdirAll(commandsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create commands directory: %w", err)
@@ -107,7 +152,13 @@ func runNewCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create command: %w", err)
 	}
 
-	out.Success("Created command %q", name)
+	scopeLabel := ""
+	if scope == config.ScopeLocal {
+		scopeLabel = " (local)"
+	} else {
+		scopeLabel = " (global)"
+	}
+	out.Success("Created command %q%s", name, scopeLabel)
 	out.Info("Edit %s to customize", commandPath)
 	out.Println("")
 	out.Println("Run 'agentctl sync' to sync to your tools.")
@@ -118,13 +169,12 @@ func runNewCommand(cmd *cobra.Command, args []string) error {
 func runNewRule(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
-	cfg, err := config.Load()
+	rulesDir, scope, err := getResourceDir("rules")
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return err
 	}
 
 	out := output.DefaultWriter()
-	rulesDir := filepath.Join(cfg.ConfigDir, "rules")
 
 	if err := os.MkdirAll(rulesDir, 0755); err != nil {
 		return fmt.Errorf("failed to create rules directory: %w", err)
@@ -165,7 +215,13 @@ Add your rules and guidelines here.
 		return fmt.Errorf("failed to create rule: %w", err)
 	}
 
-	out.Success("Created rule %q", name)
+	scopeLabel := ""
+	if scope == config.ScopeLocal {
+		scopeLabel = " (local)"
+	} else {
+		scopeLabel = " (global)"
+	}
+	out.Success("Created rule %q%s", name, scopeLabel)
 	out.Info("Edit %s to customize", rulePath)
 	out.Println("")
 	out.Println("Run 'agentctl sync' to sync to your tools.")
@@ -176,13 +232,12 @@ Add your rules and guidelines here.
 func runNewPrompt(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
-	cfg, err := config.Load()
+	promptsDir, scope, err := getResourceDir("prompts")
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return err
 	}
 
 	out := output.DefaultWriter()
-	promptsDir := filepath.Join(cfg.ConfigDir, "prompts")
 
 	if err := os.MkdirAll(promptsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create prompts directory: %w", err)
@@ -209,7 +264,13 @@ func runNewPrompt(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create prompt: %w", err)
 	}
 
-	out.Success("Created prompt %q", name)
+	scopeLabel := ""
+	if scope == config.ScopeLocal {
+		scopeLabel = " (local)"
+	} else {
+		scopeLabel = " (global)"
+	}
+	out.Success("Created prompt %q%s", name, scopeLabel)
 	out.Info("Edit %s to customize", promptPath)
 
 	return nil
@@ -218,78 +279,59 @@ func runNewPrompt(cmd *cobra.Command, args []string) error {
 func runNewSkill(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
-	cfg, err := config.Load()
+	skillsDir, scope, err := getResourceDir("skills")
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return err
 	}
 
 	out := output.DefaultWriter()
-	skillsDir := filepath.Join(cfg.ConfigDir, "skills")
 	skillDir := filepath.Join(skillsDir, name)
 
 	if _, err := os.Stat(skillDir); err == nil {
 		return fmt.Errorf("skill %q already exists", name)
 	}
 
-	// Create skill directory structure
-	dirs := []string{
-		skillDir,
-		filepath.Join(skillDir, "prompts"),
+	// Create skill directory
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return fmt.Errorf("failed to create skill directory: %w", err)
 	}
 
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
-	}
+	// Create SKILL.md (Claude Code format)
+	skillMd := `---
+name: ` + name + `
+description: Description of this skill
+---
 
-	// Create skill.json
-	skillJSON := map[string]interface{}{
-		"name":        name,
-		"description": "Description of this skill",
-		"version":     "1.0.0",
-		"author":      "",
-	}
+# ` + name + `
 
-	data, err := jsonutil.MarshalIndent(skillJSON, "", "  ")
-	if err != nil {
-		return err
-	}
+This is your skill prompt. It will be sent to the AI when users invoke this skill.
 
-	if err := os.WriteFile(filepath.Join(skillDir, "skill.json"), data, 0644); err != nil {
-		return fmt.Errorf("failed to create skill.json: %w", err)
-	}
+## Instructions
 
-	// Create main prompt
-	mainPrompt := `# ` + name + `
+Add your instructions here. Be specific about:
+- What this skill should do
+- How it should behave
+- What output format to use
 
-This is the main prompt for your skill.
+## Usage
 
-## What This Skill Does
+Use $ARGUMENTS to reference any arguments the user provides when invoking this skill.
 
-Describe what this skill does here.
-
-## How to Use
-
-Explain how to use this skill.
-
-## Examples
-
-Provide usage examples.
+Example: "Analyze $ARGUMENTS and provide feedback."
 `
 
-	if err := os.WriteFile(filepath.Join(skillDir, "prompts", "main.md"), []byte(mainPrompt), 0644); err != nil {
-		return fmt.Errorf("failed to create main prompt: %w", err)
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMd), 0644); err != nil {
+		return fmt.Errorf("failed to create SKILL.md: %w", err)
 	}
 
-	out.Success("Created skill %q", name)
-	out.Info("Skill directory: %s", skillDir)
-	out.Println("")
-	out.Println("Files created:")
-	out.List([]string{
-		"skill.json - Skill metadata",
-		"prompts/main.md - Main skill prompt",
-	})
+	scopeLabel := ""
+	if scope == config.ScopeLocal {
+		scopeLabel = " (local)"
+	} else {
+		scopeLabel = " (global)"
+	}
+	out.Success("Created skill %q%s", name, scopeLabel)
+	out.Info("Edit %s to customize", filepath.Join(skillDir, "SKILL.md"))
 	out.Println("")
 	out.Println("Run 'agentctl sync' to sync to your tools.")
 
@@ -392,13 +434,12 @@ func getResourceTypeDescription(inProject bool) string {
 
 // runInteractiveNewCommand creates a new command via interactive form
 func runInteractiveNewCommand() error {
-	cfg, err := config.Load()
+	commandsDir, scope, err := getResourceDir("commands")
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return err
 	}
 
 	out := output.DefaultWriter()
-	commandsDir := filepath.Join(cfg.ConfigDir, "commands")
 
 	var name, description string
 
@@ -471,8 +512,14 @@ func runInteractiveNewCommand() error {
 		return fmt.Errorf("failed to create command: %w", err)
 	}
 
+	scopeLabel := ""
+	if scope == config.ScopeLocal {
+		scopeLabel = " (local)"
+	} else {
+		scopeLabel = " (global)"
+	}
 	out.Println("")
-	out.Success("Created command %q", name)
+	out.Success("Created command %q%s", name, scopeLabel)
 	out.Info("Edit %s to customize", commandPath)
 	out.Println("")
 	out.Println("Run 'agentctl sync' to sync to your tools.")
@@ -482,13 +529,12 @@ func runInteractiveNewCommand() error {
 
 // runInteractiveNewRule creates a new rule via interactive form
 func runInteractiveNewRule() error {
-	cfg, err := config.Load()
+	rulesDir, scope, err := getResourceDir("rules")
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return err
 	}
 
 	out := output.DefaultWriter()
-	rulesDir := filepath.Join(cfg.ConfigDir, "rules")
 
 	var name, description string
 
@@ -568,8 +614,14 @@ applies: "*"
 		return fmt.Errorf("failed to create rule: %w", err)
 	}
 
+	scopeLabel := ""
+	if scope == config.ScopeLocal {
+		scopeLabel = " (local)"
+	} else {
+		scopeLabel = " (global)"
+	}
 	out.Println("")
-	out.Success("Created rule %q", name)
+	out.Success("Created rule %q%s", name, scopeLabel)
 	out.Info("Edit %s to customize", rulePath)
 	out.Println("")
 	out.Println("Run 'agentctl sync' to sync to your tools.")
@@ -579,13 +631,12 @@ applies: "*"
 
 // runInteractiveNewPrompt creates a new prompt via interactive form
 func runInteractiveNewPrompt() error {
-	cfg, err := config.Load()
+	promptsDir, scope, err := getResourceDir("prompts")
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return err
 	}
 
 	out := output.DefaultWriter()
-	promptsDir := filepath.Join(cfg.ConfigDir, "prompts")
 
 	var name, description string
 
@@ -650,8 +701,14 @@ func runInteractiveNewPrompt() error {
 		return fmt.Errorf("failed to create prompt: %w", err)
 	}
 
+	scopeLabel := ""
+	if scope == config.ScopeLocal {
+		scopeLabel = " (local)"
+	} else {
+		scopeLabel = " (global)"
+	}
 	out.Println("")
-	out.Success("Created prompt %q", name)
+	out.Success("Created prompt %q%s", name, scopeLabel)
 	out.Info("Edit %s to customize", promptPath)
 
 	return nil
@@ -659,13 +716,12 @@ func runInteractiveNewPrompt() error {
 
 // runInteractiveNewSkill creates a new skill via interactive form
 func runInteractiveNewSkill() error {
-	cfg, err := config.Load()
+	skillsDir, scope, err := getResourceDir("skills")
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return err
 	}
 
 	out := output.DefaultWriter()
-	skillsDir := filepath.Join(cfg.ConfigDir, "skills")
 
 	var name, description string
 
@@ -702,19 +758,11 @@ func runInteractiveNewSkill() error {
 		return nil
 	}
 
-	// Create the skill
+	// Create the skill directory
 	skillDir := filepath.Join(skillsDir, name)
 
-	// Create skill directory structure
-	dirs := []string{
-		skillDir,
-		filepath.Join(skillDir, "prompts"),
-	}
-
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return fmt.Errorf("failed to create skill directory: %w", err)
 	}
 
 	// Use default description if not provided
@@ -722,54 +770,43 @@ func runInteractiveNewSkill() error {
 		description = "Description of this skill"
 	}
 
-	// Create skill.json
-	skillJSON := map[string]interface{}{
-		"name":        name,
-		"description": description,
-		"version":     "1.0.0",
-		"author":      "",
-	}
+	// Create SKILL.md (Claude Code format)
+	skillMd := `---
+name: ` + name + `
+description: ` + description + `
+---
 
-	data, err := jsonutil.MarshalIndent(skillJSON, "", "  ")
-	if err != nil {
-		return err
-	}
+# ` + name + `
 
-	if err := os.WriteFile(filepath.Join(skillDir, "skill.json"), data, 0644); err != nil {
-		return fmt.Errorf("failed to create skill.json: %w", err)
-	}
+This is your skill prompt. It will be sent to the AI when users invoke this skill.
 
-	// Create main prompt
-	mainPrompt := `# ` + name + `
+## Instructions
 
-` + description + `
+Add your instructions here. Be specific about:
+- What this skill should do
+- How it should behave
+- What output format to use
 
-## What This Skill Does
+## Usage
 
-Describe what this skill does here.
+Use $ARGUMENTS to reference any arguments the user provides when invoking this skill.
 
-## How to Use
-
-Explain how to use this skill.
-
-## Examples
-
-Provide usage examples.
+Example: "Analyze $ARGUMENTS and provide feedback."
 `
 
-	if err := os.WriteFile(filepath.Join(skillDir, "prompts", "main.md"), []byte(mainPrompt), 0644); err != nil {
-		return fmt.Errorf("failed to create main prompt: %w", err)
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMd), 0644); err != nil {
+		return fmt.Errorf("failed to create SKILL.md: %w", err)
 	}
 
+	scopeLabel := ""
+	if scope == config.ScopeLocal {
+		scopeLabel = " (local)"
+	} else {
+		scopeLabel = " (global)"
+	}
 	out.Println("")
-	out.Success("Created skill %q", name)
-	out.Info("Skill directory: %s", skillDir)
-	out.Println("")
-	out.Println("Files created:")
-	out.List([]string{
-		"skill.json - Skill metadata",
-		"prompts/main.md - Main skill prompt",
-	})
+	out.Success("Created skill %q%s", name, scopeLabel)
+	out.Info("Edit %s to customize", filepath.Join(skillDir, "SKILL.md"))
 	out.Println("")
 	out.Println("Run 'agentctl sync' to sync to your tools.")
 

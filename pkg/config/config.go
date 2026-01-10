@@ -159,6 +159,12 @@ func LoadProjectConfig(projectDir string) (*Config, error) {
 	// Merge: project overrides global
 	merged := globalCfg.Merge(projectCfg)
 	merged.ProjectPath = projectPath
+
+	// Load local resources from .agentctl/ directory
+	if err := merged.loadLocalResources(); err != nil {
+		return nil, err
+	}
+
 	return merged, nil
 }
 
@@ -224,6 +230,7 @@ func InitProjectConfig(dir string) (*Config, error) {
 }
 
 // Merge merges another config into this one (other takes precedence)
+// Servers from the base config are marked as "global", servers from other are marked as "local"
 func (c *Config) Merge(other *Config) *Config {
 	merged := &Config{
 		Version:   c.Version,
@@ -233,14 +240,20 @@ func (c *Config) Merge(other *Config) *Config {
 		Settings:  c.Settings,
 	}
 
-	// Copy servers from base
+	// Copy servers from base (global)
 	for name, server := range c.Servers {
-		merged.Servers[name] = server
+		serverCopy := *server
+		if serverCopy.Scope == "" {
+			serverCopy.Scope = string(ScopeGlobal)
+		}
+		merged.Servers[name] = &serverCopy
 	}
 
-	// Override/add servers from other
+	// Override/add servers from other (local)
 	for name, server := range other.Servers {
-		merged.Servers[name] = server
+		serverCopy := *server
+		serverCopy.Scope = string(ScopeLocal)
+		merged.Servers[name] = &serverCopy
 	}
 
 	// Merge resource lists
@@ -289,6 +302,11 @@ func (c *Config) SaveTo(path string) error {
 
 // loadResources loads all resources from the config directory
 func (c *Config) loadResources() error {
+	return c.loadResourcesWithScope(string(ScopeGlobal))
+}
+
+// loadResourcesWithScope loads all resources from the config directory and marks them with the given scope
+func (c *Config) loadResourcesWithScope(scope string) error {
 	var err error
 
 	// Load commands
@@ -296,11 +314,19 @@ func (c *Config) loadResources() error {
 	if err != nil {
 		return err
 	}
+	// Mark scope
+	for _, cmd := range c.LoadedCommands {
+		cmd.Scope = scope
+	}
 
 	// Load rules
 	c.LoadedRules, err = rule.LoadAll(filepath.Join(c.ConfigDir, "rules"))
 	if err != nil {
 		return err
+	}
+	// Mark scope
+	for _, r := range c.LoadedRules {
+		r.Scope = scope
 	}
 
 	// Load prompts
@@ -308,14 +334,100 @@ func (c *Config) loadResources() error {
 	if err != nil {
 		return err
 	}
+	// Mark scope
+	for _, p := range c.LoadedPrompts {
+		p.Scope = scope
+	}
 
 	// Load skills
 	c.LoadedSkills, err = skill.LoadAll(filepath.Join(c.ConfigDir, "skills"))
 	if err != nil {
 		return err
 	}
+	// Mark scope
+	for _, s := range c.LoadedSkills {
+		s.Scope = scope
+	}
 
 	return nil
+}
+
+// loadLocalResources loads resources from the project-local .agentctl/ directory
+func (c *Config) loadLocalResources() error {
+	if c.ProjectPath == "" {
+		return nil
+	}
+
+	projectDir := filepath.Dir(c.ProjectPath)
+	localResourceDir := filepath.Join(projectDir, ".agentctl")
+
+	// Load local commands
+	localCommands, err := command.LoadAll(filepath.Join(localResourceDir, "commands"))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, cmd := range localCommands {
+		cmd.Scope = string(ScopeLocal)
+	}
+	c.LoadedCommands = append(c.LoadedCommands, localCommands...)
+
+	// Load local rules
+	localRules, err := rule.LoadAll(filepath.Join(localResourceDir, "rules"))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, r := range localRules {
+		r.Scope = string(ScopeLocal)
+	}
+	c.LoadedRules = append(c.LoadedRules, localRules...)
+
+	// Load local prompts
+	localPrompts, err := prompt.LoadAll(filepath.Join(localResourceDir, "prompts"))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, p := range localPrompts {
+		p.Scope = string(ScopeLocal)
+	}
+	c.LoadedPrompts = append(c.LoadedPrompts, localPrompts...)
+
+	// Load local skills
+	localSkills, err := skill.LoadAll(filepath.Join(localResourceDir, "skills"))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, s := range localSkills {
+		s.Scope = string(ScopeLocal)
+	}
+	c.LoadedSkills = append(c.LoadedSkills, localSkills...)
+
+	return nil
+}
+
+// LocalResourceDir returns the local resource directory path for the project
+func (c *Config) LocalResourceDir() string {
+	if c.ProjectPath == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(c.ProjectPath), ".agentctl")
+}
+
+// ReloadResources reloads all resources from disk (global and local)
+// This should be called after creating, editing, or deleting resources
+func (c *Config) ReloadResources() error {
+	// Reset loaded resources
+	c.LoadedCommands = nil
+	c.LoadedRules = nil
+	c.LoadedPrompts = nil
+	c.LoadedSkills = nil
+
+	// Reload global resources
+	if err := c.loadResourcesWithScope(string(ScopeGlobal)); err != nil {
+		return err
+	}
+
+	// Reload local resources
+	return c.loadLocalResources()
 }
 
 // ActiveServers returns the list of non-disabled servers
@@ -371,4 +483,197 @@ func removeFromSlice(slice []string, item string) []string {
 		}
 	}
 	return result
+}
+
+// LoadScoped loads configuration for a specific scope only
+func LoadScoped(scope Scope) (*Config, error) {
+	switch scope {
+	case ScopeLocal:
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get working directory: %w", err)
+		}
+		projectPath := filepath.Join(cwd, ".agentctl.json")
+		if _, err := os.Stat(projectPath); os.IsNotExist(err) {
+			// Create a new empty project config
+			return &Config{
+				Version:     "1",
+				Servers:     make(map[string]*mcp.Server),
+				Path:        projectPath,
+				ConfigDir:   cwd,
+				ProjectPath: projectPath,
+			}, nil
+		}
+		cfg, err := LoadFrom(projectPath)
+		if err != nil {
+			return nil, err
+		}
+		cfg.ProjectPath = projectPath
+		// Mark all servers as local scope
+		for _, server := range cfg.Servers {
+			server.Scope = string(ScopeLocal)
+		}
+		return cfg, nil
+
+	case ScopeGlobal:
+		cfg, err := Load()
+		if err != nil {
+			return nil, err
+		}
+		// Mark all servers as global scope
+		for _, server := range cfg.Servers {
+			server.Scope = string(ScopeGlobal)
+		}
+		return cfg, nil
+
+	case ScopeAll:
+		return LoadWithProject()
+
+	default:
+		return nil, fmt.Errorf("invalid scope: %s", scope)
+	}
+}
+
+// SaveScoped saves the configuration to the appropriate location based on scope
+func (c *Config) SaveScoped(scope Scope) error {
+	switch scope {
+	case ScopeLocal:
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get working directory: %w", err)
+		}
+		projectPath := filepath.Join(cwd, ".agentctl.json")
+		return c.SaveTo(projectPath)
+
+	case ScopeGlobal:
+		configDir := DefaultConfigDir()
+		globalPath := filepath.Join(configDir, "agentctl.json")
+		return c.SaveTo(globalPath)
+
+	default:
+		return fmt.Errorf("cannot save to scope %q (use local or global)", scope)
+	}
+}
+
+// ServersForScope returns servers that belong to a specific scope
+func (c *Config) ServersForScope(scope Scope) []*mcp.Server {
+	var servers []*mcp.Server
+	for _, server := range c.Servers {
+		if server.Disabled {
+			continue
+		}
+		switch scope {
+		case ScopeLocal:
+			if server.Scope == string(ScopeLocal) {
+				servers = append(servers, server)
+			}
+		case ScopeGlobal:
+			if server.Scope == string(ScopeGlobal) || server.Scope == "" {
+				servers = append(servers, server)
+			}
+		case ScopeAll:
+			servers = append(servers, server)
+		}
+	}
+	return servers
+}
+
+// GetServerScope returns the scope of a specific server
+func (c *Config) GetServerScope(name string) Scope {
+	server, ok := c.Servers[name]
+	if !ok {
+		return ""
+	}
+	if server.Scope == string(ScopeLocal) {
+		return ScopeLocal
+	}
+	return ScopeGlobal
+}
+
+// RulesForScope returns rules that belong to a specific scope
+func (c *Config) RulesForScope(scope Scope) []*rule.Rule {
+	var rules []*rule.Rule
+	for _, r := range c.LoadedRules {
+		switch scope {
+		case ScopeLocal:
+			if r.Scope == string(ScopeLocal) {
+				rules = append(rules, r)
+			}
+		case ScopeGlobal:
+			if r.Scope == string(ScopeGlobal) || r.Scope == "" {
+				rules = append(rules, r)
+			}
+		case ScopeAll:
+			rules = append(rules, r)
+		}
+	}
+	return rules
+}
+
+// CommandsForScope returns commands that belong to a specific scope
+func (c *Config) CommandsForScope(scope Scope) []*command.Command {
+	var commands []*command.Command
+	for _, cmd := range c.LoadedCommands {
+		switch scope {
+		case ScopeLocal:
+			if cmd.Scope == string(ScopeLocal) {
+				commands = append(commands, cmd)
+			}
+		case ScopeGlobal:
+			if cmd.Scope == string(ScopeGlobal) || cmd.Scope == "" {
+				commands = append(commands, cmd)
+			}
+		case ScopeAll:
+			commands = append(commands, cmd)
+		}
+	}
+	return commands
+}
+
+// PromptsForScope returns prompts that belong to a specific scope
+func (c *Config) PromptsForScope(scope Scope) []*prompt.Prompt {
+	var prompts []*prompt.Prompt
+	for _, p := range c.LoadedPrompts {
+		switch scope {
+		case ScopeLocal:
+			if p.Scope == string(ScopeLocal) {
+				prompts = append(prompts, p)
+			}
+		case ScopeGlobal:
+			if p.Scope == string(ScopeGlobal) || p.Scope == "" {
+				prompts = append(prompts, p)
+			}
+		case ScopeAll:
+			prompts = append(prompts, p)
+		}
+	}
+	return prompts
+}
+
+// SkillsForScope returns skills that belong to a specific scope
+func (c *Config) SkillsForScope(scope Scope) []*skill.Skill {
+	var skills []*skill.Skill
+	for _, s := range c.LoadedSkills {
+		switch scope {
+		case ScopeLocal:
+			if s.Scope == string(ScopeLocal) {
+				skills = append(skills, s)
+			}
+		case ScopeGlobal:
+			if s.Scope == string(ScopeGlobal) || s.Scope == "" {
+				skills = append(skills, s)
+			}
+		case ScopeAll:
+			skills = append(skills, s)
+		}
+	}
+	return skills
+}
+
+// ProjectDir returns the project directory if a project config is loaded
+func (c *Config) ProjectDir() string {
+	if c.ProjectPath == "" {
+		return ""
+	}
+	return filepath.Dir(c.ProjectPath)
 }

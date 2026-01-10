@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/iheanyi/agentctl/pkg/command"
@@ -21,8 +22,19 @@ This will update MCP servers, commands, and rules in each tool's
 configuration file. Manually added entries (without the agentctl
 marker) are preserved.
 
+Scope:
+  By default, syncs all servers from both local and global configs.
+  Use --scope to sync only specific scope.
+
+  Local servers sync to workspace configs (.mcp.json, .cursor/mcp.json)
+  for tools that support it, falling back to global config with a warning.
+
+  Global servers always sync to global tool configs.
+
 Examples:
-  agentctl sync                  # Sync to all detected tools
+  agentctl sync                  # Sync all (local + global)
+  agentctl sync --scope local    # Sync only local servers to workspace configs
+  agentctl sync --scope global   # Sync only global servers to global configs
   agentctl sync --tool claude    # Sync only to Claude Code
   agentctl sync --dry-run        # Preview changes without applying
   agentctl sync --verbose        # Show detailed sync information`,
@@ -34,6 +46,7 @@ var (
 	syncDryRun  bool
 	syncClean   bool
 	syncVerbose bool
+	syncScope   string
 )
 
 func init() {
@@ -41,9 +54,22 @@ func init() {
 	syncCmd.Flags().BoolVarP(&syncDryRun, "dry-run", "n", false, "Preview changes without applying")
 	syncCmd.Flags().BoolVar(&syncClean, "clean", false, "Remove stale managed entries")
 	syncCmd.Flags().BoolVarP(&syncVerbose, "verbose", "v", false, "Show detailed sync information")
+	syncCmd.Flags().StringVarP(&syncScope, "scope", "s", "", "Sync scope: local, global, or all (default: all)")
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
+	// Parse scope filter
+	var scope config.Scope
+	if syncScope != "" {
+		var err error
+		scope, err = config.ParseScope(syncScope)
+		if err != nil {
+			return err
+		}
+	} else {
+		scope = config.ScopeAll
+	}
+
 	// Load config (including project config if present)
 	cfg, err := config.LoadWithProject()
 	if err != nil {
@@ -55,8 +81,24 @@ func runSync(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Using project config: %s\n\n", cfg.ProjectPath)
 	}
 
-	// Get active servers, commands, and rules
-	servers := cfg.ActiveServers()
+	// Get active servers filtered by scope
+	var servers []*mcp.Server
+	if scope == config.ScopeAll {
+		servers = cfg.ActiveServers()
+	} else {
+		servers = cfg.ServersForScope(scope)
+	}
+
+	// Separate local and global servers for scoped sync
+	var localServers, globalServers []*mcp.Server
+	for _, s := range servers {
+		if s.Scope == string(config.ScopeLocal) {
+			localServers = append(localServers, s)
+		} else {
+			globalServers = append(globalServers, s)
+		}
+	}
+
 	commands := cfg.LoadedCommands
 	rules := cfg.LoadedRules
 
@@ -185,15 +227,49 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 		// Sync servers if supported
 		if containsResourceType(supported, sync.ResourceMCP) && len(servers) > 0 {
-			if err := adapter.WriteServers(servers); err != nil {
-				fmt.Printf("  Error syncing servers: %v\n", err)
-				errorCount++
-			} else {
-				fmt.Printf("  Synced %d server(s)\n", len(servers))
-				if syncVerbose {
-					printVerboseServers(servers, "    ")
+			// Get project directory for workspace configs
+			projectDir := cfg.ProjectDir()
+			if projectDir == "" {
+				if cwd, err := os.Getwd(); err == nil {
+					projectDir = cwd
 				}
-				syncedAny = true
+			}
+
+			// Check if adapter supports workspace configs
+			wa, hasWorkspace := sync.AsWorkspaceAdapter(adapter)
+
+			// Sync local servers to workspace config if supported
+			if len(localServers) > 0 && hasWorkspace && projectDir != "" {
+				workspacePath := wa.WorkspaceConfigPath(projectDir)
+				if err := wa.WriteWorkspaceServers(projectDir, localServers); err != nil {
+					fmt.Printf("  Error syncing local servers to workspace: %v\n", err)
+					errorCount++
+				} else {
+					fmt.Printf("  Synced %d local server(s) to %s\n", len(localServers), workspacePath)
+					if syncVerbose {
+						printVerboseServers(localServers, "    ")
+					}
+					syncedAny = true
+				}
+			} else if len(localServers) > 0 {
+				// Tool doesn't support workspace configs - warn and sync to global
+				fmt.Printf("  Warning: %s doesn't support workspace configs\n", adapter.Name())
+				fmt.Printf("  Syncing %d local server(s) to global config\n", len(localServers))
+				globalServers = append(globalServers, localServers...)
+			}
+
+			// Sync global servers to global config
+			if len(globalServers) > 0 {
+				if err := adapter.WriteServers(globalServers); err != nil {
+					fmt.Printf("  Error syncing global servers: %v\n", err)
+					errorCount++
+				} else {
+					fmt.Printf("  Synced %d global server(s)\n", len(globalServers))
+					if syncVerbose {
+						printVerboseServers(globalServers, "    ")
+					}
+					syncedAny = true
+				}
 			}
 		}
 

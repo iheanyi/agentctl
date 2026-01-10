@@ -2,6 +2,7 @@ package rule
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strings"
 
@@ -21,6 +22,9 @@ type Rule struct {
 	Frontmatter *Frontmatter `json:"frontmatter,omitempty"`
 	Content     string       `json:"content"` // Markdown content
 	Path        string       `json:"path"`    // Source file path
+
+	// Runtime fields (not serialized)
+	Scope string `json:"-"` // "local" or "global" - where this rule came from
 }
 
 // Load loads a rule from a markdown file, parsing optional frontmatter
@@ -131,9 +135,7 @@ func Save(r *Rule, dir string) error {
 	if r.Frontmatter != nil {
 		content.WriteString("---\n")
 		if r.Frontmatter.Priority != 0 {
-			content.WriteString("priority: ")
-			content.WriteString(strings.TrimSpace(yaml.Node{Value: string(rune(r.Frontmatter.Priority))}.Value))
-			content.WriteString("\n")
+			content.WriteString(fmt.Sprintf("priority: %d\n", r.Frontmatter.Priority))
 		}
 		if len(r.Frontmatter.Tools) > 0 {
 			content.WriteString("tools: [")

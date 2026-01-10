@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/iheanyi/agentctl/pkg/aliases"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/mcpclient"
@@ -132,10 +133,8 @@ func FormatServerDescription(s *Server) string {
 		}
 	}
 
-	// Truncate if too long
-	if len(desc) > 60 {
-		desc = desc[:57] + "..."
-	}
+	// Truncate if too long (unicode-safe)
+	desc = ansi.Truncate(desc, 60, "...")
 
 	return desc
 }

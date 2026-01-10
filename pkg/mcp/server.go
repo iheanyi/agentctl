@@ -37,6 +37,9 @@ type Server struct {
 	Namespace string            `json:"namespace,omitempty"` // For conflict resolution
 	Build     *BuildConfig      `json:"build,omitempty"`
 	Disabled  bool              `json:"disabled,omitempty"`
+
+	// Runtime fields (not serialized to JSON)
+	Scope string `json:"-"` // "local" or "global" - where this server came from
 }
 
 // Runtime represents the runtime required by an MCP server

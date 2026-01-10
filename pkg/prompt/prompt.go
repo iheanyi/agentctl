@@ -12,6 +12,10 @@ type Prompt struct {
 	Description string   `json:"description,omitempty"`
 	Template    string   `json:"template"`
 	Variables   []string `json:"variables,omitempty"` // Expected template variables
+
+	// Runtime fields (not serialized)
+	Scope      string `json:"-"` // "local" or "global" - where this prompt came from
+	SourcePath string `json:"-"` // Path to the source file
 }
 
 // Load loads a prompt from a JSON file
