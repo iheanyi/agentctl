@@ -1,0 +1,34 @@
+{
+  "version": "1",
+  "settings": {
+    "autoUpdate": {
+      "enabled": false
+    },
+    "tools": {
+      "claude": {
+        "enabled": true
+      },
+      "cline": {
+        "enabled": true
+      },
+      "codex": {
+        "enabled": true
+      },
+      "continue": {
+        "enabled": true
+      },
+      "cursor": {
+        "enabled": true
+      },
+      "opencode": {
+        "enabled": true
+      },
+      "windsurf": {
+        "enabled": true
+      },
+      "zed": {
+        "enabled": true
+      }
+    }
+  }
+}
