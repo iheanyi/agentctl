@@ -132,6 +132,11 @@ func (a *ClaudeAdapter) WriteServers(servers []*mcp.Server) error {
 			name = server.Namespace
 		}
 
+		// Skip servers with empty names to prevent corrupting config
+		if name == "" {
+			continue
+		}
+
 		cfg := ClaudeServerConfig{
 			Env:       server.Env,
 			ManagedBy: ManagedValue,
@@ -526,6 +531,11 @@ func (a *ClaudeAdapter) WriteWorkspaceServers(projectDir string, servers []*mcp.
 		name := server.Name
 		if server.Namespace != "" {
 			name = server.Namespace
+		}
+
+		// Skip servers with empty names to prevent corrupting config
+		if name == "" {
+			continue
 		}
 
 		serverCfg := map[string]interface{}{

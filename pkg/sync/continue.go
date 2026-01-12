@@ -199,6 +199,11 @@ func (a *ContinueAdapter) WriteServers(servers []*mcp.Server) error {
 			name = server.Namespace
 		}
 
+		// Skip servers with empty names to prevent corrupting config
+		if name == "" {
+			continue
+		}
+
 		serverCfg := map[string]interface{}{
 			"command":    server.Command,
 			"_managedBy": ManagedValue,

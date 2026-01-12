@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	stdsync "sync"
+	"time"
 
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/sync"
@@ -27,16 +29,23 @@ This checks:
 - MCP server command availability
 - Sync state consistency
 
+Use --tools to also run each tool's native doctor command (if available).
+
 Examples:
   agentctl doctor           # Run all health checks
-  agentctl doctor -v        # Show detailed output`,
+  agentctl doctor -v        # Show detailed output
+  agentctl doctor --tools   # Also run tool-specific doctors (claude doctor, etc.)`,
 	RunE: runDoctor,
 }
 
-var doctorVerbose bool
+var (
+	doctorVerbose   bool
+	doctorRunTools  bool
+)
 
 func init() {
 	doctorCmd.Flags().BoolVarP(&doctorVerbose, "verbose", "v", false, "Show detailed output")
+	doctorCmd.Flags().BoolVar(&doctorRunTools, "tools", false, "Run tool-specific doctor commands")
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
@@ -163,6 +172,79 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		issues++
 	}
 	fmt.Println()
+
+	// Run tool-specific doctor commands if requested
+	if doctorRunTools {
+		fmt.Println("Tool Doctors:")
+		toolDoctors := getToolDoctorCommands()
+		ranAny := false
+
+		for _, td := range toolDoctors {
+			// Check if tool command exists
+			if _, err := exec.LookPath(td.command); err != nil {
+				if doctorVerbose {
+					fmt.Printf("  - %s: not installed\n", td.name)
+				}
+				continue
+			}
+
+			ranAny = true
+			fmt.Printf("  Running %s doctor...\n", td.name)
+
+			// Run the doctor command with 30s timeout
+			// Use script wrapper on macOS to provide PTY for tools that need it
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			var toolCmd *exec.Cmd
+			if td.needsPTY && runtime.GOOS == "darwin" {
+				// Use script -q /dev/null to provide a PTY
+				args := append([]string{"-q", "/dev/null", td.command}, td.args...)
+				toolCmd = exec.CommandContext(ctx, "script", args...)
+			} else {
+				toolCmd = exec.CommandContext(ctx, td.command, td.args...)
+			}
+			output, err := toolCmd.CombinedOutput()
+			cancel()
+
+			if ctx.Err() == context.DeadlineExceeded {
+				fmt.Printf("    ⚠ %s doctor timed out (30s)\n", td.name)
+				if td.needsPTY {
+					fmt.Printf("      Note: This tool requires an interactive terminal.\n")
+					fmt.Printf("      Run '%s %s' directly for full diagnostics.\n", td.command, strings.Join(td.args, " "))
+				}
+				// Don't count timeout as issue, just informational
+			} else if err != nil {
+				// Check if it's a TTY-related error
+				outputStr := string(output)
+				if strings.Contains(outputStr, "Raw mode") || strings.Contains(outputStr, "stdin") {
+					fmt.Printf("    ⚠ %s doctor requires interactive terminal\n", td.name)
+					fmt.Printf("      Run '%s %s' directly for full diagnostics.\n", td.command, strings.Join(td.args, " "))
+				} else {
+					fmt.Printf("    ✗ %s doctor failed\n", td.name)
+					if doctorVerbose && len(output) > 0 {
+						// Indent output
+						lines := strings.Split(strings.TrimSpace(outputStr), "\n")
+						for _, line := range lines {
+							fmt.Printf("      %s\n", line)
+						}
+					}
+					issues++
+				}
+			} else {
+				fmt.Printf("    ✓ %s doctor passed\n", td.name)
+				if doctorVerbose && len(output) > 0 {
+					lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+					for _, line := range lines {
+						fmt.Printf("      %s\n", line)
+					}
+				}
+			}
+		}
+
+		if !ranAny {
+			fmt.Println("  No tool doctor commands available")
+		}
+		fmt.Println()
+	}
 
 	// Check MCP server commands
 	if cfg != nil && len(cfg.Servers) > 0 {
@@ -300,4 +382,30 @@ func getVersion(command string, args []string) (string, error) {
 	}
 
 	return version, nil
+}
+
+// toolDoctor represents a tool's doctor command
+type toolDoctor struct {
+	name     string   // Display name
+	command  string   // Command to run
+	args     []string // Arguments
+	needsPTY bool     // Whether the command needs a PTY to run
+}
+
+// getToolDoctorCommands returns the list of known tool doctor commands
+func getToolDoctorCommands() []toolDoctor {
+	return []toolDoctor{
+		{
+			name:     "Claude Code",
+			command:  "claude",
+			args:     []string{"doctor"},
+			needsPTY: true, // claude doctor uses Ink which requires a TTY
+		},
+		// Add more tools here as they add doctor commands
+		// {
+		// 	name:    "Cursor",
+		// 	command: "cursor",
+		// 	args:    []string{"--doctor"},
+		// },
+	}
 }

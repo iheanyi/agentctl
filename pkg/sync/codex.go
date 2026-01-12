@@ -111,6 +111,11 @@ func (a *CodexAdapter) WriteServers(servers []*mcp.Server) error {
 			name = server.Namespace
 		}
 
+		// Skip servers with empty names to prevent corrupting config
+		if name == "" {
+			continue
+		}
+
 		config.MCPServers[name] = CodexServerConfig{
 			Command:   server.Command,
 			Args:      server.Args,

@@ -116,25 +116,28 @@ func (a *ClaudeDesktopAdapter) WriteServers(servers []*mcp.Server) error {
 		}
 	}
 
-	// Add new servers
-	for _, server := range servers {
+	// Add new servers (only stdio - Claude Desktop doesn't support HTTP/SSE)
+	for _, server := range FilterStdioServers(servers) {
 		name := server.Name
 		if server.Namespace != "" {
 			name = server.Namespace
 		}
 
-		cfg := ClaudeServerConfig{
-			Env:       server.Env,
-			ManagedBy: ManagedValue,
+		// Skip servers with empty names to prevent corrupting config
+		if name == "" {
+			continue
 		}
 
-		// Handle different transport types
-		if server.Transport == mcp.TransportHTTP || server.Transport == mcp.TransportSSE {
-			cfg.Transport = string(server.Transport)
-			cfg.URL = server.URL
-		} else {
-			cfg.Command = server.Command
-			cfg.Args = server.Args
+		// Validate: command is required for stdio servers
+		if server.Command == "" {
+			continue
+		}
+
+		cfg := ClaudeServerConfig{
+			Command:   server.Command,
+			Args:      server.Args,
+			Env:       server.Env,
+			ManagedBy: ManagedValue,
 		}
 
 		config.MCPServers[name] = cfg
