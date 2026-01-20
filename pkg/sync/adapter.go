@@ -6,6 +6,7 @@ import (
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/rule"
+	"github.com/iheanyi/agentctl/pkg/skill"
 )
 
 // ResourceType represents the type of resource being synced
@@ -81,6 +82,33 @@ type WorkspaceAdapter interface {
 func SupportsWorkspace(a Adapter) bool {
 	wa, ok := a.(WorkspaceAdapter)
 	return ok && wa.SupportsWorkspace()
+}
+
+// SkillsAdapter is an optional interface for adapters that support skills/plugins.
+// Skills are directory-based configurations with SKILL.md files that define
+// slash commands, prompts, and other tool extensions.
+type SkillsAdapter interface {
+	Adapter
+
+	// ReadSkills reads skill configurations from the tool
+	ReadSkills() ([]*skill.Skill, error)
+
+	// WriteSkills writes skill configurations to the tool
+	// Note: Most tools don't support writing skills programmatically
+	// This is optional and may return an error for read-only skill systems
+	WriteSkills(skills []*skill.Skill) error
+}
+
+// AsSkillsAdapter returns the adapter as a SkillsAdapter if supported
+func AsSkillsAdapter(a Adapter) (SkillsAdapter, bool) {
+	sa, ok := a.(SkillsAdapter)
+	return sa, ok
+}
+
+// SupportsSkills checks if an adapter implements SkillsAdapter
+func SupportsSkills(a Adapter) bool {
+	_, ok := a.(SkillsAdapter)
+	return ok
 }
 
 // AsWorkspaceAdapter returns the adapter as a WorkspaceAdapter if supported
