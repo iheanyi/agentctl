@@ -80,12 +80,16 @@ func (a *ClaudeAdapter) commandsDir() string {
 	return filepath.Join(a.configDir(), "commands")
 }
 
+func (a *ClaudeAdapter) rulesDir() string {
+	return filepath.Join(a.configDir(), "rules")
+}
+
 func (a *ClaudeAdapter) pluginsDir() string {
 	return filepath.Join(a.configDir(), "plugins")
 }
 
 func (a *ClaudeAdapter) SupportedResources() []ResourceType {
-	return []ResourceType{ResourceMCP, ResourceCommands, ResourceSkills}
+	return []ResourceType{ResourceMCP, ResourceCommands, ResourceRules, ResourceSkills}
 }
 
 func (a *ClaudeAdapter) ReadServers() ([]*mcp.Server, error) {
@@ -212,11 +216,25 @@ func (a *ClaudeAdapter) WriteCommands(commands []*command.Command) error {
 }
 
 func (a *ClaudeAdapter) ReadRules() ([]*rule.Rule, error) {
-	return nil, nil // Claude Code doesn't have rules
+	rulesDir := a.rulesDir()
+	return rule.LoadAll(rulesDir)
 }
 
 func (a *ClaudeAdapter) WriteRules(rules []*rule.Rule) error {
-	return nil // Claude Code doesn't have rules
+	rulesDir := a.rulesDir()
+
+	// Ensure directory exists
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		return err
+	}
+
+	for _, r := range rules {
+		if err := rule.Save(r, rulesDir); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // ReadSkills reads installed plugins as skills
@@ -262,6 +280,25 @@ func (a *ClaudeAdapter) ReadSkills() ([]*skill.Skill, error) {
 	}
 
 	return skills, nil
+}
+
+// WriteSkills writes skills to Claude Code's skills directory
+// Note: This writes to ~/.claude/skills/, not the plugins system
+func (a *ClaudeAdapter) WriteSkills(skills []*skill.Skill) error {
+	skillsDir := filepath.Join(a.configDir(), "skills")
+
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		return err
+	}
+
+	for _, s := range skills {
+		skillDir := filepath.Join(skillsDir, s.Name)
+		if err := s.Save(skillDir); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (a *ClaudeAdapter) loadSettings() (*ClaudeCodeSettings, error) {
