@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
@@ -46,23 +47,33 @@ func (a *CursorAdapter) Detect() (bool, error) {
 }
 
 func (a *CursorAdapter) ConfigPath() string {
+	return filepath.Join(a.configDir(), "mcp.json")
+}
+
+func (a *CursorAdapter) configDir() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
 
 	switch runtime.GOOS {
-	case "darwin", "linux":
-		return filepath.Join(homeDir, ".cursor", "mcp.json")
-	case "windows":
-		return filepath.Join(homeDir, ".cursor", "mcp.json")
+	case "darwin", "linux", "windows":
+		return filepath.Join(homeDir, ".cursor")
 	default:
 		return ""
 	}
 }
 
+func (a *CursorAdapter) rulesDir() string {
+	return filepath.Join(a.configDir(), "rules")
+}
+
+func (a *CursorAdapter) commandsDir() string {
+	return filepath.Join(a.configDir(), "commands")
+}
+
 func (a *CursorAdapter) SupportedResources() []ResourceType {
-	return []ResourceType{ResourceMCP, ResourceRules}
+	return []ResourceType{ResourceMCP, ResourceRules, ResourceCommands}
 }
 
 func (a *CursorAdapter) ReadServers() ([]*mcp.Server, error) {
@@ -171,32 +182,99 @@ func (a *CursorAdapter) WriteServers(servers []*mcp.Server) error {
 }
 
 func (a *CursorAdapter) ReadCommands() ([]*command.Command, error) {
-	return nil, nil // Cursor doesn't have commands
+	commandsDir := a.commandsDir()
+
+	entries, err := os.ReadDir(commandsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var commands []*command.Command
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		path := filepath.Join(commandsDir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		cmd := parseCursorCommand(entry.Name(), string(data))
+		if cmd != nil {
+			commands = append(commands, cmd)
+		}
+	}
+
+	return commands, nil
 }
 
 func (a *CursorAdapter) WriteCommands(commands []*command.Command) error {
-	return nil // Cursor doesn't have commands
+	commandsDir := a.commandsDir()
+
+	// Ensure directory exists
+	if err := os.MkdirAll(commandsDir, 0755); err != nil {
+		return err
+	}
+
+	for _, cmd := range commands {
+		content := formatCursorCommand(cmd)
+		filename := cmd.Name + ".md"
+		path := filepath.Join(commandsDir, filename)
+
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (a *CursorAdapter) ReadRules() ([]*rule.Rule, error) {
-	// Cursor uses .cursorrules file
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
+	var rules []*rule.Rule
+
+	// First check modern .cursor/rules/ directory (takes priority)
+	rulesDir := a.rulesDir()
+	if entries, err := os.ReadDir(rulesDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			// Cursor uses .mdc files (markdown with frontmatter) or .md files
+			if !strings.HasSuffix(entry.Name(), ".mdc") && !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+
+			path := filepath.Join(rulesDir, entry.Name())
+			r, err := loadCursorRule(path)
+			if err != nil {
+				continue
+			}
+			rules = append(rules, r)
+		}
 	}
 
-	// Check for global .cursorrules
-	rulesPath := filepath.Join(homeDir, ".cursorrules")
-	if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
-		return nil, nil
+	// Also check legacy .cursorrules file if no modern rules found
+	if len(rules) == 0 {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return rules, nil
+		}
+
+		legacyPath := filepath.Join(homeDir, ".cursorrules")
+		if _, err := os.Stat(legacyPath); err == nil {
+			r, err := rule.Load(legacyPath)
+			if err == nil {
+				rules = append(rules, r)
+			}
+		}
 	}
 
-	r, err := rule.Load(rulesPath)
-	if err != nil {
-		return nil, err
-	}
-
-	return []*rule.Rule{r}, nil
+	return rules, nil
 }
 
 func (a *CursorAdapter) WriteRules(rules []*rule.Rule) error {
@@ -204,23 +282,118 @@ func (a *CursorAdapter) WriteRules(rules []*rule.Rule) error {
 		return nil
 	}
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
+	rulesDir := a.rulesDir()
+
+	// Ensure directory exists
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
 		return err
 	}
 
-	rulesPath := filepath.Join(homeDir, ".cursorrules")
-
-	// Concatenate all rules with frontmatter indicator
-	var content string
-	for i, r := range rules {
-		if i > 0 {
-			content += "\n\n---\n\n"
+	// Write each rule as a .mdc file
+	for _, r := range rules {
+		if err := saveCursorRule(r, rulesDir); err != nil {
+			return err
 		}
-		content += r.Content
 	}
 
-	return os.WriteFile(rulesPath, []byte(content), 0644)
+	return nil
+}
+
+// loadCursorRule loads a Cursor rule from .mdc or .md file
+// Cursor uses "globs" and "alwaysApply" in frontmatter
+func loadCursorRule(path string) (*rule.Rule, error) {
+	r, err := rule.Load(path)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cursor uses .mdc extension - normalize name
+	r.Name = strings.TrimSuffix(r.Name, ".mdc")
+
+	return r, nil
+}
+
+// saveCursorRule saves a rule in Cursor's .mdc format
+func saveCursorRule(r *rule.Rule, dir string) error {
+	var content strings.Builder
+
+	// Write Cursor-style frontmatter if we have glob patterns
+	hasGlobs := r.Frontmatter != nil && (len(r.Frontmatter.Globs) > 0 || len(r.Frontmatter.Paths) > 0)
+	if hasGlobs || (r.Frontmatter != nil && r.Frontmatter.Priority != 0) {
+		content.WriteString("---\n")
+		if r.Frontmatter != nil {
+			// Use globs for Cursor, or convert paths to globs
+			globs := r.Frontmatter.Globs
+			if len(globs) == 0 && len(r.Frontmatter.Paths) > 0 {
+				globs = r.Frontmatter.Paths
+			}
+			if len(globs) > 0 {
+				content.WriteString("globs:\n")
+				for _, g := range globs {
+					content.WriteString("  - \"")
+					content.WriteString(g)
+					content.WriteString("\"\n")
+				}
+			}
+			// Cursor uses alwaysApply: true/false
+			content.WriteString("alwaysApply: false\n")
+		}
+		content.WriteString("---\n\n")
+	}
+
+	content.WriteString(r.Content)
+
+	// Determine filename - use .mdc extension for Cursor
+	name := r.Name
+	if name == "" {
+		name = "imported-rule"
+	}
+	if !strings.HasSuffix(name, ".mdc") {
+		name += ".mdc"
+	}
+
+	path := filepath.Join(dir, name)
+	return os.WriteFile(path, []byte(content.String()), 0644)
+}
+
+// parseCursorCommand parses a Cursor command markdown file
+func parseCursorCommand(filename string, content string) *command.Command {
+	name := strings.TrimSuffix(filename, ".md")
+	cmd := &command.Command{Name: name}
+
+	if strings.HasPrefix(content, "---") {
+		parts := strings.SplitN(content, "---", 3)
+		if len(parts) >= 3 {
+			frontmatter := parts[1]
+			for _, line := range strings.Split(frontmatter, "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "description:") {
+					cmd.Description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+				}
+			}
+			cmd.Prompt = strings.TrimSpace(parts[2])
+		}
+	} else {
+		cmd.Prompt = content
+	}
+
+	return cmd
+}
+
+// formatCursorCommand formats a command for Cursor
+func formatCursorCommand(cmd *command.Command) string {
+	var sb strings.Builder
+
+	sb.WriteString("---\n")
+	if cmd.Description != "" {
+		sb.WriteString("description: ")
+		sb.WriteString(cmd.Description)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("---\n\n")
+	sb.WriteString(cmd.Prompt)
+
+	return sb.String()
 }
 
 // loadRawConfig loads the entire config as a raw map to preserve all fields
