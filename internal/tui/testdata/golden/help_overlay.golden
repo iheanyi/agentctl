@@ -1,0 +1,32 @@
+         ╭────────────────────────────────────────────────────────────╮         
+         │                                                            │         
+         │  Keyboard Shortcuts                                        │         
+         │                                                            │         
+         │    Navigation           Operations           Filters       │         
+         │    ──────────           ──────────           ───────       │         
+         │    j/k     up/down      i      install       f    cycle    │         
+         │  filter                                                    │         
+         │    g/G     top/bottom   a      add new       1    all      │         
+         │    /       search       d      delete        2             │         
+         │  installed                                                 │         
+         │    Esc     clear        e      edit          3             │         
+         │  available                                                 │         
+         │                         Enter  toggle        4             │         
+         │  disabled                                                  │         
+         │    Selection            s      sync                        │         
+         │    ─────────            t      test          UI            │         
+         │    Space   toggle       x      tools (exec)  ──            │         
+         │    V       select all                        L    toggle   │         
+         │  logs                                                      │         
+         │                         Profiles             ?    this     │         
+         │  help                                                      │         
+         │    Tabs                 ────────             q    quit     │         
+         │    ────                 P      switch                      │         
+         │    Tab/Shift+Tab  next/prev tab                            │         
+         │    F1-F6          jump to tab                              │         
+         │  (Servers/Commands/Rules/Skills/Prompts/Hooks)             │         
+         │                                                            │         
+         │                         Press any key to close             │         
+         │                                                            │         
+         │                                                            │         
+         ╰────────────────────────────────────────────────────────────╯         

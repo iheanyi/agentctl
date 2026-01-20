@@ -30,18 +30,18 @@ const (
 
 // Server represents a unified server item for the TUI list
 type Server struct {
-	Name           string
-	Desc           string // Description of the server
-	Status         ServerStatusType
-	Health         HealthStatusType
-	HealthError    error
-	HealthLatency  string // e.g., "120ms"
-	Transport      string // stdio, http, sse
-	Command        string // for display
-	Selected       bool   // for multi-select
-	Tools          []mcpclient.Tool // Discovered tools
-	ServerConfig   *mcp.Server
-	AliasConfig    *aliases.Alias
+	Name          string
+	Desc          string // Description of the server
+	Status        ServerStatusType
+	Health        HealthStatusType
+	HealthError   error
+	HealthLatency string           // e.g., "120ms"
+	Transport     string           // stdio, http, sse
+	Command       string           // for display
+	Selected      bool             // for multi-select
+	Tools         []mcpclient.Tool // Discovered tools
+	ServerConfig  *mcp.Server
+	AliasConfig   *aliases.Alias
 }
 
 // Title implements list.Item interface

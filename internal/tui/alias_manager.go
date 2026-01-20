@@ -17,24 +17,24 @@ import (
 
 // AliasEntry represents an alias in the list
 type AliasEntry struct {
-	Name        string
-	Alias       aliases.Alias
-	IsBundled   bool
-	IsExpanded  bool
+	Name       string
+	Alias      aliases.Alias
+	IsBundled  bool
+	IsExpanded bool
 }
 
 // AliasManagerModel is the Bubble Tea model for managing bundled aliases
 type AliasManagerModel struct {
 	// Data
-	entries       []AliasEntry
-	filtered      []AliasEntry
-	bundledPath   string
+	entries     []AliasEntry
+	filtered    []AliasEntry
+	bundledPath string
 
 	// State
-	cursor        int
-	searchQuery   string
-	searchInput   textinput.Model
-	searching     bool
+	cursor      int
+	searchQuery string
+	searchInput textinput.Model
+	searching   bool
 
 	// UI state
 	width         int
@@ -50,26 +50,26 @@ type AliasManagerModel struct {
 	confirmDelete string
 
 	// Wizard state
-	wizardStep       int  // 0=basic, 1=type, 2=config, 3=giturl
-	wizardIsNew      bool // true for add, false for edit
-	wizardFocus      int  // current focused field within step
-	wizardName       textinput.Model
-	wizardDesc       textinput.Model
-	wizardConfigType int  // 0=simple, 1=variants
-	wizardTransport  int  // 0=stdio, 1=http, 2=sse
-	wizardRuntime    int  // 0=node, 1=python, 2=go, 3=docker
-	wizardPackage    textinput.Model
-	wizardURL        textinput.Model
-	wizardHasLocal   bool
-	wizardHasRemote  bool
-	wizardLocalRuntime   int // 0=node, 1=python
-	wizardLocalPackage   textinput.Model
+	wizardStep            int  // 0=basic, 1=type, 2=config, 3=giturl
+	wizardIsNew           bool // true for add, false for edit
+	wizardFocus           int  // current focused field within step
+	wizardName            textinput.Model
+	wizardDesc            textinput.Model
+	wizardConfigType      int // 0=simple, 1=variants
+	wizardTransport       int // 0=stdio, 1=http, 2=sse
+	wizardRuntime         int // 0=node, 1=python, 2=go, 3=docker
+	wizardPackage         textinput.Model
+	wizardURL             textinput.Model
+	wizardHasLocal        bool
+	wizardHasRemote       bool
+	wizardLocalRuntime    int // 0=node, 1=python
+	wizardLocalPackage    textinput.Model
 	wizardRemoteTransport int // 0=http, 1=sse
-	wizardRemoteURL      textinput.Model
-	wizardDefaultVariant int // 0=local, 1=remote
-	wizardWantGitURL     bool
-	wizardGitURL         textinput.Model
-	wizardExistingName   string // for editing - the original name
+	wizardRemoteURL       textinput.Model
+	wizardDefaultVariant  int // 0=local, 1=remote
+	wizardWantGitURL      bool
+	wizardGitURL          textinput.Model
+	wizardExistingName    string // for editing - the original name
 }
 
 type aliasManagerMode int
@@ -1647,4 +1647,3 @@ func RunAliasManager() error {
 	_, err := p.Run()
 	return err
 }
-

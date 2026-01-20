@@ -42,6 +42,9 @@ type keyMap struct {
 	// Profiles
 	ProfileSwitch key.Binding
 
+	// Backup
+	Backup key.Binding
+
 	// UI
 	ToggleLogs key.Binding
 	Help       key.Binding
@@ -56,6 +59,10 @@ type keyMap struct {
 	Tab4    key.Binding
 	Tab5    key.Binding
 	Tab6    key.Binding
+	Tab7    key.Binding
+
+	// Import
+	Import key.Binding
 }
 
 // newKeyMap creates a new keyMap with all keybindings configured.
@@ -183,6 +190,12 @@ func newKeyMap() keyMap {
 			key.WithHelp("P", "switch profile"),
 		),
 
+		// Backup
+		Backup: key.NewBinding(
+			key.WithKeys("B"),
+			key.WithHelp("B", "backups"),
+		),
+
 		// UI
 		ToggleLogs: key.NewBinding(
 			key.WithKeys("L"),
@@ -229,6 +242,16 @@ func newKeyMap() keyMap {
 		Tab6: key.NewBinding(
 			key.WithKeys("F6"),
 			key.WithHelp("F6", "hooks"),
+		),
+		Tab7: key.NewBinding(
+			key.WithKeys("F7"),
+			key.WithHelp("F7", "tools"),
+		),
+
+		// Import
+		Import: key.NewBinding(
+			key.WithKeys("I"),
+			key.WithHelp("I", "import"),
 		),
 	}
 }
@@ -279,6 +302,8 @@ func (k keyMap) FullHelp() [][]key.Binding {
 			k.Test,
 			k.TestAll,
 			k.Refresh,
+			k.Import,
+			k.Backup,
 		},
 		// Filters column
 		{
