@@ -13,7 +13,9 @@ import (
 type Frontmatter struct {
 	Priority int      `yaml:"priority,omitempty"` // Rule priority (higher = more important)
 	Tools    []string `yaml:"tools,omitempty"`    // Which tools this rule applies to
-	Applies  string   `yaml:"applies,omitempty"`  // File pattern this rule applies to (e.g., "*.ts")
+	Applies  string   `yaml:"applies,omitempty"`  // File pattern this rule applies to (e.g., "*.ts") - legacy
+	Paths    []string `yaml:"paths,omitempty"`    // File patterns for conditional rules (Claude Code style)
+	Globs    []string `yaml:"globs,omitempty"`    // File patterns for conditional rules (Cursor style)
 }
 
 // Rule represents a rule/instruction configuration
@@ -146,6 +148,22 @@ func Save(r *Rule, dir string) error {
 			content.WriteString("applies: \"")
 			content.WriteString(r.Frontmatter.Applies)
 			content.WriteString("\"\n")
+		}
+		if len(r.Frontmatter.Paths) > 0 {
+			content.WriteString("paths:\n")
+			for _, p := range r.Frontmatter.Paths {
+				content.WriteString("  - \"")
+				content.WriteString(p)
+				content.WriteString("\"\n")
+			}
+		}
+		if len(r.Frontmatter.Globs) > 0 {
+			content.WriteString("globs:\n")
+			for _, g := range r.Frontmatter.Globs {
+				content.WriteString("  - \"")
+				content.WriteString(g)
+				content.WriteString("\"\n")
+			}
 		}
 		content.WriteString("---\n\n")
 	}
