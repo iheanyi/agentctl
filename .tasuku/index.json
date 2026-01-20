@@ -8,6 +8,162 @@
       "file": "tasks/adapter-workspace-interface.md",
       "updated_at": "2026-01-09T16:56:17.105964Z"
     },
+    "add-agentssubagents-resource-typ": {
+      "status": "ready",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "agents",
+        "epic"
+      ],
+      "file": "tasks/add-agentssubagents-resource-typ.md",
+      "updated_at": "2026-01-20T16:55:22.32549Z"
+    },
+    "add-claude-section-to-agentctljs": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "schema"
+      ],
+      "file": "tasks/add-claude-section-to-agentctljs.md",
+      "updated_at": "2026-01-20T16:46:22.11025Z"
+    },
+    "add-copilot-cli-adapter-new-tool": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "copilot"
+      ],
+      "file": "tasks/add-copilot-cli-adapter-new-tool.md",
+      "updated_at": "2026-01-20T16:46:23.075828Z"
+    },
+    "add-copilot-cli-custom-instructi": {
+      "status": "ready",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "copilot",
+        "rules"
+      ],
+      "file": "tasks/add-copilot-cli-custom-instructi.md",
+      "updated_at": "2026-01-20T16:55:23.235106Z"
+    },
+    "add-cursor-cursorrules-support-w": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "cursor",
+        "rules"
+      ],
+      "file": "tasks/add-cursor-cursorrules-support-w.md",
+      "updated_at": "2026-01-20T16:55:23.08757Z"
+    },
+    "add-hooks-resource-type-support": {
+      "status": "ready",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "hooks",
+        "epic"
+      ],
+      "file": "tasks/add-hooks-resource-type-support.md",
+      "updated_at": "2026-01-20T16:55:22.516899Z"
+    },
+    "add-promptscommands-sync-for-cod": {
+      "status": "ready",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "commands"
+      ],
+      "file": "tasks/add-promptscommands-sync-for-cod.md",
+      "updated_at": "2026-01-20T16:55:22.744988Z"
+    },
+    "add-skills-resource-type-support": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "skills",
+        "epic"
+      ],
+      "file": "tasks/add-skills-resource-type-support.md",
+      "updated_at": "2026-01-20T16:55:22.136088Z"
+    },
+    "add-support-for-yaml-frontmatter": {
+      "status": "ready",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "rules"
+      ],
+      "file": "tasks/add-support-for-yaml-frontmatter.md",
+      "updated_at": "2026-01-20T16:49:36.204567Z"
+    },
+    "audit-claude-code-adapter-agains": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "audit",
+        "claude"
+      ],
+      "file": "tasks/audit-claude-code-adapter-agains.md",
+      "updated_at": "2026-01-20T16:46:22.653696Z"
+    },
+    "audit-claude-desktop-adapter-aga": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "audit",
+        "claude-desktop"
+      ],
+      "file": "tasks/audit-claude-desktop-adapter-aga.md",
+      "updated_at": "2026-01-20T16:46:22.818013Z"
+    },
+    "audit-codex-adapter-against-late": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "audit",
+        "codex"
+      ],
+      "file": "tasks/audit-codex-adapter-against-late.md",
+      "updated_at": "2026-01-20T16:46:22.913471Z"
+    },
+    "audit-cursor-adapter-against-lat": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "audit",
+        "cursor"
+      ],
+      "file": "tasks/audit-cursor-adapter-against-lat.md",
+      "updated_at": "2026-01-20T16:46:22.7417Z"
+    },
+    "audit-opencode-adapter-against-l": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "audit",
+        "opencode"
+      ],
+      "file": "tasks/audit-opencode-adapter-against-l.md",
+      "updated_at": "2026-01-20T16:46:23.003054Z"
+    },
+    "audit-opencode-adapter-uses-diff": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "audit",
+        "opencode",
+        "bug"
+      ],
+      "file": "tasks/audit-opencode-adapter-uses-diff.md",
+      "updated_at": "2026-01-20T16:55:22.923981Z"
+    },
     "claude-workspace": {
       "status": "done",
       "priority": 1,
@@ -60,12 +216,115 @@
       "file": "tasks/cursor-workspace.md",
       "updated_at": "2026-01-09T16:58:27.819137Z"
     },
+    "cut-v-release-for-agentctl-inclu": {
+      "status": "done",
+      "priority": 3,
+      "file": "tasks/cut-v-release-for-agentctl-inclu.md",
+      "updated_at": "2026-01-13T02:41:08.256647Z"
+    },
+    "fix-claude-adapter-to-support-cl": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "bug",
+        "claude",
+        "rules"
+      ],
+      "file": "tasks/fix-claude-adapter-to-support-cl.md",
+      "updated_at": "2026-01-20T16:49:36.079885Z"
+    },
+    "implement-claudemd-global-instru": {
+      "status": "blocked",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "claude"
+      ],
+      "blocked_by": [
+        "add-claude-section-to-agentctljs"
+      ],
+      "file": "tasks/implement-claudemd-global-instru.md",
+      "updated_at": "2026-01-20T16:46:34.328377Z"
+    },
+    "implement-hooks-sync-for-claude": {
+      "status": "blocked",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "claude"
+      ],
+      "blocked_by": [
+        "add-claude-section-to-agentctljs"
+      ],
+      "file": "tasks/implement-hooks-sync-for-claude.md",
+      "updated_at": "2026-01-20T16:46:34.672209Z"
+    },
+    "implement-permissions-sync-for-c": {
+      "status": "blocked",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "claude"
+      ],
+      "blocked_by": [
+        "add-claude-section-to-agentctljs"
+      ],
+      "file": "tasks/implement-permissions-sync-for-c.md",
+      "updated_at": "2026-01-20T16:46:34.531927Z"
+    },
+    "implement-pluginsmarketplaces-sy": {
+      "status": "blocked",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "claude"
+      ],
+      "blocked_by": [
+        "add-claude-section-to-agentctljs"
+      ],
+      "file": "tasks/implement-pluginsmarketplaces-sy.md",
+      "updated_at": "2026-01-20T16:46:34.434379Z"
+    },
+    "implement-statusline-sync-for-cl": {
+      "status": "blocked",
+      "priority": 3,
+      "tags": [
+        "feature",
+        "claude"
+      ],
+      "blocked_by": [
+        "add-claude-section-to-agentctljs"
+      ],
+      "file": "tasks/implement-statusline-sync-for-cl.md",
+      "updated_at": "2026-01-20T16:46:34.779607Z"
+    },
     "init-local-dirs": {
       "status": "done",
       "priority": 2,
       "parent_id": "scope-support",
       "file": "tasks/init-local-dirs.md",
       "updated_at": "2026-01-09T17:23:00.345913Z"
+    },
+    "map-codex-starlark-rules-to-perm": {
+      "status": "ready",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "codex"
+      ],
+      "file": "tasks/map-codex-starlark-rules-to-perm.md",
+      "updated_at": "2026-01-20T16:49:36.332266Z"
+    },
+    "map-permissions-concepts-across": {
+      "status": "ready",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "permissions",
+        "epic"
+      ],
+      "file": "tasks/map-permissions-concepts-across.md",
+      "updated_at": "2026-01-20T16:55:23.395055Z"
     },
     "new-cmd-scope": {
       "status": "done",
@@ -159,6 +418,16 @@
       "file": "tasks/skills-scope.md",
       "updated_at": "2026-01-09T17:20:17.200567Z"
     },
+    "support-codex-toml-config-format": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "codex"
+      ],
+      "file": "tasks/support-codex-toml-config-format.md",
+      "updated_at": "2026-01-20T16:55:23.535487Z"
+    },
     "sync-warnings": {
       "status": "done",
       "priority": 2,
@@ -191,5 +460,5 @@
   "archived_count": 0,
   "learnings_count": 7,
   "decisions_count": 1,
-  "updated_at": "2026-01-09T18:06:08.774813Z"
+  "updated_at": "2026-01-20T16:55:23.535818Z"
 }
