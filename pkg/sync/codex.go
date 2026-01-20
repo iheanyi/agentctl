@@ -2,6 +2,7 @@ package sync
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,13 +29,13 @@ type CodexTOMLConfig struct {
 
 // CodexTOMLServerConfig represents a server in Codex's TOML format
 type CodexTOMLServerConfig struct {
-	Command    string            `toml:"command,omitempty"`
-	Args       []string          `toml:"args,omitempty"`
-	URL        string            `toml:"url,omitempty"`
-	Env        map[string]string `toml:"env,omitempty"`
-	Enabled    *bool             `toml:"enabled,omitempty"`
-	Timeout    int               `toml:"startup_timeout_sec,omitempty"`
-	ToolTimeout int              `toml:"tool_timeout_sec,omitempty"`
+	Command     string            `toml:"command,omitempty"`
+	Args        []string          `toml:"args,omitempty"`
+	URL         string            `toml:"url,omitempty"`
+	Env         map[string]string `toml:"env,omitempty"`
+	Enabled     *bool             `toml:"enabled,omitempty"`
+	Timeout     int               `toml:"startup_timeout_sec,omitempty"`
+	ToolTimeout int               `toml:"tool_timeout_sec,omitempty"`
 }
 
 // CodexJSONServerConfig represents a server in Codex's legacy JSON format
@@ -364,35 +365,7 @@ func (a *CodexAdapter) writeServersToJSON(servers []*mcp.Server) error {
 
 func (a *CodexAdapter) ReadCommands() ([]*command.Command, error) {
 	// Codex uses ~/.codex/prompts/ for custom prompts (similar to commands)
-	promptsDir := a.promptsDir()
-
-	entries, err := os.ReadDir(promptsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var commands []*command.Command
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-
-		path := filepath.Join(promptsDir, entry.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-
-		cmd := parseCodexPrompt(entry.Name(), string(data))
-		if cmd != nil {
-			commands = append(commands, cmd)
-		}
-	}
-
-	return commands, nil
+	return ReadCommandsFromDir(a.promptsDir(), parseCodexPrompt)
 }
 
 func (a *CodexAdapter) WriteCommands(commands []*command.Command) error {
@@ -403,6 +376,11 @@ func (a *CodexAdapter) WriteCommands(commands []*command.Command) error {
 	}
 
 	for _, cmd := range commands {
+		// Validate command name to prevent path traversal
+		if err := SanitizeName(cmd.Name); err != nil {
+			return fmt.Errorf("invalid command name: %w", err)
+		}
+
 		content := formatCodexPrompt(cmd)
 		filename := cmd.Name + ".md"
 		path := filepath.Join(promptsDir, filename)
@@ -455,53 +433,12 @@ func (a *CodexAdapter) WriteRules(rules []*rule.Rule) error {
 
 // ReadSkills reads skills from Codex's skills directory
 func (a *CodexAdapter) ReadSkills() ([]*skill.Skill, error) {
-	skillsDir := a.skillsDir()
-
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var skills []*skill.Skill
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		skillPath := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
-		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
-			continue
-		}
-
-		s, err := skill.Load(filepath.Join(skillsDir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		skills = append(skills, s)
-	}
-
-	return skills, nil
+	return ReadSkillsFromDir(a.skillsDir())
 }
 
 // WriteSkills writes skills to Codex's skills directory
 func (a *CodexAdapter) WriteSkills(skills []*skill.Skill) error {
-	skillsDir := a.skillsDir()
-
-	if err := os.MkdirAll(skillsDir, 0755); err != nil {
-		return err
-	}
-
-	for _, s := range skills {
-		skillDir := filepath.Join(skillsDir, s.Name)
-		if err := s.Save(skillDir); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return WriteSkillsToDir(a.skillsDir(), skills)
 }
 
 // parseCodexPrompt parses a Codex prompt markdown file

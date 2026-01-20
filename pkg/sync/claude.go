@@ -2,6 +2,7 @@ package sync
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -203,6 +204,11 @@ func (a *ClaudeAdapter) WriteCommands(commands []*command.Command) error {
 	}
 
 	for _, cmd := range commands {
+		// Validate command name to prevent path traversal
+		if err := SanitizeName(cmd.Name); err != nil {
+			return fmt.Errorf("invalid command name: %w", err)
+		}
+
 		content := formatClaudeCommand(cmd)
 		filename := cmd.Name + ".md"
 		path := filepath.Join(commandsDir, filename)
@@ -292,6 +298,11 @@ func (a *ClaudeAdapter) WriteSkills(skills []*skill.Skill) error {
 	}
 
 	for _, s := range skills {
+		// Validate skill name to prevent path traversal
+		if err := SanitizeName(s.Name); err != nil {
+			return fmt.Errorf("invalid skill name: %w", err)
+		}
+
 		skillDir := filepath.Join(skillsDir, s.Name)
 		if err := s.Save(skillDir); err != nil {
 			return err
@@ -393,28 +404,6 @@ func parseClaudeCommand(filename string, content string) *command.Command {
 	}
 
 	return cmd
-}
-
-// parseToolsList parses a YAML list or comma-separated tools string
-func parseToolsList(s string) []string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil
-	}
-	// Handle YAML array format [tool1, tool2]
-	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
-		s = strings.TrimPrefix(s, "[")
-		s = strings.TrimSuffix(s, "]")
-	}
-	parts := strings.Split(s, ",")
-	var tools []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			tools = append(tools, p)
-		}
-	}
-	return tools
 }
 
 // formatClaudeCommand formats a command for Claude Code

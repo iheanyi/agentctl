@@ -15,6 +15,8 @@ var (
 	Version = "dev"
 	// Commit is set at build time
 	Commit = "unknown"
+	// JSONOutput is set when --json flag is used
+	JSONOutput bool
 )
 
 var rootCmd = &cobra.Command{
@@ -46,6 +48,9 @@ func Execute() {
 }
 
 func init() {
+	// Global flags
+	rootCmd.PersistentFlags().BoolVar(&JSONOutput, "json", false, "Output results as JSON (machine-parseable)")
+
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(addCmd) // Primary command for adding MCP servers (alias: install)
 	rootCmd.AddCommand(removeCmd)
@@ -66,6 +71,7 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(uiCmd)
 	rootCmd.AddCommand(daemonCmd)
+	rootCmd.AddCommand(backupCmd)
 }
 
 // runRoot handles the default behavior when no subcommand is given

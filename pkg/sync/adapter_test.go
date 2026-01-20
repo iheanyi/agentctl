@@ -338,10 +338,10 @@ func TestParseClaudeCommand(t *testing.T) {
 		wantPrompt       string
 	}{
 		{
-			name:     "simple command without frontmatter",
-			filename: "simple.md",
-			content:  "Just a prompt",
-			wantName: "simple",
+			name:       "simple command without frontmatter",
+			filename:   "simple.md",
+			content:    "Just a prompt",
+			wantName:   "simple",
 			wantPrompt: "Just a prompt",
 		},
 		{

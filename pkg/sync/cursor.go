@@ -1,7 +1,7 @@
 package sync
 
 import (
-	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -77,161 +77,45 @@ func (a *CursorAdapter) SupportedResources() []ResourceType {
 }
 
 func (a *CursorAdapter) ReadServers() ([]*mcp.Server, error) {
-	raw, err := a.loadRawConfig()
+	helper := NewJSONConfigHelper(a.ConfigPath())
+	raw, err := helper.LoadRaw()
 	if err != nil {
 		return nil, err
 	}
 
-	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
-	if !ok {
-		return nil, nil
-	}
-
-	var servers []*mcp.Server
-	for name, v := range mcpServers {
-		serverData, ok := v.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		server := &mcp.Server{
-			Name: name,
-		}
-
-		if cmd, ok := serverData["command"].(string); ok {
-			server.Command = cmd
-		}
-
-		if args, ok := serverData["args"].([]interface{}); ok {
-			for _, arg := range args {
-				if str, ok := arg.(string); ok {
-					server.Args = append(server.Args, str)
-				}
-			}
-		}
-
-		if envData, ok := serverData["env"].(map[string]interface{}); ok {
-			server.Env = make(map[string]string)
-			for k, v := range envData {
-				if str, ok := v.(string); ok {
-					server.Env[k] = str
-				}
-			}
-		}
-
-		servers = append(servers, server)
-	}
-
-	return servers, nil
+	mcpServers, _ := GetMCPServersSection(raw, "mcpServers")
+	return ServersFromMCPSection(mcpServers), nil
 }
 
 func (a *CursorAdapter) WriteServers(servers []*mcp.Server) error {
-	// Load the full raw config to preserve all fields
-	raw, err := a.loadRawConfig()
+	helper := NewJSONConfigHelper(a.ConfigPath())
+	raw, err := helper.LoadRaw()
 	if err != nil {
 		return err
 	}
 
-	// Get or create the mcpServers section
-	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
-	if !ok {
-		mcpServers = make(map[string]interface{})
-	}
-
-	// Remove old agentctl-managed entries
-	for name, v := range mcpServers {
-		if serverData, ok := v.(map[string]interface{}); ok {
-			if managedBy, ok := serverData["_managedBy"].(string); ok && managedBy == ManagedValue {
-				delete(mcpServers, name)
-			}
-		}
-	}
+	mcpServers, _ := GetMCPServersSection(raw, "mcpServers")
+	RemoveManagedServers(mcpServers)
 
 	// Add new servers (only stdio transport - Cursor doesn't support HTTP/SSE)
 	for _, server := range FilterStdioServers(servers) {
-		name := server.Name
-		if server.Namespace != "" {
-			name = server.Namespace
-		}
-
-		// Skip servers with empty names to prevent corrupting config
+		name := GetServerName(server)
 		if name == "" {
 			continue
 		}
-
-		serverCfg := map[string]interface{}{
-			"command":    server.Command,
-			"_managedBy": ManagedValue,
-		}
-
-		if len(server.Args) > 0 {
-			serverCfg["args"] = server.Args
-		}
-
-		if len(server.Env) > 0 {
-			serverCfg["env"] = server.Env
-		}
-
-		mcpServers[name] = serverCfg
+		mcpServers[name] = ServerToRawMap(server)
 	}
 
-	// Update the mcpServers section in raw config
 	raw["mcpServers"] = mcpServers
-
-	return a.saveRawConfig(raw)
+	return helper.SaveRaw(raw)
 }
 
 func (a *CursorAdapter) ReadCommands() ([]*command.Command, error) {
-	commandsDir := a.commandsDir()
-
-	entries, err := os.ReadDir(commandsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var commands []*command.Command
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-
-		path := filepath.Join(commandsDir, entry.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-
-		cmd := parseCursorCommand(entry.Name(), string(data))
-		if cmd != nil {
-			commands = append(commands, cmd)
-		}
-	}
-
-	return commands, nil
+	return ReadCommandsFromDir(a.commandsDir(), parseCursorCommand)
 }
 
 func (a *CursorAdapter) WriteCommands(commands []*command.Command) error {
-	commandsDir := a.commandsDir()
-
-	// Ensure directory exists
-	if err := os.MkdirAll(commandsDir, 0755); err != nil {
-		return err
-	}
-
-	for _, cmd := range commands {
-		content := formatCursorCommand(cmd)
-		filename := cmd.Name + ".md"
-		path := filepath.Join(commandsDir, filename)
-
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return WriteCommandsToDir(a.commandsDir(), commands, formatCursorCommand)
 }
 
 func (a *CursorAdapter) ReadRules() ([]*rule.Rule, error) {
@@ -348,6 +232,13 @@ func saveCursorRule(r *rule.Rule, dir string) error {
 	if name == "" {
 		name = "imported-rule"
 	}
+
+	// Validate rule name to prevent path traversal (without extension)
+	baseName := strings.TrimSuffix(name, ".mdc")
+	if err := SanitizeName(baseName); err != nil {
+		return fmt.Errorf("invalid rule name: %w", err)
+	}
+
 	if !strings.HasSuffix(name, ".mdc") {
 		name += ".mdc"
 	}
@@ -396,44 +287,6 @@ func formatCursorCommand(cmd *command.Command) string {
 	return sb.String()
 }
 
-// loadRawConfig loads the entire config as a raw map to preserve all fields
-func (a *CursorAdapter) loadRawConfig() (map[string]interface{}, error) {
-	path := a.ConfigPath()
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]interface{}), nil
-		}
-		return nil, err
-	}
-
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, err
-	}
-
-	return raw, nil
-}
-
-// saveRawConfig saves the entire config, preserving all fields
-func (a *CursorAdapter) saveRawConfig(raw map[string]interface{}) error {
-	path := a.ConfigPath()
-
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(raw, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, data, 0644)
-}
-
 // WorkspaceAdapter implementation for Cursor
 
 // SupportsWorkspace returns true - Cursor supports .cursor/mcp.json in project root
@@ -448,60 +301,18 @@ func (a *CursorAdapter) WorkspaceConfigPath(projectDir string) string {
 
 // ReadWorkspaceServers reads MCP servers from the project's .cursor/mcp.json file
 func (a *CursorAdapter) ReadWorkspaceServers(projectDir string) ([]*mcp.Server, error) {
-	path := a.WorkspaceConfigPath(projectDir)
-
-	data, err := os.ReadFile(path)
+	helper := NewJSONConfigHelper(a.WorkspaceConfigPath(projectDir))
+	raw, err := helper.LoadRaw()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
 
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, err
-	}
+	mcpServers, _ := GetMCPServersSection(raw, "mcpServers")
+	servers := ServersFromMCPSection(mcpServers)
 
-	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
-	if !ok {
-		return nil, nil
-	}
-
-	var servers []*mcp.Server
-	for name, v := range mcpServers {
-		serverData, ok := v.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		server := &mcp.Server{
-			Name:  name,
-			Scope: "local",
-		}
-
-		if cmd, ok := serverData["command"].(string); ok {
-			server.Command = cmd
-		}
-
-		if args, ok := serverData["args"].([]interface{}); ok {
-			for _, arg := range args {
-				if str, ok := arg.(string); ok {
-					server.Args = append(server.Args, str)
-				}
-			}
-		}
-
-		if envData, ok := serverData["env"].(map[string]interface{}); ok {
-			server.Env = make(map[string]string)
-			for k, ev := range envData {
-				if str, ok := ev.(string); ok {
-					server.Env[k] = str
-				}
-			}
-		}
-
-		servers = append(servers, server)
+	// Mark as local scope
+	for _, s := range servers {
+		s.Scope = "local"
 	}
 
 	return servers, nil
@@ -509,73 +320,24 @@ func (a *CursorAdapter) ReadWorkspaceServers(projectDir string) ([]*mcp.Server, 
 
 // WriteWorkspaceServers writes MCP servers to the project's .cursor/mcp.json file
 func (a *CursorAdapter) WriteWorkspaceServers(projectDir string, servers []*mcp.Server) error {
-	path := a.WorkspaceConfigPath(projectDir)
-
-	// Load existing config if present
-	var raw map[string]interface{}
-	if data, err := os.ReadFile(path); err == nil {
-		if err := json.Unmarshal(data, &raw); err != nil {
-			raw = make(map[string]interface{})
-		}
-	} else {
-		raw = make(map[string]interface{})
-	}
-
-	// Get or create mcpServers section
-	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
-	if !ok {
-		mcpServers = make(map[string]interface{})
-	}
-
-	// Remove old agentctl-managed entries
-	for name, v := range mcpServers {
-		if serverData, ok := v.(map[string]interface{}); ok {
-			if managedBy, ok := serverData["_managedBy"].(string); ok && managedBy == ManagedValue {
-				delete(mcpServers, name)
-			}
-		}
-	}
-
-	// Add new servers (only stdio - Cursor doesn't support HTTP/SSE)
-	for _, server := range FilterStdioServers(servers) {
-		name := server.Name
-		if server.Namespace != "" {
-			name = server.Namespace
-		}
-
-		// Skip servers with empty names to prevent corrupting config
-		if name == "" {
-			continue
-		}
-
-		serverCfg := map[string]interface{}{
-			"command":    server.Command,
-			"_managedBy": ManagedValue,
-		}
-
-		if len(server.Args) > 0 {
-			serverCfg["args"] = server.Args
-		}
-
-		if len(server.Env) > 0 {
-			serverCfg["env"] = server.Env
-		}
-
-		mcpServers[name] = serverCfg
-	}
-
-	raw["mcpServers"] = mcpServers
-
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(raw, "", "  ")
+	helper := NewJSONConfigHelper(a.WorkspaceConfigPath(projectDir))
+	raw, err := helper.LoadRaw()
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	mcpServers, _ := GetMCPServersSection(raw, "mcpServers")
+	RemoveManagedServers(mcpServers)
+
+	// Add new servers (only stdio - Cursor doesn't support HTTP/SSE)
+	for _, server := range FilterStdioServers(servers) {
+		name := GetServerName(server)
+		if name == "" {
+			continue
+		}
+		mcpServers[name] = ServerToRawMap(server)
+	}
+
+	raw["mcpServers"] = mcpServers
+	return helper.SaveRaw(raw)
 }

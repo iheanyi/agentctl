@@ -6,6 +6,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/iheanyi/agentctl/pkg/config"
+	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +52,10 @@ func runList(cmd *cobra.Command, args []string) error {
 		var err error
 		scope, err = config.ParseScope(listScope)
 		if err != nil {
+			if JSONOutput {
+				jw := output.NewJSONWriter()
+				return jw.WriteError(err)
+			}
 			return err
 		}
 	} else {
@@ -60,7 +65,16 @@ func runList(cmd *cobra.Command, args []string) error {
 	// Load config (including project config if present)
 	cfg, err := config.LoadWithProject()
 	if err != nil {
+		if JSONOutput {
+			jw := output.NewJSONWriter()
+			return jw.WriteError(fmt.Errorf("failed to load config: %w", err))
+		}
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// JSON output mode
+	if JSONOutput {
+		return runListJSON(cfg, scope)
 	}
 
 	// Show project config notice if applicable
@@ -198,6 +212,100 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// runListJSON outputs the list results as JSON
+func runListJSON(cfg *config.Config, scope config.Scope) error {
+	jw := output.NewJSONWriter()
+
+	listOutput := output.ListOutput{
+		ProjectPath: cfg.ProjectPath,
+	}
+
+	// Get servers filtered by scope and type
+	if listType == "" || listType == "servers" {
+		servers := cfg.ServersForScope(scope)
+		for _, server := range servers {
+			status := "enabled"
+			if server.Disabled {
+				status = "disabled"
+			}
+			sourceInfo := server.Source.Type
+			if server.Source.URL != "" {
+				sourceInfo = server.Source.URL
+			} else if server.Source.Alias != "" {
+				sourceInfo = "alias:" + server.Source.Alias
+			}
+
+			transport := "stdio"
+			if server.URL != "" {
+				transport = string(server.Transport)
+				if transport == "" {
+					transport = "http"
+				}
+			}
+
+			listOutput.Servers = append(listOutput.Servers, output.ServerInfo{
+				Name:      server.Name,
+				Scope:     server.Scope,
+				Source:    sourceInfo,
+				Status:    status,
+				Command:   server.Command,
+				URL:       server.URL,
+				Transport: transport,
+			})
+		}
+	}
+
+	// Get commands filtered by scope and type
+	if listType == "" || listType == "commands" {
+		commands := cfg.CommandsForScope(scope)
+		for _, cmd := range commands {
+			listOutput.Commands = append(listOutput.Commands, output.CommandInfo{
+				Name:        cmd.Name,
+				Scope:       cmd.Scope,
+				Description: cmd.Description,
+			})
+		}
+	}
+
+	// Get rules filtered by scope and type
+	if listType == "" || listType == "rules" {
+		rules := cfg.RulesForScope(scope)
+		for _, r := range rules {
+			listOutput.Rules = append(listOutput.Rules, output.RuleInfo{
+				Name:  r.Name,
+				Scope: r.Scope,
+				Path:  r.Path,
+			})
+		}
+	}
+
+	// Get prompts filtered by scope and type
+	if listType == "" || listType == "prompts" {
+		prompts := cfg.PromptsForScope(scope)
+		for _, p := range prompts {
+			listOutput.Prompts = append(listOutput.Prompts, output.PromptInfo{
+				Name:        p.Name,
+				Scope:       p.Scope,
+				Description: p.Description,
+			})
+		}
+	}
+
+	// Get skills filtered by scope and type
+	if listType == "" || listType == "skills" {
+		skills := cfg.SkillsForScope(scope)
+		for _, s := range skills {
+			listOutput.Skills = append(listOutput.Skills, output.SkillInfo{
+				Name:        s.Name,
+				Scope:       s.Scope,
+				Description: s.Description,
+			})
+		}
+	}
+
+	return jw.WriteSuccess(listOutput)
 }
 
 // scopeToIndicator converts a scope string to a short indicator for display

@@ -26,7 +26,9 @@ const ManagedMarker = "_managedBy"
 // ManagedValue is the value used to identify agentctl-managed entries
 const ManagedValue = "agentctl"
 
-// Adapter is the interface that tool-specific adapters must implement
+// Adapter is the base interface that all tool-specific adapters must implement.
+// This interface contains only the core methods. Resource-specific operations
+// (servers, commands, rules, skills) are defined in separate optional interfaces.
 type Adapter interface {
 	// Name returns the adapter name (e.g., "claude", "cursor")
 	Name() string
@@ -39,23 +41,41 @@ type Adapter interface {
 
 	// SupportedResources returns the resource types this adapter supports
 	SupportedResources() []ResourceType
+}
+
+// ServerAdapter is an optional interface for adapters that support MCP servers.
+// Implement this interface if the tool can sync MCP server configurations.
+type ServerAdapter interface {
+	Adapter
 
 	// ReadServers reads MCP server configurations from the tool
 	ReadServers() ([]*mcp.Server, error)
 
 	// WriteServers writes MCP server configurations to the tool
 	WriteServers(servers []*mcp.Server) error
+}
 
-	// ReadCommands reads command configurations from the tool (if supported)
+// CommandsAdapter is an optional interface for adapters that support commands.
+// Implement this interface if the tool can sync command configurations.
+type CommandsAdapter interface {
+	Adapter
+
+	// ReadCommands reads command configurations from the tool
 	ReadCommands() ([]*command.Command, error)
 
-	// WriteCommands writes command configurations to the tool (if supported)
+	// WriteCommands writes command configurations to the tool
 	WriteCommands(commands []*command.Command) error
+}
 
-	// ReadRules reads rule configurations from the tool (if supported)
+// RulesAdapter is an optional interface for adapters that support rules.
+// Implement this interface if the tool can sync rule configurations.
+type RulesAdapter interface {
+	Adapter
+
+	// ReadRules reads rule configurations from the tool
 	ReadRules() ([]*rule.Rule, error)
 
-	// WriteRules writes rule configurations to the tool (if supported)
+	// WriteRules writes rule configurations to the tool
 	WriteRules(rules []*rule.Rule) error
 }
 
@@ -97,6 +117,42 @@ type SkillsAdapter interface {
 	// Note: Most tools don't support writing skills programmatically
 	// This is optional and may return an error for read-only skill systems
 	WriteSkills(skills []*skill.Skill) error
+}
+
+// AsServerAdapter returns the adapter as a ServerAdapter if supported
+func AsServerAdapter(a Adapter) (ServerAdapter, bool) {
+	sa, ok := a.(ServerAdapter)
+	return sa, ok
+}
+
+// SupportsServers checks if an adapter implements ServerAdapter
+func SupportsServers(a Adapter) bool {
+	_, ok := a.(ServerAdapter)
+	return ok
+}
+
+// AsCommandsAdapter returns the adapter as a CommandsAdapter if supported
+func AsCommandsAdapter(a Adapter) (CommandsAdapter, bool) {
+	ca, ok := a.(CommandsAdapter)
+	return ca, ok
+}
+
+// SupportsCommands checks if an adapter implements CommandsAdapter
+func SupportsCommands(a Adapter) bool {
+	_, ok := a.(CommandsAdapter)
+	return ok
+}
+
+// AsRulesAdapter returns the adapter as a RulesAdapter if supported
+func AsRulesAdapter(a Adapter) (RulesAdapter, bool) {
+	ra, ok := a.(RulesAdapter)
+	return ra, ok
+}
+
+// SupportsRules checks if an adapter implements RulesAdapter
+func SupportsRules(a Adapter) bool {
+	_, ok := a.(RulesAdapter)
+	return ok
 }
 
 // AsSkillsAdapter returns the adapter as a SkillsAdapter if supported
@@ -163,7 +219,7 @@ type SyncResult struct {
 }
 
 // SyncAll syncs configuration to all detected tools
-func SyncAll(servers []*mcp.Server, commands []*command.Command, rules []*rule.Rule) []SyncResult {
+func SyncAll(servers []*mcp.Server, commands []*command.Command, rules []*rule.Rule, skills []*skill.Skill) []SyncResult {
 	adapters := Detected()
 	results := make([]SyncResult, len(adapters))
 	var wg sync.WaitGroup
@@ -174,36 +230,53 @@ func SyncAll(servers []*mcp.Server, commands []*command.Command, rules []*rule.R
 			defer wg.Done()
 			result := SyncResult{Tool: adapter.Name()}
 
-			supported := adapter.SupportedResources()
-
-			// Sync servers if supported
-			if containsResource(supported, ResourceMCP) && len(servers) > 0 {
-				if err := adapter.WriteServers(servers); err != nil {
-					result.Error = err
-				} else {
-					result.Changes += len(servers)
+			// Sync servers if adapter supports it
+			if len(servers) > 0 {
+				if sa, ok := AsServerAdapter(adapter); ok {
+					if err := sa.WriteServers(servers); err != nil {
+						result.Error = err
+					} else {
+						result.Changes += len(servers)
+					}
 				}
 			}
 
-			// Sync commands if supported
-			if containsResource(supported, ResourceCommands) && len(commands) > 0 {
-				if err := adapter.WriteCommands(commands); err != nil {
-					if result.Error == nil {
-						result.Error = err
+			// Sync commands if adapter supports it
+			if len(commands) > 0 {
+				if ca, ok := AsCommandsAdapter(adapter); ok {
+					if err := ca.WriteCommands(commands); err != nil {
+						if result.Error == nil {
+							result.Error = err
+						}
+					} else {
+						result.Changes += len(commands)
 					}
-				} else {
-					result.Changes += len(commands)
 				}
 			}
 
-			// Sync rules if supported
-			if containsResource(supported, ResourceRules) && len(rules) > 0 {
-				if err := adapter.WriteRules(rules); err != nil {
-					if result.Error == nil {
-						result.Error = err
+			// Sync rules if adapter supports it
+			if len(rules) > 0 {
+				if ra, ok := AsRulesAdapter(adapter); ok {
+					if err := ra.WriteRules(rules); err != nil {
+						if result.Error == nil {
+							result.Error = err
+						}
+					} else {
+						result.Changes += len(rules)
 					}
-				} else {
-					result.Changes += len(rules)
+				}
+			}
+
+			// Sync skills if adapter supports it
+			if len(skills) > 0 {
+				if sa, ok := AsSkillsAdapter(adapter); ok {
+					if err := sa.WriteSkills(skills); err != nil {
+						if result.Error == nil {
+							result.Error = err
+						}
+					} else {
+						result.Changes += len(skills)
+					}
 				}
 			}
 

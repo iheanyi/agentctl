@@ -89,8 +89,10 @@ func runImport(cmd *cobra.Command, args []string) error {
 
 	// Import servers
 	if (importAll || importServers) && containsResourceType(supported, sync.ResourceMCP) {
-		servers, err := adapter.ReadServers()
-		if err != nil {
+		sa, ok := sync.AsServerAdapter(adapter)
+		if !ok {
+			out.Warning("Adapter doesn't support reading servers")
+		} else if servers, err := sa.ReadServers(); err != nil {
 			out.Warning("Failed to read servers: %v", err)
 		} else {
 			for _, server := range servers {
@@ -117,8 +119,10 @@ func runImport(cmd *cobra.Command, args []string) error {
 
 	// Import commands
 	if (importAll || importCommands) && containsResourceType(supported, sync.ResourceCommands) {
-		commands, err := adapter.ReadCommands()
-		if err != nil {
+		ca, ok := sync.AsCommandsAdapter(adapter)
+		if !ok {
+			out.Warning("Adapter doesn't support reading commands")
+		} else if commands, err := ca.ReadCommands(); err != nil {
 			out.Warning("Failed to read commands: %v", err)
 		} else {
 			commandsDir := filepath.Join(cfg.ConfigDir, "commands")
@@ -142,8 +146,10 @@ func runImport(cmd *cobra.Command, args []string) error {
 
 	// Import rules
 	if (importAll || importRules) && containsResourceType(supported, sync.ResourceRules) {
-		rules, err := adapter.ReadRules()
-		if err != nil {
+		ra, ok := sync.AsRulesAdapter(adapter)
+		if !ok {
+			out.Warning("Adapter doesn't support reading rules")
+		} else if rules, err := ra.ReadRules(); err != nil {
 			out.Warning("Failed to read rules: %v", err)
 		} else {
 			rulesDir := filepath.Join(cfg.ConfigDir, "rules")

@@ -6,9 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
-	"github.com/iheanyi/agentctl/pkg/rule"
 )
 
 // ClaudeDesktopAdapter syncs configuration to Claude Desktop (the Electron app)
@@ -76,7 +74,7 @@ func (a *ClaudeDesktopAdapter) ConfigPath() string {
 }
 
 func (a *ClaudeDesktopAdapter) SupportedResources() []ResourceType {
-	return []ResourceType{ResourceMCP, ResourceCommands}
+	return []ResourceType{ResourceMCP}
 }
 
 func (a *ClaudeDesktopAdapter) ReadServers() ([]*mcp.Server, error) {
@@ -146,25 +144,9 @@ func (a *ClaudeDesktopAdapter) WriteServers(servers []*mcp.Server) error {
 	return a.saveConfig(config)
 }
 
-func (a *ClaudeDesktopAdapter) ReadCommands() ([]*command.Command, error) {
-	// Claude Code stores commands differently - in a separate commands directory
-	// For now, return empty as this requires more investigation of Claude's format
-	return nil, nil
-}
 
-func (a *ClaudeDesktopAdapter) WriteCommands(commands []*command.Command) error {
-	// Claude Code commands are stored in a separate location
-	// This will be implemented based on Claude Code's actual format
-	return nil
-}
 
-func (a *ClaudeDesktopAdapter) ReadRules() ([]*rule.Rule, error) {
-	return nil, nil // Claude doesn't have rules in the same way
-}
 
-func (a *ClaudeDesktopAdapter) WriteRules(rules []*rule.Rule) error {
-	return nil // Claude doesn't have rules in the same way
-}
 
 func (a *ClaudeDesktopAdapter) loadConfig() (*ClaudeConfig, error) {
 	path := a.ConfigPath()

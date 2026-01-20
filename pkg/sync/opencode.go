@@ -1,7 +1,7 @@
 package sync
 
 import (
-	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -91,7 +91,8 @@ func (a *OpenCodeAdapter) SupportedResources() []ResourceType {
 }
 
 func (a *OpenCodeAdapter) ReadServers() ([]*mcp.Server, error) {
-	raw, err := a.loadRawConfig()
+	helper := NewJSONConfigHelper(a.ConfigPath())
+	raw, err := helper.LoadRaw()
 	if err != nil {
 		return nil, err
 	}
@@ -157,8 +158,8 @@ func (a *OpenCodeAdapter) ReadServers() ([]*mcp.Server, error) {
 }
 
 func (a *OpenCodeAdapter) WriteServers(servers []*mcp.Server) error {
-	// Load the full raw config to preserve all fields
-	raw, err := a.loadRawConfig()
+	helper := NewJSONConfigHelper(a.ConfigPath())
+	raw, err := helper.LoadRaw()
 	if err != nil {
 		return err
 	}
@@ -224,7 +225,7 @@ func (a *OpenCodeAdapter) WriteServers(servers []*mcp.Server) error {
 	raw["mcp"] = mcpSection
 
 	// Save the config
-	if err := a.saveRawConfig(raw); err != nil {
+	if err := helper.SaveRaw(raw); err != nil {
 		return err
 	}
 
@@ -234,35 +235,7 @@ func (a *OpenCodeAdapter) WriteServers(servers []*mcp.Server) error {
 }
 
 func (a *OpenCodeAdapter) ReadCommands() ([]*command.Command, error) {
-	commandsDir := a.commandsDir()
-
-	entries, err := os.ReadDir(commandsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var commands []*command.Command
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-
-		path := filepath.Join(commandsDir, entry.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-
-		cmd := parseOpenCodeCommand(entry.Name(), string(data))
-		if cmd != nil {
-			commands = append(commands, cmd)
-		}
-	}
-
-	return commands, nil
+	return ReadCommandsFromDir(a.commandsDir(), parseOpenCodeCommand)
 }
 
 func (a *OpenCodeAdapter) WriteCommands(commands []*command.Command) error {
@@ -274,6 +247,11 @@ func (a *OpenCodeAdapter) WriteCommands(commands []*command.Command) error {
 	}
 
 	for _, cmd := range commands {
+		// Validate command name to prevent path traversal
+		if err := SanitizeName(cmd.Name); err != nil {
+			return fmt.Errorf("invalid command name: %w", err)
+		}
+
 		content := formatOpenCodeCommand(cmd)
 		filename := cmd.Name + ".md"
 		path := filepath.Join(commandsDir, filename)
@@ -334,53 +312,12 @@ func (a *OpenCodeAdapter) WriteRules(rules []*rule.Rule) error {
 
 // ReadSkills reads skills from OpenCode's skill directory
 func (a *OpenCodeAdapter) ReadSkills() ([]*skill.Skill, error) {
-	skillsDir := a.skillsDir()
-
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var skills []*skill.Skill
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		skillPath := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
-		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
-			continue
-		}
-
-		s, err := skill.Load(filepath.Join(skillsDir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		skills = append(skills, s)
-	}
-
-	return skills, nil
+	return ReadSkillsFromDir(a.skillsDir())
 }
 
 // WriteSkills writes skills to OpenCode's skill directory
 func (a *OpenCodeAdapter) WriteSkills(skills []*skill.Skill) error {
-	skillsDir := a.skillsDir()
-
-	if err := os.MkdirAll(skillsDir, 0755); err != nil {
-		return err
-	}
-
-	for _, s := range skills {
-		skillDir := filepath.Join(skillsDir, s.Name)
-		if err := s.Save(skillDir); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return WriteSkillsToDir(a.skillsDir(), skills)
 }
 
 // parseOpenCodeCommand parses an OpenCode command markdown file
@@ -436,39 +373,3 @@ func formatOpenCodeCommand(cmd *command.Command) string {
 	return sb.String()
 }
 
-// loadRawConfig loads the entire config as a raw map to preserve all fields
-func (a *OpenCodeAdapter) loadRawConfig() (map[string]interface{}, error) {
-	path := a.ConfigPath()
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]interface{}), nil
-		}
-		return nil, err
-	}
-
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, err
-	}
-
-	return raw, nil
-}
-
-// saveRawConfig saves the entire config, preserving all fields
-func (a *OpenCodeAdapter) saveRawConfig(raw map[string]interface{}) error {
-	path := a.ConfigPath()
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(raw, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, data, 0644)
-}

@@ -280,7 +280,11 @@ func detectToolsWithServers() []toolServers {
 		}
 
 		// Read servers
-		servers, err := adapter.ReadServers()
+		sa, ok := sync.AsServerAdapter(adapter)
+		if !ok {
+			continue
+		}
+		servers, err := sa.ReadServers()
 		if err != nil || len(servers) == 0 {
 			continue
 		}

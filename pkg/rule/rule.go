@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/iheanyi/agentctl/pkg/pathutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -175,6 +176,13 @@ func Save(r *Rule, dir string) error {
 	if name == "" {
 		name = "imported-rule"
 	}
+
+	// Validate rule name to prevent path traversal (without extension)
+	baseName := strings.TrimSuffix(name, ".md")
+	if err := pathutil.SanitizeName(baseName); err != nil {
+		return fmt.Errorf("invalid rule name: %w", err)
+	}
+
 	if !strings.HasSuffix(name, ".md") {
 		name += ".md"
 	}

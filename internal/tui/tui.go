@@ -4592,7 +4592,7 @@ func (m *Model) syncAll() tea.Cmd {
 		}
 
 		// Sync to all detected tools
-		results := sync.SyncAll(servers, nil, nil)
+		results := sync.SyncAll(servers, nil, nil, nil)
 
 		errors := make(map[string]error)
 		for _, result := range results {

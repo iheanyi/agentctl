@@ -1,7 +1,6 @@
 package sync
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -95,161 +94,45 @@ func (a *CopilotAdapter) SupportedResources() []ResourceType {
 }
 
 func (a *CopilotAdapter) ReadServers() ([]*mcp.Server, error) {
-	raw, err := a.loadRawConfig()
+	helper := NewJSONConfigHelper(a.ConfigPath())
+	raw, err := helper.LoadRaw()
 	if err != nil {
 		return nil, err
 	}
 
-	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
-	if !ok {
-		return nil, nil
-	}
-
-	var servers []*mcp.Server
-	for name, v := range mcpServers {
-		serverData, ok := v.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		server := &mcp.Server{
-			Name: name,
-		}
-
-		if cmd, ok := serverData["command"].(string); ok {
-			server.Command = cmd
-		}
-
-		if args, ok := serverData["args"].([]interface{}); ok {
-			for _, arg := range args {
-				if str, ok := arg.(string); ok {
-					server.Args = append(server.Args, str)
-				}
-			}
-		}
-
-		if envData, ok := serverData["env"].(map[string]interface{}); ok {
-			server.Env = make(map[string]string)
-			for k, v := range envData {
-				if str, ok := v.(string); ok {
-					server.Env[k] = str
-				}
-			}
-		}
-
-		servers = append(servers, server)
-	}
-
-	return servers, nil
+	mcpServers, _ := GetMCPServersSection(raw, "mcpServers")
+	return ServersFromMCPSection(mcpServers), nil
 }
 
 func (a *CopilotAdapter) WriteServers(servers []*mcp.Server) error {
-	// Load the full raw config to preserve all fields
-	raw, err := a.loadRawConfig()
+	helper := NewJSONConfigHelper(a.ConfigPath())
+	raw, err := helper.LoadRaw()
 	if err != nil {
 		return err
 	}
 
-	// Get or create the mcpServers section
-	mcpServers, ok := raw["mcpServers"].(map[string]interface{})
-	if !ok {
-		mcpServers = make(map[string]interface{})
-	}
-
-	// Remove old agentctl-managed entries
-	for name, v := range mcpServers {
-		if serverData, ok := v.(map[string]interface{}); ok {
-			if managedBy, ok := serverData["_managedBy"].(string); ok && managedBy == ManagedValue {
-				delete(mcpServers, name)
-			}
-		}
-	}
+	mcpServers, _ := GetMCPServersSection(raw, "mcpServers")
+	RemoveManagedServers(mcpServers)
 
 	// Add new servers (only stdio transport)
 	for _, server := range FilterStdioServers(servers) {
-		name := server.Name
-		if server.Namespace != "" {
-			name = server.Namespace
-		}
-
-		// Skip servers with empty names to prevent corrupting config
+		name := GetServerName(server)
 		if name == "" {
 			continue
 		}
-
-		serverCfg := map[string]interface{}{
-			"command":    server.Command,
-			"_managedBy": ManagedValue,
-		}
-
-		if len(server.Args) > 0 {
-			serverCfg["args"] = server.Args
-		}
-
-		if len(server.Env) > 0 {
-			serverCfg["env"] = server.Env
-		}
-
-		mcpServers[name] = serverCfg
+		mcpServers[name] = ServerToRawMap(server)
 	}
 
-	// Update the mcpServers section in raw config
 	raw["mcpServers"] = mcpServers
-
-	return a.saveRawConfig(raw)
+	return helper.SaveRaw(raw)
 }
 
 func (a *CopilotAdapter) ReadCommands() ([]*command.Command, error) {
-	commandsDir := a.commandsDir()
-
-	entries, err := os.ReadDir(commandsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var commands []*command.Command
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-
-		path := filepath.Join(commandsDir, entry.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-
-		cmd := parseCopilotCommand(entry.Name(), string(data))
-		if cmd != nil {
-			commands = append(commands, cmd)
-		}
-	}
-
-	return commands, nil
+	return ReadCommandsFromDir(a.commandsDir(), parseCopilotCommand)
 }
 
 func (a *CopilotAdapter) WriteCommands(commands []*command.Command) error {
-	commandsDir := a.commandsDir()
-
-	// Ensure directory exists
-	if err := os.MkdirAll(commandsDir, 0755); err != nil {
-		return err
-	}
-
-	for _, cmd := range commands {
-		content := formatCopilotCommand(cmd)
-		filename := cmd.Name + ".md"
-		path := filepath.Join(commandsDir, filename)
-
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return WriteCommandsToDir(a.commandsDir(), commands, formatCopilotCommand)
 }
 
 func (a *CopilotAdapter) ReadRules() ([]*rule.Rule, error) {
@@ -294,53 +177,12 @@ func (a *CopilotAdapter) WriteRules(rules []*rule.Rule) error {
 
 // ReadSkills reads skills from Copilot's skills directory
 func (a *CopilotAdapter) ReadSkills() ([]*skill.Skill, error) {
-	skillsDir := a.skillsDir()
-
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var skills []*skill.Skill
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		skillPath := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
-		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
-			continue
-		}
-
-		s, err := skill.Load(filepath.Join(skillsDir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		skills = append(skills, s)
-	}
-
-	return skills, nil
+	return ReadSkillsFromDir(a.skillsDir())
 }
 
 // WriteSkills writes skills to Copilot's skills directory
 func (a *CopilotAdapter) WriteSkills(skills []*skill.Skill) error {
-	skillsDir := a.skillsDir()
-
-	if err := os.MkdirAll(skillsDir, 0755); err != nil {
-		return err
-	}
-
-	for _, s := range skills {
-		skillDir := filepath.Join(skillsDir, s.Name)
-		if err := s.Save(skillDir); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return WriteSkillsToDir(a.skillsDir(), skills)
 }
 
 // parseCopilotCommand parses a Copilot command markdown file
@@ -390,40 +232,3 @@ func formatCopilotCommand(cmd *command.Command) string {
 	return sb.String()
 }
 
-// loadRawConfig loads the entire config as a raw map to preserve all fields
-func (a *CopilotAdapter) loadRawConfig() (map[string]interface{}, error) {
-	path := a.ConfigPath()
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]interface{}), nil
-		}
-		return nil, err
-	}
-
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, err
-	}
-
-	return raw, nil
-}
-
-// saveRawConfig saves the entire config, preserving all fields
-func (a *CopilotAdapter) saveRawConfig(raw map[string]interface{}) error {
-	path := a.ConfigPath()
-
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(raw, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, data, 0644)
-}
