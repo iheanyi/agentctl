@@ -1,5 +1,5 @@
- agentctl  [Servers]      Commands       Rules       Skills       Prompts                             
- Hooks       Tools   ● 1  ○ 1  ◌ 0                                                                    
+ agentctl  [Servers]      Commands       Rules       Skills       Hooks                               
+ Tools       Agents   ● 1  ○ 1  ◌ 0                                                                   
 ────────────────────────────────────────────────────────────────────────────────                      
   Filter: Installed                                                                                   
    ● filesystem                                       stdio · stdio transport                         

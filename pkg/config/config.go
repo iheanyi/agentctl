@@ -8,7 +8,6 @@ import (
 
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
-	"github.com/iheanyi/agentctl/pkg/prompt"
 	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/skill"
 )
@@ -39,7 +38,6 @@ type Config struct {
 	Servers  map[string]*mcp.Server `json:"servers,omitempty"`
 	Commands []string               `json:"commands,omitempty"` // Command names to include
 	Rules    []string               `json:"rules,omitempty"`    // Rule names to include
-	Prompts  []string               `json:"prompts,omitempty"`  // Prompt names to include
 	Skills   []string               `json:"skills,omitempty"`   // Skill names to include
 	Disabled []string               `json:"disabled,omitempty"` // Resources to disable
 	Profile  string                 `json:"profile,omitempty"`  // Active profile (for project configs)
@@ -48,7 +46,6 @@ type Config struct {
 	// Loaded resources (not serialized)
 	LoadedCommands []*command.Command `json:"-"`
 	LoadedRules    []*rule.Rule       `json:"-"`
-	LoadedPrompts  []*prompt.Prompt   `json:"-"`
 	LoadedSkills   []*skill.Skill     `json:"-"`
 
 	// Path info (not serialized)
@@ -259,7 +256,6 @@ func (c *Config) Merge(other *Config) *Config {
 	// Merge resource lists
 	merged.Commands = mergeStringSlices(c.Commands, other.Commands)
 	merged.Rules = mergeStringSlices(c.Rules, other.Rules)
-	merged.Prompts = mergeStringSlices(c.Prompts, other.Prompts)
 	merged.Skills = mergeStringSlices(c.Skills, other.Skills)
 
 	// Apply disabled list from other
@@ -267,7 +263,6 @@ func (c *Config) Merge(other *Config) *Config {
 		delete(merged.Servers, disabled)
 		merged.Commands = removeFromSlice(merged.Commands, disabled)
 		merged.Rules = removeFromSlice(merged.Rules, disabled)
-		merged.Prompts = removeFromSlice(merged.Prompts, disabled)
 		merged.Skills = removeFromSlice(merged.Skills, disabled)
 	}
 
@@ -329,16 +324,6 @@ func (c *Config) loadResourcesWithScope(scope string) error {
 		r.Scope = scope
 	}
 
-	// Load prompts
-	c.LoadedPrompts, err = prompt.LoadAll(filepath.Join(c.ConfigDir, "prompts"))
-	if err != nil {
-		return err
-	}
-	// Mark scope
-	for _, p := range c.LoadedPrompts {
-		p.Scope = scope
-	}
-
 	// Load skills
 	c.LoadedSkills, err = skill.LoadAll(filepath.Join(c.ConfigDir, "skills"))
 	if err != nil {
@@ -381,16 +366,6 @@ func (c *Config) loadLocalResources() error {
 	}
 	c.LoadedRules = append(c.LoadedRules, localRules...)
 
-	// Load local prompts
-	localPrompts, err := prompt.LoadAll(filepath.Join(localResourceDir, "prompts"))
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	for _, p := range localPrompts {
-		p.Scope = string(ScopeLocal)
-	}
-	c.LoadedPrompts = append(c.LoadedPrompts, localPrompts...)
-
 	// Load local skills
 	localSkills, err := skill.LoadAll(filepath.Join(localResourceDir, "skills"))
 	if err != nil && !os.IsNotExist(err) {
@@ -418,7 +393,6 @@ func (c *Config) ReloadResources() error {
 	// Reset loaded resources
 	c.LoadedCommands = nil
 	c.LoadedRules = nil
-	c.LoadedPrompts = nil
 	c.LoadedSkills = nil
 
 	// Reload global resources
@@ -628,26 +602,6 @@ func (c *Config) CommandsForScope(scope Scope) []*command.Command {
 		}
 	}
 	return commands
-}
-
-// PromptsForScope returns prompts that belong to a specific scope
-func (c *Config) PromptsForScope(scope Scope) []*prompt.Prompt {
-	var prompts []*prompt.Prompt
-	for _, p := range c.LoadedPrompts {
-		switch scope {
-		case ScopeLocal:
-			if p.Scope == string(ScopeLocal) {
-				prompts = append(prompts, p)
-			}
-		case ScopeGlobal:
-			if p.Scope == string(ScopeGlobal) || p.Scope == "" {
-				prompts = append(prompts, p)
-			}
-		case ScopeAll:
-			prompts = append(prompts, p)
-		}
-	}
-	return prompts
 }
 
 // SkillsForScope returns skills that belong to a specific scope

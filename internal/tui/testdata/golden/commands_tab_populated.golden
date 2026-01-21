@@ -1,5 +1,5 @@
- agentctl   Servers      [Commands]      Rules       Skills       Prompts       
- Hooks       Tools   3 commands                                                 
+ agentctl   Servers      [Commands]      Rules       Skills       Hooks         
+ Tools       Agents   3 commands                                                
 ────────────────────────────────────────────────────────────────────────────────
    ⌘ [G] /review                              Code review with best practices   
    ⌘ [G] /commit                                    Generate a commit message   

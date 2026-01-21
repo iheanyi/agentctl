@@ -11,6 +11,7 @@ import (
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/jsonutil"
 	"github.com/iheanyi/agentctl/pkg/output"
+	"github.com/iheanyi/agentctl/pkg/pathutil"
 )
 
 var newCmd = &cobra.Command{
@@ -64,11 +65,19 @@ var newSkillCmd = &cobra.Command{
 	RunE:  runNewSkill,
 }
 
+var newAgentCmd = &cobra.Command{
+	Use:   "agent <name>",
+	Short: "Create a new custom agent/subagent",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runNewAgent,
+}
+
 func init() {
 	newCmd.AddCommand(newCommandCmd)
 	newCmd.AddCommand(newRuleCmd)
 	newCmd.AddCommand(newPromptCmd)
 	newCmd.AddCommand(newSkillCmd)
+	newCmd.AddCommand(newAgentCmd)
 
 	// Add scope flag to all new commands
 	newCmd.PersistentFlags().StringVarP(&newScope, "scope", "s", "", "Config scope: local, global (default: local if .agentctl.json exists)")
@@ -113,6 +122,11 @@ func getResourceDir(resourceType string) (string, config.Scope, error) {
 func runNewCommand(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
+	// Validate name to prevent path traversal
+	if err := pathutil.SanitizeName(name); err != nil {
+		return fmt.Errorf("invalid command name: %w", err)
+	}
+
 	commandsDir, scope, err := getResourceDir("commands")
 	if err != nil {
 		return err
@@ -153,6 +167,16 @@ func runNewCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create command: %w", err)
 	}
 
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.NewResourceResult{
+			Type:  "command",
+			Name:  name,
+			Scope: string(scope),
+			Path:  commandPath,
+		})
+	}
+
 	scopeLabel := ""
 	if scope == config.ScopeLocal {
 		scopeLabel = " (local)"
@@ -169,6 +193,11 @@ func runNewCommand(cmd *cobra.Command, args []string) error {
 
 func runNewRule(cmd *cobra.Command, args []string) error {
 	name := args[0]
+
+	// Validate name to prevent path traversal
+	if err := pathutil.SanitizeName(name); err != nil {
+		return fmt.Errorf("invalid rule name: %w", err)
+	}
 
 	rulesDir, scope, err := getResourceDir("rules")
 	if err != nil {
@@ -216,6 +245,16 @@ Add your rules and guidelines here.
 		return fmt.Errorf("failed to create rule: %w", err)
 	}
 
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.NewResourceResult{
+			Type:  "rule",
+			Name:  name,
+			Scope: string(scope),
+			Path:  rulePath,
+		})
+	}
+
 	scopeLabel := ""
 	if scope == config.ScopeLocal {
 		scopeLabel = " (local)"
@@ -232,6 +271,11 @@ Add your rules and guidelines here.
 
 func runNewPrompt(cmd *cobra.Command, args []string) error {
 	name := args[0]
+
+	// Validate name to prevent path traversal
+	if err := pathutil.SanitizeName(name); err != nil {
+		return fmt.Errorf("invalid prompt name: %w", err)
+	}
 
 	promptsDir, scope, err := getResourceDir("prompts")
 	if err != nil {
@@ -265,6 +309,16 @@ func runNewPrompt(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create prompt: %w", err)
 	}
 
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.NewResourceResult{
+			Type:  "prompt",
+			Name:  name,
+			Scope: string(scope),
+			Path:  promptPath,
+		})
+	}
+
 	scopeLabel := ""
 	if scope == config.ScopeLocal {
 		scopeLabel = " (local)"
@@ -279,6 +333,11 @@ func runNewPrompt(cmd *cobra.Command, args []string) error {
 
 func runNewSkill(cmd *cobra.Command, args []string) error {
 	name := args[0]
+
+	// Validate name to prevent path traversal
+	if err := pathutil.SanitizeName(name); err != nil {
+		return fmt.Errorf("invalid skill name: %w", err)
+	}
 
 	skillsDir, scope, err := getResourceDir("skills")
 	if err != nil {
@@ -325,6 +384,16 @@ Example: "Analyze $ARGUMENTS and provide feedback."
 		return fmt.Errorf("failed to create SKILL.md: %w", err)
 	}
 
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.NewResourceResult{
+			Type:  "skill",
+			Name:  name,
+			Scope: string(scope),
+			Path:  skillDir,
+		})
+	}
+
 	scopeLabel := ""
 	if scope == config.ScopeLocal {
 		scopeLabel = " (local)"
@@ -333,6 +402,86 @@ Example: "Analyze $ARGUMENTS and provide feedback."
 	}
 	out.Success("Created skill %q%s", name, scopeLabel)
 	out.Info("Edit %s to customize", filepath.Join(skillDir, "SKILL.md"))
+	out.Println("")
+	out.Println("Run 'agentctl sync' to sync to your tools.")
+
+	return nil
+}
+
+func runNewAgent(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	// Validate name to prevent path traversal
+	if err := pathutil.SanitizeName(name); err != nil {
+		return fmt.Errorf("invalid agent name: %w", err)
+	}
+
+	agentsDir, scope, err := getResourceDir("agents")
+	if err != nil {
+		return err
+	}
+
+	out := output.DefaultWriter()
+
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create agents directory: %w", err)
+	}
+
+	agentPath := filepath.Join(agentsDir, name+".md")
+	if _, err := os.Stat(agentPath); err == nil {
+		return fmt.Errorf("agent %q already exists", name)
+	}
+
+	template := `---
+name: ` + name + `
+description: Description of what this agent does
+model: sonnet
+tools:
+  - Read
+  - Grep
+  - Glob
+---
+
+You are a specialized AI agent.
+
+## Purpose
+
+Describe what this agent is designed to do.
+
+## Instructions
+
+- Instruction 1
+- Instruction 2
+- Instruction 3
+
+## Constraints
+
+- Only perform actions within your designated scope
+- Ask for clarification when requirements are unclear
+`
+
+	if err := os.WriteFile(agentPath, []byte(template), 0644); err != nil {
+		return fmt.Errorf("failed to create agent: %w", err)
+	}
+
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.NewResourceResult{
+			Type:  "agent",
+			Name:  name,
+			Scope: string(scope),
+			Path:  agentPath,
+		})
+	}
+
+	scopeLabel := ""
+	if scope == config.ScopeLocal {
+		scopeLabel = " (local)"
+	} else {
+		scopeLabel = " (global)"
+	}
+	out.Success("Created agent %q%s", name, scopeLabel)
+	out.Info("Edit %s to customize", agentPath)
 	out.Println("")
 	out.Println("Run 'agentctl sync' to sync to your tools.")
 
@@ -363,6 +512,7 @@ const (
 	resourceRule    resourceType = "rule"
 	resourcePrompt  resourceType = "prompt"
 	resourceSkill   resourceType = "skill"
+	resourceAgent   resourceType = "agent"
 )
 
 // runInteractiveNew launches the interactive form to create a new resource
@@ -386,6 +536,7 @@ func runInteractiveNew() error {
 					huh.NewOption("Rule - Guidelines for AI behavior", string(resourceRule)),
 					huh.NewOption("Prompt - A reusable prompt template", string(resourcePrompt)),
 					huh.NewOption("Skill - A complete skill package", string(resourceSkill)),
+					huh.NewOption("Agent - A custom AI agent/subagent", string(resourceAgent)),
 				).
 				Value(&selectedType),
 		),
@@ -410,6 +561,8 @@ func runInteractiveNew() error {
 		return runInteractiveNewPrompt()
 	case resourceSkill:
 		return runInteractiveNewSkill()
+	case resourceAgent:
+		return runInteractiveNewAgent()
 	default:
 		return fmt.Errorf("unknown resource type: %s", selectedType)
 	}
@@ -808,6 +961,109 @@ Example: "Analyze $ARGUMENTS and provide feedback."
 	out.Println("")
 	out.Success("Created skill %q%s", name, scopeLabel)
 	out.Info("Edit %s to customize", filepath.Join(skillDir, "SKILL.md"))
+	out.Println("")
+	out.Println("Run 'agentctl sync' to sync to your tools.")
+
+	return nil
+}
+
+// runInteractiveNewAgent creates a new agent via interactive form
+func runInteractiveNewAgent() error {
+	agentsDir, scope, err := getResourceDir("agents")
+	if err != nil {
+		return err
+	}
+
+	out := output.DefaultWriter()
+
+	var name, description string
+
+	// Get agent details
+	form := newStyledForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Agent name").
+				Description("A short identifier for this agent (e.g., 'code-reviewer', 'security-auditor')").
+				Placeholder("my-agent").
+				Value(&name).
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("name is required")
+					}
+					// Check if agent already exists
+					agentPath := filepath.Join(agentsDir, s+".md")
+					if _, err := os.Stat(agentPath); err == nil {
+						return fmt.Errorf("agent %q already exists", s)
+					}
+					return nil
+				}),
+			huh.NewInput().
+				Title("Description").
+				Description("What does this agent do?").
+				Placeholder("Description of this agent").
+				Value(&description),
+		),
+	)
+
+	if ok, err := runFormWithCancel(form, "new agent"); err != nil {
+		return err
+	} else if !ok {
+		return nil
+	}
+
+	// Create the agent
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create agents directory: %w", err)
+	}
+
+	agentPath := filepath.Join(agentsDir, name+".md")
+
+	// Use default description if not provided
+	if description == "" {
+		description = "Description of what this agent does"
+	}
+
+	template := `---
+name: ` + name + `
+description: ` + description + `
+model: sonnet
+tools:
+  - Read
+  - Grep
+  - Glob
+---
+
+You are a specialized AI agent.
+
+## Purpose
+
+Describe what this agent is designed to do.
+
+## Instructions
+
+- Instruction 1
+- Instruction 2
+- Instruction 3
+
+## Constraints
+
+- Only perform actions within your designated scope
+- Ask for clarification when requirements are unclear
+`
+
+	if err := os.WriteFile(agentPath, []byte(template), 0644); err != nil {
+		return fmt.Errorf("failed to create agent: %w", err)
+	}
+
+	scopeLabel := ""
+	if scope == config.ScopeLocal {
+		scopeLabel = " (local)"
+	} else {
+		scopeLabel = " (global)"
+	}
+	out.Println("")
+	out.Success("Created agent %q%s", name, scopeLabel)
+	out.Info("Edit %s to customize", agentPath)
 	out.Println("")
 	out.Println("Run 'agentctl sync' to sync to your tools.")
 

@@ -11,6 +11,45 @@ import (
 	"github.com/iheanyi/agentctl/pkg/pathutil"
 )
 
+// InspectTitle returns the display name for the inspector modal header
+func (r *Rule) InspectTitle() string {
+	return fmt.Sprintf("Rule: %s", r.Name)
+}
+
+// InspectContent returns the formatted content for the inspector viewport
+func (r *Rule) InspectContent() string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf("Tool:  %s\n", r.Tool))
+	b.WriteString(fmt.Sprintf("Scope: %s\n", r.Scope))
+	b.WriteString(fmt.Sprintf("Path:  %s\n\n", r.Path))
+
+	if r.Frontmatter != nil {
+		b.WriteString("Frontmatter:\n")
+		if r.Frontmatter.Priority != 0 {
+			b.WriteString(fmt.Sprintf("  Priority: %d\n", r.Frontmatter.Priority))
+		}
+		if len(r.Frontmatter.Tools) > 0 {
+			b.WriteString(fmt.Sprintf("  Tools: %s\n", strings.Join(r.Frontmatter.Tools, ", ")))
+		}
+		if r.Frontmatter.Applies != "" {
+			b.WriteString(fmt.Sprintf("  Applies: %s\n", r.Frontmatter.Applies))
+		}
+		if len(r.Frontmatter.Paths) > 0 {
+			b.WriteString(fmt.Sprintf("  Paths: %s\n", strings.Join(r.Frontmatter.Paths, ", ")))
+		}
+		if len(r.Frontmatter.Globs) > 0 {
+			b.WriteString(fmt.Sprintf("  Globs: %s\n", strings.Join(r.Frontmatter.Globs, ", ")))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("Content:\n")
+	b.WriteString(r.Content)
+
+	return b.String()
+}
+
 // Frontmatter represents the optional YAML frontmatter in a rule file
 type Frontmatter struct {
 	Priority int      `yaml:"priority,omitempty"` // Rule priority (higher = more important)
@@ -29,6 +68,7 @@ type Rule struct {
 
 	// Runtime fields (not serialized)
 	Scope string `json:"-"` // "local" or "global" - where this rule came from
+	Tool  string `json:"-"` // Which tool owns this (e.g., "claude", "gemini", "agentctl")
 }
 
 // Load loads a rule from a markdown file, parsing optional frontmatter
@@ -97,7 +137,7 @@ func Load(path string) (*Rule, error) {
 	return rule, nil
 }
 
-// LoadAll loads all rules from a directory
+// LoadAll loads all rules from a directory (recursively includes subdirectories)
 func LoadAll(dir string) ([]*Rule, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -109,14 +149,24 @@ func LoadAll(dir string) ([]*Rule, error) {
 
 	var rules []*Rule
 	for _, entry := range entries {
+		path := dir + "/" + entry.Name()
+
 		if entry.IsDir() {
-			continue
-		}
-		if !strings.HasSuffix(entry.Name(), ".md") {
+			// Recursively load from subdirectories
+			subRules, err := LoadAll(path)
+			if err != nil {
+				return nil, err
+			}
+			rules = append(rules, subRules...)
 			continue
 		}
 
-		rule, err := Load(dir + "/" + entry.Name())
+		// Support .md and .mdc (Cursor format) files
+		if !strings.HasSuffix(entry.Name(), ".md") && !strings.HasSuffix(entry.Name(), ".mdc") {
+			continue
+		}
+
+		rule, err := Load(path)
 		if err != nil {
 			return nil, err
 		}

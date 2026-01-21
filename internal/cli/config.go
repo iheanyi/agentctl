@@ -84,7 +84,6 @@ func runConfig(cmd *cobra.Command, args []string) error {
 	out.Println("  Servers: %d", len(cfg.Servers))
 	out.Println("  Commands: %d", len(cfg.LoadedCommands))
 	out.Println("  Rules: %d", len(cfg.LoadedRules))
-	out.Println("  Prompts: %d", len(cfg.LoadedPrompts))
 	out.Println("  Skills: %d", len(cfg.LoadedSkills))
 	out.Println("")
 

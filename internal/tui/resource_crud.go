@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -14,7 +13,6 @@ import (
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/jsonutil"
 	"github.com/iheanyi/agentctl/pkg/mcp"
-	"github.com/iheanyi/agentctl/pkg/prompt"
 	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/skill"
 )
@@ -341,114 +339,6 @@ func (r *ResourceCRUD) EditRule(rl *rule.Rule) error {
 // DeleteRule deletes a rule
 func (r *ResourceCRUD) DeleteRule(rl *rule.Rule) error {
 	return os.Remove(rl.Path)
-}
-
-// CreatePrompt creates a new prompt via interactive form
-func (r *ResourceCRUD) CreatePrompt() (*prompt.Prompt, error) {
-	promptsDir := filepath.Join(r.cfg.ConfigDir, "prompts")
-
-	var name, description, templateText string
-
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewNote().Title("Create New Prompt Template"),
-			huh.NewInput().
-				Title("Name").
-				Description("A short identifier for this prompt template").
-				Placeholder("my-prompt").
-				Value(&name).
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("name is required")
-					}
-					if strings.ContainsAny(s, " \t\n/\\") {
-						return fmt.Errorf("name cannot contain spaces or path separators")
-					}
-					promptPath := filepath.Join(promptsDir, s+".json")
-					if _, err := os.Stat(promptPath); err == nil {
-						return fmt.Errorf("prompt %q already exists", s)
-					}
-					return nil
-				}),
-			huh.NewInput().
-				Title("Description").
-				Description("What is this prompt template used for?").
-				Placeholder("Description of this prompt template").
-				Value(&description),
-			huh.NewText().
-				Title("Template").
-				Description("Use {{variable}} for placeholders. Variables will be auto-extracted.").
-				Placeholder("You are a {{role}} expert.\n\nAnalyze the following:\n{{input}}").
-				Value(&templateText).
-				CharLimit(4000),
-		),
-	)
-
-	if err := form.Run(); err != nil {
-		return nil, err
-	}
-
-	// Create the prompt
-	if err := os.MkdirAll(promptsDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create prompts directory: %w", err)
-	}
-
-	if description == "" {
-		description = "No description"
-	}
-	if templateText == "" {
-		templateText = "{{input}}"
-	}
-
-	// Auto-extract variables from template
-	variables := extractVariables(templateText)
-
-	p := &prompt.Prompt{
-		Name:        name,
-		Description: description,
-		Template:    templateText,
-		Variables:   variables,
-	}
-
-	promptPath := filepath.Join(promptsDir, name+".json")
-	data, err := jsonutil.MarshalIndent(p, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-
-	if err := os.WriteFile(promptPath, data, 0644); err != nil {
-		return nil, fmt.Errorf("failed to create prompt: %w", err)
-	}
-
-	return p, nil
-}
-
-// extractVariables extracts {{variable}} patterns from a template string
-func extractVariables(template string) []string {
-	re := regexp.MustCompile(`\{\{(\w+)\}\}`)
-	matches := re.FindAllStringSubmatch(template, -1)
-
-	seen := make(map[string]bool)
-	var variables []string
-	for _, match := range matches {
-		if len(match) > 1 && !seen[match[1]] {
-			seen[match[1]] = true
-			variables = append(variables, match[1])
-		}
-	}
-	return variables
-}
-
-// EditPrompt opens the prompt in the user's editor
-func (r *ResourceCRUD) EditPrompt(p *prompt.Prompt) error {
-	promptPath := filepath.Join(r.cfg.ConfigDir, "prompts", p.Name+".json")
-	return r.openInEditor(promptPath)
-}
-
-// DeletePrompt deletes a prompt
-func (r *ResourceCRUD) DeletePrompt(p *prompt.Prompt) error {
-	promptPath := filepath.Join(r.cfg.ConfigDir, "prompts", p.Name+".json")
-	return os.Remove(promptPath)
 }
 
 // CreateSkill creates a new skill via interactive wizard

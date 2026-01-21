@@ -63,8 +63,9 @@ type ListOutput struct {
 	Servers     []ServerInfo  `json:"servers,omitempty"`
 	Commands    []CommandInfo `json:"commands,omitempty"`
 	Rules       []RuleInfo    `json:"rules,omitempty"`
-	Prompts     []PromptInfo  `json:"prompts,omitempty"`
 	Skills      []SkillInfo   `json:"skills,omitempty"`
+	Plugins     []PluginInfo  `json:"plugins,omitempty"`
+	Agents      []AgentInfo   `json:"agents,omitempty"`
 }
 
 // ServerInfo represents server information in JSON output
@@ -82,6 +83,7 @@ type ServerInfo struct {
 type CommandInfo struct {
 	Name        string `json:"name"`
 	Scope       string `json:"scope"`
+	Tool        string `json:"tool,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 
@@ -89,21 +91,36 @@ type CommandInfo struct {
 type RuleInfo struct {
 	Name  string `json:"name"`
 	Scope string `json:"scope"`
+	Tool  string `json:"tool,omitempty"`
 	Path  string `json:"path,omitempty"`
-}
-
-// PromptInfo represents prompt information in JSON output
-type PromptInfo struct {
-	Name        string `json:"name"`
-	Scope       string `json:"scope"`
-	Description string `json:"description,omitempty"`
 }
 
 // SkillInfo represents skill information in JSON output
 type SkillInfo struct {
 	Name        string `json:"name"`
 	Scope       string `json:"scope"`
+	Tool        string `json:"tool,omitempty"`
 	Description string `json:"description,omitempty"`
+}
+
+// PluginInfo represents plugin information in JSON output
+type PluginInfo struct {
+	Name    string `json:"name"`
+	Scope   string `json:"scope"`
+	Tool    string `json:"tool"`
+	Version string `json:"version,omitempty"`
+	Status  string `json:"status"`
+	Path    string `json:"path,omitempty"`
+}
+
+// AgentInfo represents agent information in JSON output
+type AgentInfo struct {
+	Name        string `json:"name"`
+	Scope       string `json:"scope"`
+	Tool        string `json:"tool"`
+	Description string `json:"description,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Path        string `json:"path,omitempty"`
 }
 
 // SyncOutput represents the JSON output for the sync command
@@ -243,4 +260,22 @@ func MustPrintJSON(data interface{}) {
 	if err := PrintJSON(data); err != nil {
 		fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
 	}
+}
+
+// NewResourceResult represents the JSON output for resource creation commands (new)
+type NewResourceResult struct {
+	Type  string `json:"type"` // "command", "rule", "skill", "prompt", "agent"
+	Name  string `json:"name"`
+	Scope string `json:"scope"` // "local" or "global"
+	Path  string `json:"path"`
+}
+
+// CopyResourceResult represents the JSON output for resource copy commands
+type CopyResourceResult struct {
+	Type       string `json:"type"` // "command", "rule", "skill"
+	Name       string `json:"name"`
+	FromScope  string `json:"fromScope"`
+	ToScope    string `json:"toScope"`
+	SourcePath string `json:"sourcePath"`
+	TargetPath string `json:"targetPath"`
 }

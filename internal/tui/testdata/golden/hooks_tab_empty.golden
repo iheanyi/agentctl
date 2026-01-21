@@ -1,15 +1,15 @@
- agentctl   Servers       Commands       Rules       Skills       Prompts       
- [Hooks]      Tools   0 hooks                                                   
+ agentctl   Servers       Commands       Rules       Skills      [Hooks]        
+ Tools       Agents   0 hooks                                                   
 ────────────────────────────────────────────────────────────────────────────────
   No hooks configured                                                           
                                                                                 
-  Hooks are configured in ~/.claude/settings.json                               
+  Claude Code:                                                                  
+    ~/.claude/settings.json                                                     
+    .claude/settings.json (project)                                             
+  Gemini CLI:                                                                   
+    ~/.gemini/settings.json                                                     
+    .gemini/settings.json (project)                                             
   (Read-only view - edit settings.json directly)                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
                                                                                 
                                                                                 
                                                                                 

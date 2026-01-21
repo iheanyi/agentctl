@@ -1,4 +1,4 @@
- agentctl  [Servers]      Commands       Rules       Skills       Prompts       Hooks       Tools     
+ agentctl  [Servers]      Commands       Rules       Skills       Hooks       Tools       Agents      
  ● 1  ○ 0  ◌ 0                                                                                        
 ────────────────────────────────────────────────────────────────────────────────────────────────────  
    ● filesystem                        stdio · Access local files securely with path restrictions     

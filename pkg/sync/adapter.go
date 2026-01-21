@@ -3,6 +3,7 @@ package sync
 import (
 	"sync"
 
+	"github.com/iheanyi/agentctl/pkg/agent"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/rule"
@@ -16,8 +17,8 @@ const (
 	ResourceMCP      ResourceType = "mcp"
 	ResourceCommands ResourceType = "commands"
 	ResourceRules    ResourceType = "rules"
-	ResourcePrompts  ResourceType = "prompts"
 	ResourceSkills   ResourceType = "skills"
+	ResourceAgents   ResourceType = "agents"
 )
 
 // ManagedMarker is the key used to mark entries managed by agentctl
@@ -119,6 +120,20 @@ type SkillsAdapter interface {
 	WriteSkills(skills []*skill.Skill) error
 }
 
+// AgentsAdapter is an optional interface for adapters that support agents/subagents.
+// Agents are markdown files that define custom AI personas with specific instructions,
+// capabilities, and tool permissions.
+type AgentsAdapter interface {
+	Adapter
+
+	// ReadAgents reads agent configurations from the tool
+	ReadAgents() ([]*agent.Agent, error)
+
+	// WriteAgents writes agent configurations to the tool
+	// Creates markdown files in the tool's agents directory
+	WriteAgents(agents []*agent.Agent) error
+}
+
 // AsServerAdapter returns the adapter as a ServerAdapter if supported
 func AsServerAdapter(a Adapter) (ServerAdapter, bool) {
 	sa, ok := a.(ServerAdapter)
@@ -164,6 +179,18 @@ func AsSkillsAdapter(a Adapter) (SkillsAdapter, bool) {
 // SupportsSkills checks if an adapter implements SkillsAdapter
 func SupportsSkills(a Adapter) bool {
 	_, ok := a.(SkillsAdapter)
+	return ok
+}
+
+// AsAgentsAdapter returns the adapter as an AgentsAdapter if supported
+func AsAgentsAdapter(a Adapter) (AgentsAdapter, bool) {
+	aa, ok := a.(AgentsAdapter)
+	return aa, ok
+}
+
+// SupportsAgents checks if an adapter implements AgentsAdapter
+func SupportsAgents(a Adapter) bool {
+	_, ok := a.(AgentsAdapter)
 	return ok
 }
 
@@ -219,7 +246,7 @@ type SyncResult struct {
 }
 
 // SyncAll syncs configuration to all detected tools
-func SyncAll(servers []*mcp.Server, commands []*command.Command, rules []*rule.Rule, skills []*skill.Skill) []SyncResult {
+func SyncAll(servers []*mcp.Server, commands []*command.Command, rules []*rule.Rule, skills []*skill.Skill, agents []*agent.Agent) []SyncResult {
 	adapters := Detected()
 	results := make([]SyncResult, len(adapters))
 	var wg sync.WaitGroup
@@ -276,6 +303,19 @@ func SyncAll(servers []*mcp.Server, commands []*command.Command, rules []*rule.R
 						}
 					} else {
 						result.Changes += len(skills)
+					}
+				}
+			}
+
+			// Sync agents if adapter supports it
+			if len(agents) > 0 {
+				if aa, ok := AsAgentsAdapter(adapter); ok {
+					if err := aa.WriteAgents(agents); err != nil {
+						if result.Error == nil {
+							result.Error = err
+						}
+					} else {
+						result.Changes += len(agents)
 					}
 				}
 			}

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/iheanyi/agentctl/pkg/agent"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/rule"
@@ -86,8 +87,12 @@ func (a *OpenCodeAdapter) agentsFilePath() string {
 	return filepath.Join(a.configDir(), "AGENTS.md")
 }
 
+func (a *OpenCodeAdapter) agentsDir() string {
+	return filepath.Join(a.configDir(), "agent")
+}
+
 func (a *OpenCodeAdapter) SupportedResources() []ResourceType {
-	return []ResourceType{ResourceMCP, ResourceCommands, ResourceRules, ResourceSkills}
+	return []ResourceType{ResourceMCP, ResourceCommands, ResourceRules, ResourceSkills, ResourceAgents}
 }
 
 func (a *OpenCodeAdapter) ReadServers() ([]*mcp.Server, error) {
@@ -371,4 +376,17 @@ func formatOpenCodeCommand(cmd *command.Command) string {
 	sb.WriteString(cmd.Prompt)
 
 	return sb.String()
+}
+
+// AgentsAdapter implementation for OpenCode
+
+// ReadAgents reads agents from OpenCode's agent directory
+func (a *OpenCodeAdapter) ReadAgents() ([]*agent.Agent, error) {
+	agentsDir := a.agentsDir()
+	return agent.LoadAll(agentsDir)
+}
+
+// WriteAgents writes agents to OpenCode's agent directory
+func (a *OpenCodeAdapter) WriteAgents(agents []*agent.Agent) error {
+	return WriteAgentsToDir(a.agentsDir(), agents)
 }

@@ -8,7 +8,6 @@ import (
 
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
-	"github.com/iheanyi/agentctl/pkg/prompt"
 	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/skill"
 )
@@ -649,37 +648,6 @@ func TestCommandsForScope(t *testing.T) {
 		commands := cfg.CommandsForScope(ScopeAll)
 		if len(commands) != 4 { // All commands
 			t.Errorf("Expected 4 commands, got %d", len(commands))
-		}
-	})
-}
-
-func TestPromptsForScope(t *testing.T) {
-	cfg := &Config{
-		LoadedPrompts: []*prompt.Prompt{
-			{Name: "global1", Scope: string(ScopeGlobal)},
-			{Name: "local1", Scope: string(ScopeLocal)},
-			{Name: "unset", Scope: ""}, // Unset scope defaults to global
-		},
-	}
-
-	t.Run("global scope", func(t *testing.T) {
-		prompts := cfg.PromptsForScope(ScopeGlobal)
-		if len(prompts) != 2 { // global1, unset
-			t.Errorf("Expected 2 global prompts, got %d", len(prompts))
-		}
-	})
-
-	t.Run("local scope", func(t *testing.T) {
-		prompts := cfg.PromptsForScope(ScopeLocal)
-		if len(prompts) != 1 { // local1
-			t.Errorf("Expected 1 local prompt, got %d", len(prompts))
-		}
-	})
-
-	t.Run("all scope", func(t *testing.T) {
-		prompts := cfg.PromptsForScope(ScopeAll)
-		if len(prompts) != 3 { // All prompts
-			t.Errorf("Expected 3 prompts, got %d", len(prompts))
 		}
 	})
 }

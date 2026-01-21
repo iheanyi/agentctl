@@ -7,15 +7,19 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/iheanyi/agentctl/pkg/agent"
+	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
+	"github.com/iheanyi/agentctl/pkg/discovery"
 	"github.com/iheanyi/agentctl/pkg/output"
+	"github.com/iheanyi/agentctl/pkg/skill"
 )
 
 var listCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
 	Short:   "List installed resources",
-	Long: `List installed MCP servers, commands, rules, prompts, and skills.
+	Long: `List installed MCP servers, commands, rules, and skills.
 
 Scope:
   By default, shows all resources from both local and global configs.
@@ -30,7 +34,8 @@ Examples:
   agentctl list --scope local    # List only local/project resources
   agentctl list --scope global   # List only global resources
   agentctl list --type servers   # List only servers
-  agentctl list --type commands  # List only commands`,
+  agentctl list --type commands  # List only commands
+  agentctl list --native         # Include resources from tool-native directories`,
 	RunE: runList,
 }
 
@@ -38,12 +43,14 @@ var (
 	listType    string
 	listProfile string
 	listScope   string
+	listNative  bool
 )
 
 func init() {
-	listCmd.Flags().StringVarP(&listType, "type", "t", "", "Filter by resource type (servers, commands, rules, prompts, skills)")
+	listCmd.Flags().StringVarP(&listType, "type", "t", "", "Filter by resource type (servers, commands, rules, skills, agents, plugins)")
 	listCmd.Flags().StringVarP(&listProfile, "profile", "p", "", "List resources from specific profile")
 	listCmd.Flags().StringVarP(&listScope, "scope", "s", "", "Filter by scope: local, global, or all (default: all)")
+	listCmd.Flags().BoolVarP(&listNative, "native", "n", false, "Include resources from tool-native directories (.cursor/, .codex/, etc.)")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -73,9 +80,17 @@ func runList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Discover native resources once if --native flag is set
+	var nativeResources []*discovery.NativeResource
+	var cwd string
+	if listNative {
+		cwd, _ = os.Getwd()
+		nativeResources = discovery.DiscoverBoth(cwd)
+	}
+
 	// JSON output mode
 	if JSONOutput {
-		return runListJSON(cfg, scope)
+		return runListJSON(cfg, scope, nativeResources, cwd)
 	}
 
 	// Show project config notice if applicable
@@ -118,20 +133,47 @@ func runList(cmd *cobra.Command, args []string) error {
 	// List commands
 	if listType == "" || listType == "commands" {
 		commands := cfg.CommandsForScope(scope)
-		if len(commands) > 0 {
+
+		// Include native commands if --native flag is set
+		var nativeCommands []*discovery.NativeResource
+		if listNative {
+			nativeCommands = filterNativeByType(nativeResources, "command", scope)
+		}
+
+		if len(commands) > 0 || len(nativeCommands) > 0 {
 			if hasOutput {
 				fmt.Println()
 			}
 			fmt.Println("Commands:")
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "  NAME\tSCOPE\tDESCRIPTION")
+			if listNative {
+				fmt.Fprintln(w, "  NAME\tSCOPE\tSOURCE\tDESCRIPTION")
+			} else {
+				fmt.Fprintln(w, "  NAME\tSCOPE\tDESCRIPTION")
+			}
 			for _, cmd := range commands {
 				scopeIndicator := scopeToIndicator(cmd.Scope)
 				desc := cmd.Description
 				if len(desc) > 40 {
 					desc = desc[:37] + "..."
 				}
-				fmt.Fprintf(w, "  %s\t%s\t%s\n", cmd.Name, scopeIndicator, desc)
+				if listNative {
+					fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", cmd.Name, scopeIndicator, "[agentctl]", desc)
+				} else {
+					fmt.Fprintf(w, "  %s\t%s\t%s\n", cmd.Name, scopeIndicator, desc)
+				}
+			}
+			for _, res := range nativeCommands {
+				scopeIndicator := scopeToIndicator(res.Scope)
+				// Get description from the underlying command
+				desc := ""
+				if c, ok := res.Resource.(*command.Command); ok {
+					desc = c.Description
+					if len(desc) > 40 {
+						desc = desc[:37] + "..."
+					}
+				}
+				fmt.Fprintf(w, "  %s\t%s\t[%s]\t%s\n", res.Name, scopeIndicator, res.Tool, desc)
 			}
 			w.Flush()
 			hasOutput = true
@@ -141,39 +183,35 @@ func runList(cmd *cobra.Command, args []string) error {
 	// List rules
 	if listType == "" || listType == "rules" {
 		rules := cfg.RulesForScope(scope)
-		if len(rules) > 0 {
+
+		// Include native rules if --native flag is set
+		var nativeRules []*discovery.NativeResource
+		if listNative {
+			nativeRules = filterNativeByType(nativeResources, "rule", scope)
+		}
+
+		if len(rules) > 0 || len(nativeRules) > 0 {
 			if hasOutput {
 				fmt.Println()
 			}
 			fmt.Println("Rules:")
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "  NAME\tSCOPE\tPATH")
+			if listNative {
+				fmt.Fprintln(w, "  NAME\tSCOPE\tSOURCE\tPATH")
+			} else {
+				fmt.Fprintln(w, "  NAME\tSCOPE\tPATH")
+			}
 			for _, r := range rules {
 				scopeIndicator := scopeToIndicator(r.Scope)
-				fmt.Fprintf(w, "  %s\t%s\t%s\n", r.Name, scopeIndicator, r.Path)
-			}
-			w.Flush()
-			hasOutput = true
-		}
-	}
-
-	// List prompts
-	if listType == "" || listType == "prompts" {
-		prompts := cfg.PromptsForScope(scope)
-		if len(prompts) > 0 {
-			if hasOutput {
-				fmt.Println()
-			}
-			fmt.Println("Prompts:")
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "  NAME\tSCOPE\tDESCRIPTION")
-			for _, p := range prompts {
-				scopeIndicator := scopeToIndicator(p.Scope)
-				desc := p.Description
-				if len(desc) > 40 {
-					desc = desc[:37] + "..."
+				if listNative {
+					fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", r.Name, scopeIndicator, "[agentctl]", r.Path)
+				} else {
+					fmt.Fprintf(w, "  %s\t%s\t%s\n", r.Name, scopeIndicator, r.Path)
 				}
-				fmt.Fprintf(w, "  %s\t%s\t%s\n", p.Name, scopeIndicator, desc)
+			}
+			for _, res := range nativeRules {
+				scopeIndicator := scopeToIndicator(res.Scope)
+				fmt.Fprintf(w, "  %s\t%s\t[%s]\t%s\n", res.Name, scopeIndicator, res.Tool, res.Path)
 			}
 			w.Flush()
 			hasOutput = true
@@ -183,20 +221,122 @@ func runList(cmd *cobra.Command, args []string) error {
 	// List skills
 	if listType == "" || listType == "skills" {
 		skills := cfg.SkillsForScope(scope)
-		if len(skills) > 0 {
+
+		// Include native skills if --native flag is set
+		var nativeSkills []*discovery.NativeResource
+		if listNative {
+			nativeSkills = filterNativeByType(nativeResources, "skill", scope)
+		}
+
+		if len(skills) > 0 || len(nativeSkills) > 0 {
 			if hasOutput {
 				fmt.Println()
 			}
 			fmt.Println("Skills:")
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "  NAME\tSCOPE\tDESCRIPTION")
+			if listNative {
+				fmt.Fprintln(w, "  NAME\tSCOPE\tSOURCE\tDESCRIPTION")
+			} else {
+				fmt.Fprintln(w, "  NAME\tSCOPE\tDESCRIPTION")
+			}
 			for _, s := range skills {
 				scopeIndicator := scopeToIndicator(s.Scope)
 				desc := s.Description
 				if len(desc) > 40 {
 					desc = desc[:37] + "..."
 				}
-				fmt.Fprintf(w, "  %s\t%s\t%s\n", s.Name, scopeIndicator, desc)
+				if listNative {
+					fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", s.Name, scopeIndicator, "[agentctl]", desc)
+				} else {
+					fmt.Fprintf(w, "  %s\t%s\t%s\n", s.Name, scopeIndicator, desc)
+				}
+			}
+			for _, res := range nativeSkills {
+				scopeIndicator := scopeToIndicator(res.Scope)
+				desc := ""
+				if sk, ok := res.Resource.(*skill.Skill); ok {
+					desc = sk.Description
+					if len(desc) > 40 {
+						desc = desc[:37] + "..."
+					}
+				}
+				fmt.Fprintf(w, "  %s\t%s\t[%s]\t%s\n", res.Name, scopeIndicator, res.Tool, desc)
+			}
+			w.Flush()
+			hasOutput = true
+		}
+	}
+
+	// List plugins (only with --native flag since they're tool-native)
+	if listNative && (listType == "" || listType == "plugins") {
+		var plugins []*discovery.Plugin
+
+		// Load global plugins
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if globalPlugins, err := discovery.LoadClaudePlugins(); err == nil {
+				plugins = append(plugins, globalPlugins...)
+			}
+		}
+
+		// Load local plugins
+		if scope == config.ScopeAll || scope == config.ScopeLocal {
+			if localPlugins, err := discovery.LoadClaudeProjectPlugins(cwd); err == nil {
+				plugins = append(plugins, localPlugins...)
+			}
+		}
+
+		if len(plugins) > 0 {
+			if hasOutput {
+				fmt.Println()
+			}
+			fmt.Println("Plugins:")
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  NAME\tSCOPE\tVERSION\tSTATUS")
+			for _, p := range plugins {
+				scopeIndicator := scopeToIndicator(p.Scope)
+				status := "enabled"
+				if !p.Enabled {
+					status = "disabled"
+				}
+				fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", p.Name, scopeIndicator, p.Version, status)
+			}
+			w.Flush()
+			hasOutput = true
+		}
+	}
+
+	// List agents (only with --native flag since they're tool-native)
+	if listNative && (listType == "" || listType == "agents") {
+		var agents []*agent.Agent
+
+		// Discover local agents
+		if scope == config.ScopeAll || scope == config.ScopeLocal {
+			if localAgents := discovery.DiscoverAgents(cwd); len(localAgents) > 0 {
+				agents = append(agents, localAgents...)
+			}
+		}
+
+		// Discover global agents
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if globalAgents := discovery.DiscoverGlobalAgents(); len(globalAgents) > 0 {
+				agents = append(agents, globalAgents...)
+			}
+		}
+
+		if len(agents) > 0 {
+			if hasOutput {
+				fmt.Println()
+			}
+			fmt.Println("Agents:")
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  NAME\tSCOPE\tTOOL\tDESCRIPTION")
+			for _, a := range agents {
+				scopeIndicator := scopeToIndicator(a.Scope)
+				desc := a.Description
+				if len(desc) > 40 {
+					desc = desc[:37] + "..."
+				}
+				fmt.Fprintf(w, "  %s\t%s\t[%s]\t%s\n", a.Name, scopeIndicator, a.Tool, desc)
 			}
 			w.Flush()
 			hasOutput = true
@@ -214,12 +354,14 @@ func runList(cmd *cobra.Command, args []string) error {
 }
 
 // runListJSON outputs the list results as JSON
-func runListJSON(cfg *config.Config, scope config.Scope) error {
+func runListJSON(cfg *config.Config, scope config.Scope, nativeResources []*discovery.NativeResource, cwd string) error {
 	jw := output.NewJSONWriter()
 
 	listOutput := output.ListOutput{
 		ProjectPath: cfg.ProjectPath,
 	}
+
+	includeNative := len(nativeResources) > 0
 
 	// Get servers filtered by scope and type
 	if listType == "" || listType == "servers" {
@@ -263,8 +405,27 @@ func runListJSON(cfg *config.Config, scope config.Scope) error {
 			listOutput.Commands = append(listOutput.Commands, output.CommandInfo{
 				Name:        cmd.Name,
 				Scope:       cmd.Scope,
+				Tool:        "agentctl",
 				Description: cmd.Description,
 			})
+		}
+
+		// Include native commands
+		if includeNative {
+			for _, res := range nativeResources {
+				if res.Type == "command" && (scope == config.ScopeAll || string(scope) == res.Scope) {
+					desc := ""
+					if c, ok := res.Resource.(*command.Command); ok {
+						desc = c.Description
+					}
+					listOutput.Commands = append(listOutput.Commands, output.CommandInfo{
+						Name:        res.Name,
+						Scope:       res.Scope,
+						Tool:        res.Tool,
+						Description: desc,
+					})
+				}
+			}
 		}
 	}
 
@@ -275,20 +436,23 @@ func runListJSON(cfg *config.Config, scope config.Scope) error {
 			listOutput.Rules = append(listOutput.Rules, output.RuleInfo{
 				Name:  r.Name,
 				Scope: r.Scope,
+				Tool:  "agentctl",
 				Path:  r.Path,
 			})
 		}
-	}
 
-	// Get prompts filtered by scope and type
-	if listType == "" || listType == "prompts" {
-		prompts := cfg.PromptsForScope(scope)
-		for _, p := range prompts {
-			listOutput.Prompts = append(listOutput.Prompts, output.PromptInfo{
-				Name:        p.Name,
-				Scope:       p.Scope,
-				Description: p.Description,
-			})
+		// Include native rules
+		if includeNative {
+			for _, res := range nativeResources {
+				if res.Type == "rule" && (scope == config.ScopeAll || string(scope) == res.Scope) {
+					listOutput.Rules = append(listOutput.Rules, output.RuleInfo{
+						Name:  res.Name,
+						Scope: res.Scope,
+						Tool:  res.Tool,
+						Path:  res.Path,
+					})
+				}
+			}
 		}
 	}
 
@@ -299,8 +463,106 @@ func runListJSON(cfg *config.Config, scope config.Scope) error {
 			listOutput.Skills = append(listOutput.Skills, output.SkillInfo{
 				Name:        s.Name,
 				Scope:       s.Scope,
+				Tool:        "agentctl",
 				Description: s.Description,
 			})
+		}
+
+		// Include native skills
+		if includeNative {
+			for _, res := range nativeResources {
+				if res.Type == "skill" && (scope == config.ScopeAll || string(scope) == res.Scope) {
+					desc := ""
+					if sk, ok := res.Resource.(*skill.Skill); ok {
+						desc = sk.Description
+					}
+					listOutput.Skills = append(listOutput.Skills, output.SkillInfo{
+						Name:        res.Name,
+						Scope:       res.Scope,
+						Tool:        res.Tool,
+						Description: desc,
+					})
+				}
+			}
+		}
+	}
+
+	// Get plugins (only with --native flag)
+	if includeNative && (listType == "" || listType == "plugins") {
+		// Load global plugins
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if globalPlugins, err := discovery.LoadClaudePlugins(); err == nil {
+				for _, p := range globalPlugins {
+					status := "enabled"
+					if !p.Enabled {
+						status = "disabled"
+					}
+					listOutput.Plugins = append(listOutput.Plugins, output.PluginInfo{
+						Name:    p.Name,
+						Scope:   p.Scope,
+						Tool:    p.Tool,
+						Version: p.Version,
+						Status:  status,
+						Path:    p.Path,
+					})
+				}
+			}
+		}
+
+		// Load local plugins
+		if scope == config.ScopeAll || scope == config.ScopeLocal {
+			if localPlugins, err := discovery.LoadClaudeProjectPlugins(cwd); err == nil {
+				for _, p := range localPlugins {
+					status := "enabled"
+					if !p.Enabled {
+						status = "disabled"
+					}
+					listOutput.Plugins = append(listOutput.Plugins, output.PluginInfo{
+						Name:    p.Name,
+						Scope:   p.Scope,
+						Tool:    p.Tool,
+						Version: p.Version,
+						Status:  status,
+						Path:    p.Path,
+					})
+				}
+			}
+		}
+	}
+
+	// Get agents (only with --native flag)
+	if includeNative && (listType == "" || listType == "agents") {
+
+		// Discover local agents
+		if scope == config.ScopeAll || scope == config.ScopeLocal {
+			if localAgents := discovery.DiscoverAgents(cwd); len(localAgents) > 0 {
+				for _, a := range localAgents {
+					listOutput.Agents = append(listOutput.Agents, output.AgentInfo{
+						Name:        a.Name,
+						Scope:       a.Scope,
+						Tool:        a.Tool,
+						Description: a.Description,
+						Model:       a.Model,
+						Path:        a.Path,
+					})
+				}
+			}
+		}
+
+		// Discover global agents
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if globalAgents := discovery.DiscoverGlobalAgents(); len(globalAgents) > 0 {
+				for _, a := range globalAgents {
+					listOutput.Agents = append(listOutput.Agents, output.AgentInfo{
+						Name:        a.Name,
+						Scope:       a.Scope,
+						Tool:        a.Tool,
+						Description: a.Description,
+						Model:       a.Model,
+						Path:        a.Path,
+					})
+				}
+			}
 		}
 	}
 
@@ -317,4 +579,17 @@ func scopeToIndicator(scope string) string {
 	default:
 		return "[G]" // Default to global
 	}
+}
+
+// filterNativeByType filters native resources by type and scope
+func filterNativeByType(resources []*discovery.NativeResource, resType string, scope config.Scope) []*discovery.NativeResource {
+	var filtered []*discovery.NativeResource
+	for _, res := range resources {
+		if res.Type == resType {
+			if scope == config.ScopeAll || string(scope) == res.Scope {
+				filtered = append(filtered, res)
+			}
+		}
+	}
+	return filtered
 }

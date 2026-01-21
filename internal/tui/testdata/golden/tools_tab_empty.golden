@@ -1,9 +1,7 @@
- agentctl   Servers       Commands       Rules       Skills      [Prompts]      
- Hooks       Tools   0 prompts                                                  
+ agentctl   Servers       Commands       Rules       Skills       Hooks         
+ [Tools]      Agents   0/0 tools detected                                       
 ────────────────────────────────────────────────────────────────────────────────
-  No prompts defined                                                            
-                                                                                
-  Create prompts in ~/.config/agentctl/prompts/                                 
+  No tool adapters registered                                                   
                                                                                 
                                                                                 
                                                                                 
@@ -12,10 +10,12 @@
                                                                                 
                                                                                 
                                                                                 
-                                                                                
-────────────────────────────────────────────────────────────────────────────────
                                                                                 
                                                                                 
                                                                                 
 ────────────────────────────────────────────────────────────────────────────────
- j/k navigate │ Tab switch tab │ a add │ e edit │ d delete │ / search │ ? help  
+                                                                                
+                                                                                
+                                                                                
+────────────────────────────────────────────────────────────────────────────────
+ j/k navigate │ Tab switch tab │ / search │ ? help                              

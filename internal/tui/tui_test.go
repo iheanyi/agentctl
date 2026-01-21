@@ -161,8 +161,11 @@ func TestResourceTabConstants(t *testing.T) {
 	if TabSkills != 3 {
 		t.Error("TabSkills should be 3")
 	}
-	if TabPrompts != 4 {
-		t.Error("TabPrompts should be 4")
+	if TabHooks != 4 {
+		t.Error("TabHooks should be 4")
+	}
+	if TabTools != 5 {
+		t.Error("TabTools should be 5")
 	}
 }
 
@@ -172,7 +175,7 @@ func TestTabNames(t *testing.T) {
 		t.Errorf("TabNames should have 7 entries, got %d", len(TabNames))
 	}
 
-	expectedNames := []string{"Servers", "Commands", "Rules", "Skills", "Prompts", "Hooks", "Tools"}
+	expectedNames := []string{"Servers", "Commands", "Rules", "Skills", "Hooks", "Tools", "Agents"}
 	for i, name := range expectedNames {
 		if TabNames[i] != name {
 			t.Errorf("TabNames[%d] = %q, want %q", i, TabNames[i], name)

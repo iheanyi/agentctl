@@ -24,6 +24,8 @@ type keyMap struct {
 	Delete   key.Binding
 	Edit     key.Binding
 	Toggle   key.Binding
+	View     key.Binding
+	Inspect  key.Binding
 	Update   key.Binding
 	Sync     key.Binding
 	SyncAll  key.Binding
@@ -33,11 +35,12 @@ type keyMap struct {
 	ExecTool key.Binding
 
 	// Filters
-	CycleFilter     key.Binding
-	FilterAll       key.Binding
-	FilterInstalled key.Binding
-	FilterAvailable key.Binding
-	FilterDisabled  key.Binding
+	CycleFilter      key.Binding
+	CycleScopeFilter key.Binding
+	FilterAll        key.Binding
+	FilterInstalled  key.Binding
+	FilterAvailable  key.Binding
+	FilterDisabled   key.Binding
 
 	// Profiles
 	ProfileSwitch key.Binding
@@ -129,9 +132,13 @@ func newKeyMap() keyMap {
 			key.WithKeys("e"),
 			key.WithHelp("e", "edit"),
 		),
-		Toggle: key.NewBinding(
+		Inspect: key.NewBinding(
 			key.WithKeys("enter"),
-			key.WithHelp("enter", "toggle"),
+			key.WithHelp("enter", "inspect"),
+		),
+		Toggle: key.NewBinding(
+			key.WithKeys(" "),
+			key.WithHelp("space", "toggle"),
 		),
 		Update: key.NewBinding(
 			key.WithKeys("u"),
@@ -166,6 +173,10 @@ func newKeyMap() keyMap {
 		CycleFilter: key.NewBinding(
 			key.WithKeys("f"),
 			key.WithHelp("f", "cycle filter"),
+		),
+		CycleScopeFilter: key.NewBinding(
+			key.WithKeys("F"),
+			key.WithHelp("F", "scope: all/local/global"),
 		),
 		FilterAll: key.NewBinding(
 			key.WithKeys("1"),
@@ -292,7 +303,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 			k.Install,
 			k.Delete,
 			k.Edit,
-			k.Toggle,
+			k.Inspect,
 			k.Update,
 		},
 		// Sync & Test column
@@ -308,6 +319,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		// Filters column
 		{
 			k.CycleFilter,
+			k.CycleScopeFilter,
 			k.FilterAll,
 			k.FilterInstalled,
 			k.FilterAvailable,
