@@ -11,6 +11,7 @@ import (
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/discovery"
+	"github.com/iheanyi/agentctl/pkg/hook"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/skill"
@@ -49,7 +50,7 @@ var (
 )
 
 func init() {
-	listCmd.Flags().StringVarP(&listType, "type", "t", "", "Filter by resource type (servers, commands, rules, skills, agents, plugins)")
+	listCmd.Flags().StringVarP(&listType, "type", "t", "", "Filter by resource type (servers, commands, rules, skills, agents, hooks, plugins)")
 	listCmd.Flags().StringVarP(&listProfile, "profile", "p", "", "List resources from specific profile")
 	listCmd.Flags().StringVarP(&listScope, "scope", "s", "", "Filter by scope: local, global, or all (default: all)")
 	listCmd.Flags().BoolVarP(&listNative, "native", "n", false, "Include resources from tool-native directories (.cursor/, .codex/, etc.)")
@@ -403,6 +404,47 @@ func runList(cmd *cobra.Command, args []string) error {
 					desc = desc[:37] + "..."
 				}
 				fmt.Fprintf(w, "  %s\t%s\t[%s]\t%s\n", a.Name, scopeIndicator, a.Tool, desc)
+			}
+			w.Flush()
+			hasOutput = true
+		}
+	}
+
+	// List hooks (only with --native flag since they're tool-native)
+	if listNative && (listType == "" || listType == "hooks") {
+		var hooks []*hook.Hook
+
+		// Discover local hooks
+		if scope == config.ScopeAll || scope == config.ScopeLocal {
+			if localHooks := discovery.DiscoverHooks(cwd); len(localHooks) > 0 {
+				hooks = append(hooks, localHooks...)
+			}
+		}
+
+		// Discover global hooks
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if globalHooks, err := hook.LoadAll(); err == nil {
+				hooks = append(hooks, globalHooks...)
+			}
+		}
+
+		if len(hooks) > 0 {
+			if hasOutput {
+				fmt.Println()
+			}
+			fmt.Println("Hooks:")
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  EVENT\tSOURCE\tMATCHER\tCOMMAND")
+			for _, h := range hooks {
+				matcher := h.Matcher
+				if matcher == "" {
+					matcher = "*"
+				}
+				cmd := h.Command
+				if len(cmd) > 50 {
+					cmd = cmd[:47] + "..."
+				}
+				fmt.Fprintf(w, "  %s\t[%s]\t%s\t%s\n", h.Type, h.Source, matcher, cmd)
 			}
 			w.Flush()
 			hasOutput = true
