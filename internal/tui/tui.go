@@ -60,10 +60,11 @@ const (
 	FilterInstalled
 	FilterAvailable
 	FilterDisabled
+	FilterNative
 )
 
 // FilterModeNames returns the display names for filter modes
-var FilterModeNames = []string{"All", "Installed", "Available", "Disabled"}
+var FilterModeNames = []string{"All", "Installed", "Available", "Disabled", "Native"}
 
 // ScopeFilter represents the scope filter for resources
 type ScopeFilter int
@@ -721,14 +722,71 @@ func (m *Model) buildServerList() {
 		})
 	}
 
-	// Sort: installed first, then alphabetically within each group
-	sort.Slice(m.allServers, func(i, j int) bool {
-		// Installed/disabled before available
-		if m.allServers[i].Status != ServerStatusAvailable && m.allServers[j].Status == ServerStatusAvailable {
-			return true
+	// Add native servers from detected tools (not managed by agentctl)
+	for _, adapter := range sync.Detected() {
+		serverAdapter, ok := adapter.(sync.ServerAdapter)
+		if !ok {
+			continue
 		}
-		if m.allServers[i].Status == ServerStatusAvailable && m.allServers[j].Status != ServerStatusAvailable {
-			return false
+		toolServers, err := serverAdapter.ReadServers()
+		if err != nil {
+			continue
+		}
+		for _, srv := range toolServers {
+			// Skip if already in agentctl config
+			if installedNames[srv.Name] {
+				continue
+			}
+			// Skip if already added from another tool
+			found := false
+			for _, existing := range m.allServers {
+				if existing.Name == srv.Name {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+
+			transport := string(srv.Transport)
+			if transport == "" {
+				transport = "stdio"
+			}
+
+			m.allServers = append(m.allServers, Server{
+				Name:         srv.Name,
+				Desc:         "", // Will be generated from transport/command
+				Status:       ServerStatusNative,
+				Health:       HealthStatusUnknown,
+				Transport:    transport,
+				Command:      srv.Command,
+				ServerConfig: srv,
+				SourceTool:   adapter.Name(),
+			})
+		}
+	}
+
+	// Sort: installed first, then native, then disabled, then available; alphabetically within groups
+	sort.Slice(m.allServers, func(i, j int) bool {
+		// Priority: Installed (0) > Native (1) > Disabled (2) > Available (3)
+		priority := func(s ServerStatusType) int {
+			switch s {
+			case ServerStatusInstalled:
+				return 0
+			case ServerStatusNative:
+				return 1
+			case ServerStatusDisabled:
+				return 2
+			case ServerStatusAvailable:
+				return 3
+			default:
+				return 4
+			}
+		}
+		pi, pj := priority(m.allServers[i].Status), priority(m.allServers[j].Status)
+		if pi != pj {
+			return pi < pj
 		}
 		// Alphabetically within group
 		return m.allServers[i].Name < m.allServers[j].Name
@@ -752,6 +810,10 @@ func (m *Model) applyFilter() {
 			}
 		case FilterDisabled:
 			if s.Status != ServerStatusDisabled {
+				continue
+			}
+		case FilterNative:
+			if s.Status != ServerStatusNative {
 				continue
 			}
 		}
@@ -1454,6 +1516,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterMode = FilterDisabled
 			m.applyFilter()
 
+		case key.Matches(msg, m.keys.FilterNative):
+			m.filterMode = FilterNative
+			m.applyFilter()
+
 		case key.Matches(msg, m.keys.ToggleLogs):
 			m.logExpanded = !m.logExpanded
 			if m.logExpanded {
@@ -1750,6 +1816,8 @@ func (m *Model) renderServerList() string {
 		filterLabel = "Available"
 	case FilterDisabled:
 		filterLabel = "Disabled"
+	case FilterNative:
+		filterLabel = "Native"
 	}
 	if filterLabel != "" && m.filterMode != FilterAll {
 		filterText := lipgloss.NewStyle().Foreground(colorCyan).Render("Filter: " + filterLabel)
@@ -1803,11 +1871,16 @@ func (m *Model) renderServerRow(s Server, selected bool) string {
 		statusBadge = StatusAvailableStyle.Render(StatusAvailable)
 	case ServerStatusDisabled:
 		statusBadge = StatusDisabledStyle.Render(StatusDisabled)
+	case ServerStatusNative:
+		statusBadge = StatusNativeStyle.Render(StatusNative)
 	}
 
-	// Scope indicator (only for installed servers)
+	// Scope indicator (only for installed servers) or tool indicator (for native)
 	scopeIndicator := ""
-	if s.ServerConfig != nil && s.ServerConfig.Scope != "" {
+	if s.Status == ServerStatusNative && s.SourceTool != "" {
+		// Show source tool for native servers
+		scopeIndicator = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Render("["+s.SourceTool+"]")
+	} else if s.ServerConfig != nil && s.ServerConfig.Scope != "" {
 		scopeIndicator = " " + RenderScopeIndicator(s.ServerConfig.Scope)
 	}
 

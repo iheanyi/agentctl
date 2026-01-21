@@ -17,6 +17,7 @@ const (
 	ServerStatusInstalled ServerStatusType = iota
 	ServerStatusAvailable
 	ServerStatusDisabled
+	ServerStatusNative // Server exists in tool config but not managed by agentctl
 )
 
 // HealthStatusType represents the health check status of an MCP server
@@ -43,6 +44,7 @@ type Server struct {
 	Tools         []mcpclient.Tool // Discovered tools
 	ServerConfig  *mcp.Server
 	AliasConfig   *aliases.Alias
+	SourceTool    string // Tool this server came from (for native servers)
 }
 
 // Title implements list.Item interface
@@ -73,6 +75,7 @@ func (s Server) FilterValue() string {
 //   - ServerStatusInstalled: filled circle (●)
 //   - ServerStatusAvailable: empty circle (○)
 //   - ServerStatusDisabled: dotted circle (◌)
+//   - ServerStatusNative: filled diamond (◆)
 func ServerStatusBadge(status ServerStatusType) string {
 	switch status {
 	case ServerStatusInstalled:
@@ -81,6 +84,8 @@ func ServerStatusBadge(status ServerStatusType) string {
 		return StatusAvailable // ○
 	case ServerStatusDisabled:
 		return StatusDisabled // ◌
+	case ServerStatusNative:
+		return StatusNative // ◆
 	default:
 		return StatusAvailable
 	}

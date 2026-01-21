@@ -41,6 +41,7 @@ type keyMap struct {
 	FilterInstalled  key.Binding
 	FilterAvailable  key.Binding
 	FilterDisabled   key.Binding
+	FilterNative     key.Binding
 
 	// Profiles
 	ProfileSwitch key.Binding
@@ -194,6 +195,10 @@ func newKeyMap() keyMap {
 			key.WithKeys("4"),
 			key.WithHelp("4", "disabled"),
 		),
+		FilterNative: key.NewBinding(
+			key.WithKeys("5"),
+			key.WithHelp("5", "native"),
+		),
 
 		// Profiles
 		ProfileSwitch: key.NewBinding(
@@ -324,6 +329,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 			k.FilterInstalled,
 			k.FilterAvailable,
 			k.FilterDisabled,
+			k.FilterNative,
 		},
 		// UI column
 		{

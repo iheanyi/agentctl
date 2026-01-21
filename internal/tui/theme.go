@@ -30,6 +30,7 @@ const (
 	StatusInstalled = "●"
 	StatusAvailable = "○"
 	StatusDisabled  = "◌"
+	StatusNative    = "◆" // Server exists in tool config but not managed by agentctl
 )
 
 // Health indicator symbols
@@ -84,6 +85,11 @@ var (
 	// Disabled status badge (◌) - subtle/dim
 	StatusDisabledStyle = lipgloss.NewStyle().
 				Foreground(colorFgSubtle)
+
+	// Native status badge (◆) - purple/violet for tool-native servers
+	StatusNativeStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#a78bfa")). // purple
+			Bold(true)
 )
 
 // Health indicator styles
