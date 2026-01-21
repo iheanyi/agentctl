@@ -723,6 +723,8 @@ func (m *Model) buildServerList() {
 	}
 
 	// Add native servers from detected tools (not managed by agentctl)
+	// Track native servers by name to consolidate tools
+	nativeServerIdx := make(map[string]int) // name -> index in allServers
 	for _, adapter := range sync.Detected() {
 		serverAdapter, ok := adapter.(sync.ServerAdapter)
 		if !ok {
@@ -737,15 +739,9 @@ func (m *Model) buildServerList() {
 			if installedNames[srv.Name] {
 				continue
 			}
-			// Skip if already added from another tool
-			found := false
-			for _, existing := range m.allServers {
-				if existing.Name == srv.Name {
-					found = true
-					break
-				}
-			}
-			if found {
+			// If already added from another tool, just append the tool name
+			if idx, exists := nativeServerIdx[srv.Name]; exists {
+				m.allServers[idx].SourceTools = append(m.allServers[idx].SourceTools, adapter.Name())
 				continue
 			}
 
@@ -754,6 +750,7 @@ func (m *Model) buildServerList() {
 				transport = "stdio"
 			}
 
+			nativeServerIdx[srv.Name] = len(m.allServers)
 			m.allServers = append(m.allServers, Server{
 				Name:         srv.Name,
 				Desc:         "", // Will be generated from transport/command
@@ -762,7 +759,7 @@ func (m *Model) buildServerList() {
 				Transport:    transport,
 				Command:      srv.Command,
 				ServerConfig: srv,
-				SourceTool:   adapter.Name(),
+				SourceTools:  []string{adapter.Name()},
 			})
 		}
 	}
@@ -1877,9 +1874,10 @@ func (m *Model) renderServerRow(s Server, selected bool) string {
 
 	// Scope indicator (only for installed servers) or tool indicator (for native)
 	scopeIndicator := ""
-	if s.Status == ServerStatusNative && s.SourceTool != "" {
-		// Show source tool for native servers
-		scopeIndicator = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Render("["+s.SourceTool+"]")
+	if s.Status == ServerStatusNative && len(s.SourceTools) > 0 {
+		// Show source tools for native servers
+		toolsStr := strings.Join(s.SourceTools, ", ")
+		scopeIndicator = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Render("["+toolsStr+"]")
 	} else if s.ServerConfig != nil && s.ServerConfig.Scope != "" {
 		scopeIndicator = " " + RenderScopeIndicator(s.ServerConfig.Scope)
 	}
@@ -1991,6 +1989,12 @@ func (m *Model) renderCommandRow(cmd *command.Command, selected bool) string {
 	// Scope indicator
 	scopeIndicator := RenderScopeIndicator(cmd.Scope)
 
+	// Tool indicator (if not agentctl)
+	toolIndicator := ""
+	if cmd.Tool != "" && cmd.Tool != "agentctl" {
+		toolIndicator = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Render("["+cmd.Tool+"]")
+	}
+
 	// Command name with / prefix
 	nameStyle := ListItemNameStyle
 	if selected {
@@ -2006,7 +2010,7 @@ func (m *Model) renderCommandRow(cmd *command.Command, selected bool) string {
 	desc := descStyle.Render(ansi.Truncate(cmd.Description, 50, "..."))
 
 	// Build the row
-	leftPart := "  " + icon + " " + scopeIndicator + " " + name
+	leftPart := "  " + icon + " " + scopeIndicator + toolIndicator + " " + name
 
 	// Calculate padding for right-aligned description
 	leftWidth := lipgloss.Width(leftPart)
@@ -2083,6 +2087,12 @@ func (m *Model) renderRuleRow(r *rule.Rule, selected bool) string {
 	// Scope indicator
 	scopeIndicator := RenderScopeIndicator(r.Scope)
 
+	// Tool indicator (if not agentctl)
+	toolIndicator := ""
+	if r.Tool != "" && r.Tool != "agentctl" {
+		toolIndicator = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Render("["+r.Tool+"]")
+	}
+
 	// Rule name
 	nameStyle := ListItemNameStyle
 	if selected {
@@ -2112,7 +2122,7 @@ func (m *Model) renderRuleRow(r *rule.Rule, selected bool) string {
 	desc := descStyle.Render(ansi.Truncate(descText, 50, "..."))
 
 	// Build the row
-	leftPart := "  " + icon + " " + scopeIndicator + " " + name
+	leftPart := "  " + icon + " " + scopeIndicator + toolIndicator + " " + name
 
 	// Calculate padding for right-aligned description
 	leftWidth := lipgloss.Width(leftPart)
@@ -2189,6 +2199,12 @@ func (m *Model) renderSkillRow(s *skill.Skill, selected bool) string {
 	// Scope indicator
 	scopeIndicator := RenderScopeIndicator(s.Scope)
 
+	// Tool indicator (if not agentctl)
+	toolIndicator := ""
+	if s.Tool != "" && s.Tool != "agentctl" {
+		toolIndicator = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Render("["+s.Tool+"]")
+	}
+
 	// Skill name
 	nameStyle := ListItemNameStyle
 	if selected {
@@ -2221,7 +2237,7 @@ func (m *Model) renderSkillRow(s *skill.Skill, selected bool) string {
 	desc := descStyle.Render(ansi.Truncate(descText, 35, "..."))
 
 	// Build the row
-	leftPart := "  " + icon + " " + scopeIndicator + " " + name + versionBadge + cmdBadge
+	leftPart := "  " + icon + " " + scopeIndicator + toolIndicator + " " + name + versionBadge + cmdBadge
 
 	// Calculate padding for right-aligned description
 	leftWidth := lipgloss.Width(leftPart)
@@ -2546,8 +2562,14 @@ func (m *Model) renderPluginRow(plugin *discovery.Plugin, selected bool) string 
 	}
 	name := nameStyle.Render(plugin.Name)
 
-	// Scope badge
-	scopeBadge := lipgloss.NewStyle().Foreground(colorCyan).Render(fmt.Sprintf(" [%s plugin]", plugin.Scope))
+	// Scope indicator
+	scopeIndicator := RenderScopeIndicator(plugin.Scope)
+
+	// Tool badge
+	toolBadge := ""
+	if plugin.Tool != "" {
+		toolBadge = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Render("["+plugin.Tool+"]")
+	}
 
 	// Version badge if available
 	versionBadge := ""
@@ -2564,7 +2586,7 @@ func (m *Model) renderPluginRow(plugin *discovery.Plugin, selected bool) string 
 	desc := descStyle.Render(pathTrunc)
 
 	// Build the row
-	leftPart := "  " + iconStyled + " " + name + scopeBadge + versionBadge
+	leftPart := "  " + iconStyled + " " + scopeIndicator + toolBadge + " " + name + versionBadge
 
 	// Calculate padding for right-aligned path
 	leftWidth := lipgloss.Width(leftPart)

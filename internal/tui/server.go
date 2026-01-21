@@ -44,7 +44,7 @@ type Server struct {
 	Tools         []mcpclient.Tool // Discovered tools
 	ServerConfig  *mcp.Server
 	AliasConfig   *aliases.Alias
-	SourceTool    string // Tool this server came from (for native servers)
+	SourceTools   []string // Tools this server is configured in (for native servers)
 }
 
 // Title implements list.Item interface
