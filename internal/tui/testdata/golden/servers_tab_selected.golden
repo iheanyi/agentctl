@@ -1,5 +1,5 @@
  agentctl  [Servers]      Commands       Rules       Skills       Hooks                               
- Tools   ● 2  ○ 0  ◌ 0                                                                                
+ Tools       Agents   ● 2  ○ 0  ◌ 0                                                                   
 ────────────────────────────────────────────────────────────────────────────────                      
    ● filesystem                                    stdio · Access local files                         
    ● github                                        stdio · GitHub integration                         

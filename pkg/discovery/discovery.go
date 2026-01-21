@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/iheanyi/agentctl/pkg/agent"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/hook"
 	"github.com/iheanyi/agentctl/pkg/mcp"
@@ -16,12 +17,12 @@ import (
 
 // NativeResource represents a resource discovered from a tool's native config
 type NativeResource struct {
-	Type     string // "rule", "skill", "command", "hook", "server", "plugin"
+	Type     string // "rule", "skill", "command", "hook", "server", "plugin", "agent"
 	Name     string
 	Path     string // Path to the file or directory
 	Tool     string // Which tool owns this (e.g., "claude", "gemini")
 	Scope    string // "local" or "global"
-	Resource any    // The actual resource (*rule.Rule, *skill.Skill, etc.)
+	Resource any    // The actual resource (*rule.Rule, *skill.Skill, *agent.Agent, etc.)
 }
 
 // Scanner defines the interface for discovering resources from tool configurations
@@ -178,6 +179,22 @@ func DiscoverAll(dir string) []*NativeResource {
 				}
 			}
 		}
+
+		// Scan agents (if scanner supports it)
+		if as, ok := scanner.(AgentScanner); ok {
+			if agents, err := as.ScanAgents(dir); err == nil {
+				for _, a := range agents {
+					resources = append(resources, &NativeResource{
+						Type:     "agent",
+						Name:     a.Name,
+						Path:     a.Path,
+						Tool:     tool,
+						Scope:    "local",
+						Resource: a,
+					})
+				}
+			}
+		}
 	}
 
 	return resources
@@ -273,6 +290,15 @@ type PluginScanner interface {
 	ScanGlobalPlugins() ([]*Plugin, error)
 }
 
+// AgentScanner defines the interface for discovering agents/subagents
+type AgentScanner interface {
+	Scanner
+	// ScanAgents discovers agents from the tool's local config directory
+	ScanAgents(dir string) ([]*agent.Agent, error)
+	// ScanGlobalAgents discovers agents from the tool's global config directory
+	ScanGlobalAgents() ([]*agent.Agent, error)
+}
+
 // DiscoverGlobal discovers resources from global tool configurations
 func DiscoverGlobal() []*NativeResource {
 	var resources []*NativeResource
@@ -365,6 +391,29 @@ func DiscoverGlobal() []*NativeResource {
 		}
 	}
 
+	// Scan for global agents
+	for _, scanner := range registry {
+		as, ok := scanner.(AgentScanner)
+		if !ok {
+			continue
+		}
+
+		tool := scanner.Name()
+
+		if agents, err := as.ScanGlobalAgents(); err == nil {
+			for _, a := range agents {
+				resources = append(resources, &NativeResource{
+					Type:     "agent",
+					Name:     a.Name,
+					Path:     a.Path,
+					Tool:     tool,
+					Scope:    "global",
+					Resource: a,
+				})
+			}
+		}
+	}
+
 	return resources
 }
 
@@ -373,4 +422,37 @@ func DiscoverBoth(dir string) []*NativeResource {
 	resources := DiscoverAll(dir)
 	resources = append(resources, DiscoverGlobal()...)
 	return resources
+}
+
+// DiscoverAgents scans all detected tools for agents in the given directory
+func DiscoverAgents(dir string) []*agent.Agent {
+	var agents []*agent.Agent
+	for _, scanner := range registry {
+		if !scanner.Detect(dir) {
+			continue
+		}
+		as, ok := scanner.(AgentScanner)
+		if !ok {
+			continue
+		}
+		if a, err := as.ScanAgents(dir); err == nil {
+			agents = append(agents, a...)
+		}
+	}
+	return agents
+}
+
+// DiscoverGlobalAgents scans all tools for global agents
+func DiscoverGlobalAgents() []*agent.Agent {
+	var agents []*agent.Agent
+	for _, scanner := range registry {
+		as, ok := scanner.(AgentScanner)
+		if !ok {
+			continue
+		}
+		if a, err := as.ScanGlobalAgents(); err == nil {
+			agents = append(agents, a...)
+		}
+	}
+	return agents
 }

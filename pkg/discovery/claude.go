@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/iheanyi/agentctl/pkg/agent"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/hook"
 	"github.com/iheanyi/agentctl/pkg/mcp"
@@ -199,4 +200,39 @@ func (s *ClaudeScanner) ScanPlugins(dir string) ([]*Plugin, error) {
 // ScanGlobalPlugins discovers plugins from Claude's global plugin config
 func (s *ClaudeScanner) ScanGlobalPlugins() ([]*Plugin, error) {
 	return LoadClaudePlugins()
+}
+
+// ScanAgents discovers agents from the project's local .claude/agents/ directory
+func (s *ClaudeScanner) ScanAgents(dir string) ([]*agent.Agent, error) {
+	agentsDir := filepath.Join(dir, ".claude", "agents")
+	if _, err := os.Stat(agentsDir); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	agents, err := agent.LoadFromDirectory(agentsDir, "local", "claude")
+	if err != nil {
+		return nil, err
+	}
+
+	return agents, nil
+}
+
+// ScanGlobalAgents discovers agents from Claude's global ~/.claude/agents/ directory
+func (s *ClaudeScanner) ScanGlobalAgents() ([]*agent.Agent, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	agentsDir := filepath.Join(homeDir, ".claude", "agents")
+	if _, err := os.Stat(agentsDir); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	agents, err := agent.LoadFromDirectory(agentsDir, "global", "claude")
+	if err != nil {
+		return nil, err
+	}
+
+	return agents, nil
 }

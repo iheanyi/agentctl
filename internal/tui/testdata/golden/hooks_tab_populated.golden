@@ -1,5 +1,5 @@
  agentctl   Servers       Commands       Rules       Skills      [Hooks]        
- Tools   2 hooks                                                                
+ Tools       Agents   2 hooks                                                   
 ────────────────────────────────────────────────────────────────────────────────
    ⏮ PreToolUse [*] (claude)                           echo 'Session started'   
    ⏭ PostToolUse [Bash] (claude)                                     npm test   

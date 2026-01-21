@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/iheanyi/agentctl/pkg/agent"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/discovery"
@@ -46,7 +47,7 @@ var (
 )
 
 func init() {
-	listCmd.Flags().StringVarP(&listType, "type", "t", "", "Filter by resource type (servers, commands, rules, skills)")
+	listCmd.Flags().StringVarP(&listType, "type", "t", "", "Filter by resource type (servers, commands, rules, skills, agents, plugins)")
 	listCmd.Flags().StringVarP(&listProfile, "profile", "p", "", "List resources from specific profile")
 	listCmd.Flags().StringVarP(&listScope, "scope", "s", "", "Filter by scope: local, global, or all (default: all)")
 	listCmd.Flags().BoolVarP(&listNative, "native", "n", false, "Include resources from tool-native directories (.cursor/, .codex/, etc.)")
@@ -280,6 +281,85 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// List plugins (only with --native flag since they're tool-native)
+	if listNative && (listType == "" || listType == "plugins") {
+		var plugins []*discovery.Plugin
+
+		// Load global plugins
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if globalPlugins, err := discovery.LoadClaudePlugins(); err == nil {
+				plugins = append(plugins, globalPlugins...)
+			}
+		}
+
+		// Load local plugins
+		if scope == config.ScopeAll || scope == config.ScopeLocal {
+			cwd, _ := os.Getwd()
+			if localPlugins, err := discovery.LoadClaudeProjectPlugins(cwd); err == nil {
+				plugins = append(plugins, localPlugins...)
+			}
+		}
+
+		if len(plugins) > 0 {
+			if hasOutput {
+				fmt.Println()
+			}
+			fmt.Println("Plugins:")
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  NAME\tSCOPE\tVERSION\tSTATUS")
+			for _, p := range plugins {
+				scopeIndicator := scopeToIndicator(p.Scope)
+				status := "enabled"
+				if !p.Enabled {
+					status = "disabled"
+				}
+				fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", p.Name, scopeIndicator, p.Version, status)
+			}
+			w.Flush()
+			hasOutput = true
+		}
+	}
+
+	// List agents (only with --native flag since they're tool-native)
+	if listNative && (listType == "" || listType == "agents") {
+		var agents []*agent.Agent
+
+		cwd, _ := os.Getwd()
+
+		// Discover local agents
+		if scope == config.ScopeAll || scope == config.ScopeLocal {
+			if localAgents := discovery.DiscoverAgents(cwd); len(localAgents) > 0 {
+				agents = append(agents, localAgents...)
+			}
+		}
+
+		// Discover global agents
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if globalAgents := discovery.DiscoverGlobalAgents(); len(globalAgents) > 0 {
+				agents = append(agents, globalAgents...)
+			}
+		}
+
+		if len(agents) > 0 {
+			if hasOutput {
+				fmt.Println()
+			}
+			fmt.Println("Agents:")
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  NAME\tSCOPE\tTOOL\tDESCRIPTION")
+			for _, a := range agents {
+				scopeIndicator := scopeToIndicator(a.Scope)
+				desc := a.Description
+				if len(desc) > 40 {
+					desc = desc[:37] + "..."
+				}
+				fmt.Fprintf(w, "  %s\t%s\t[%s]\t%s\n", a.Name, scopeIndicator, a.Tool, desc)
+			}
+			w.Flush()
+			hasOutput = true
+		}
+	}
+
 	if !hasOutput {
 		fmt.Println("No resources installed.")
 		fmt.Println("\nGet started:")
@@ -423,6 +503,87 @@ func runListJSON(cfg *config.Config, scope config.Scope, includeNative bool) err
 						Scope:       res.Scope,
 						Tool:        res.Tool,
 						Description: desc,
+					})
+				}
+			}
+		}
+	}
+
+	// Get plugins (only with --native flag)
+	if includeNative && (listType == "" || listType == "plugins") {
+		// Load global plugins
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if globalPlugins, err := discovery.LoadClaudePlugins(); err == nil {
+				for _, p := range globalPlugins {
+					status := "enabled"
+					if !p.Enabled {
+						status = "disabled"
+					}
+					listOutput.Plugins = append(listOutput.Plugins, output.PluginInfo{
+						Name:    p.Name,
+						Scope:   p.Scope,
+						Tool:    p.Tool,
+						Version: p.Version,
+						Status:  status,
+						Path:    p.Path,
+					})
+				}
+			}
+		}
+
+		// Load local plugins
+		if scope == config.ScopeAll || scope == config.ScopeLocal {
+			cwd, _ := os.Getwd()
+			if localPlugins, err := discovery.LoadClaudeProjectPlugins(cwd); err == nil {
+				for _, p := range localPlugins {
+					status := "enabled"
+					if !p.Enabled {
+						status = "disabled"
+					}
+					listOutput.Plugins = append(listOutput.Plugins, output.PluginInfo{
+						Name:    p.Name,
+						Scope:   p.Scope,
+						Tool:    p.Tool,
+						Version: p.Version,
+						Status:  status,
+						Path:    p.Path,
+					})
+				}
+			}
+		}
+	}
+
+	// Get agents (only with --native flag)
+	if includeNative && (listType == "" || listType == "agents") {
+		cwd, _ := os.Getwd()
+
+		// Discover local agents
+		if scope == config.ScopeAll || scope == config.ScopeLocal {
+			if localAgents := discovery.DiscoverAgents(cwd); len(localAgents) > 0 {
+				for _, a := range localAgents {
+					listOutput.Agents = append(listOutput.Agents, output.AgentInfo{
+						Name:        a.Name,
+						Scope:       a.Scope,
+						Tool:        a.Tool,
+						Description: a.Description,
+						Model:       a.Model,
+						Path:        a.Path,
+					})
+				}
+			}
+		}
+
+		// Discover global agents
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if globalAgents := discovery.DiscoverGlobalAgents(); len(globalAgents) > 0 {
+				for _, a := range globalAgents {
+					listOutput.Agents = append(listOutput.Agents, output.AgentInfo{
+						Name:        a.Name,
+						Scope:       a.Scope,
+						Tool:        a.Tool,
+						Description: a.Description,
+						Model:       a.Model,
+						Path:        a.Path,
 					})
 				}
 			}

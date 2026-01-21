@@ -1,5 +1,5 @@
  agentctl   Servers       Commands       Rules      [Skills]      Hooks         
- Tools   2 skills                                                               
+ Tools       Agents   2 skills                                                  
 ────────────────────────────────────────────────────────────────────────────────
    ⚡ [G] code-review v1.0.0 (2 cmds)         Multi-step code review workflow   
    ⚡ [L] testing v1.0.0                        Test generation and execution   

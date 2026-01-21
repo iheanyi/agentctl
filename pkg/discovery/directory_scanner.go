@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/iheanyi/agentctl/pkg/agent"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/hook"
 	"github.com/iheanyi/agentctl/pkg/mcp"
@@ -24,6 +25,7 @@ type ScannerConfig struct {
 	RulesDirs    []string // Subdirs containing rules (e.g., ["rules"])
 	SkillsDirs   []string // Subdirs containing skills
 	CommandsDirs []string // Subdirs containing commands
+	AgentsDirs   []string // Subdirs containing agents (e.g., ["agents"])
 	FileExts     []string // Allowed file extensions (default: [".md", ".mdc"])
 }
 
@@ -172,6 +174,53 @@ func (s *DirectoryScanner) ScanServers(dir string) ([]*mcp.Server, error) {
 	// DirectoryScanner doesn't scan servers by default - servers are typically
 	// in JSON config files which are tool-specific
 	return nil, nil
+}
+
+// ScanAgents discovers agents from the tool's local agents directory
+func (s *DirectoryScanner) ScanAgents(dir string) ([]*agent.Agent, error) {
+	var agents []*agent.Agent
+
+	for _, localDir := range s.cfg.LocalDirs {
+		for _, agentsDir := range s.cfg.AgentsDirs {
+			fullPath := filepath.Join(dir, localDir, agentsDir)
+			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+				continue
+			}
+
+			loadedAgents, err := agent.LoadFromDirectory(fullPath, "local", s.cfg.Name)
+			if err != nil {
+				continue
+			}
+
+			agents = append(agents, loadedAgents...)
+		}
+	}
+
+	return agents, nil
+}
+
+// ScanGlobalAgents discovers agents from the tool's global agents directory
+func (s *DirectoryScanner) ScanGlobalAgents() ([]*agent.Agent, error) {
+	var agents []*agent.Agent
+
+	for _, globalDir := range s.cfg.GlobalDirs {
+		expandedDir := expandHomeDir(globalDir)
+		for _, agentsDir := range s.cfg.AgentsDirs {
+			fullPath := filepath.Join(expandedDir, agentsDir)
+			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+				continue
+			}
+
+			loadedAgents, err := agent.LoadFromDirectory(fullPath, "global", s.cfg.Name)
+			if err != nil {
+				continue
+			}
+
+			agents = append(agents, loadedAgents...)
+		}
+	}
+
+	return agents, nil
 }
 
 // hasAllowedExtension checks if the filename has an allowed extension

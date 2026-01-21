@@ -64,6 +64,8 @@ type ListOutput struct {
 	Commands    []CommandInfo `json:"commands,omitempty"`
 	Rules       []RuleInfo    `json:"rules,omitempty"`
 	Skills      []SkillInfo   `json:"skills,omitempty"`
+	Plugins     []PluginInfo  `json:"plugins,omitempty"`
+	Agents      []AgentInfo   `json:"agents,omitempty"`
 }
 
 // ServerInfo represents server information in JSON output
@@ -99,6 +101,26 @@ type SkillInfo struct {
 	Scope       string `json:"scope"`
 	Tool        string `json:"tool,omitempty"`
 	Description string `json:"description,omitempty"`
+}
+
+// PluginInfo represents plugin information in JSON output
+type PluginInfo struct {
+	Name    string `json:"name"`
+	Scope   string `json:"scope"`
+	Tool    string `json:"tool"`
+	Version string `json:"version,omitempty"`
+	Status  string `json:"status"`
+	Path    string `json:"path,omitempty"`
+}
+
+// AgentInfo represents agent information in JSON output
+type AgentInfo struct {
+	Name        string `json:"name"`
+	Scope       string `json:"scope"`
+	Tool        string `json:"tool"`
+	Description string `json:"description,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Path        string `json:"path,omitempty"`
 }
 
 // SyncOutput represents the JSON output for the sync command

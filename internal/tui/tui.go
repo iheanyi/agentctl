@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/iheanyi/agentctl/pkg/agent"
 	"github.com/iheanyi/agentctl/pkg/aliases"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
@@ -46,10 +47,11 @@ const (
 	TabSkills
 	TabHooks
 	TabTools
+	TabAgents
 )
 
 // TabNames returns the display names for tabs
-var TabNames = []string{"Servers", "Commands", "Rules", "Skills", "Hooks", "Tools"}
+var TabNames = []string{"Servers", "Commands", "Rules", "Skills", "Hooks", "Tools", "Agents"}
 
 // FilterMode represents the current filter for the server list
 type FilterMode int
@@ -120,7 +122,9 @@ type Model struct {
 	rules         []*rule.Rule
 	skills        []*skill.Skill
 	hooks         []*hook.Hook
-	detectedTools []sync.Adapter // Detected tool adapters
+	agents        []*agent.Agent      // Custom agents/subagents
+	detectedTools []sync.Adapter      // Detected tool adapters
+	plugins       []*discovery.Plugin // Installed Claude plugins
 
 	// Resource CRUD handler
 	resourceCRUD *ResourceCRUD
@@ -627,6 +631,43 @@ func (m *Model) loadAllResources() {
 	sort.Slice(m.detectedTools, func(i, j int) bool {
 		return m.detectedTools[i].Name() < m.detectedTools[j].Name()
 	})
+
+	// Load installed Claude plugins (global and local)
+	m.plugins = nil
+	if globalPlugins, err := discovery.LoadClaudePlugins(); err == nil {
+		m.plugins = append(m.plugins, globalPlugins...)
+	}
+	if projectDir != "" {
+		if localPlugins, err := discovery.LoadClaudeProjectPlugins(projectDir); err == nil {
+			m.plugins = append(m.plugins, localPlugins...)
+		}
+	}
+
+	// Load agents from tool-native directories
+	m.agents = nil
+	seenAgents := make(map[string]bool)
+	if projectDir != "" {
+		if localAgents := discovery.DiscoverAgents(projectDir); len(localAgents) > 0 {
+			for _, a := range localAgents {
+				if a.Path == "" || !seenAgents[a.Path] {
+					m.agents = append(m.agents, a)
+					if a.Path != "" {
+						seenAgents[a.Path] = true
+					}
+				}
+			}
+		}
+	}
+	if globalAgents := discovery.DiscoverGlobalAgents(); len(globalAgents) > 0 {
+		for _, a := range globalAgents {
+			if a.Path == "" || !seenAgents[a.Path] {
+				m.agents = append(m.agents, a)
+				if a.Path != "" {
+					seenAgents[a.Path] = true
+				}
+			}
+		}
+	}
 }
 
 // buildServerList constructs the unified server list from config and aliases
@@ -1324,6 +1365,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.openInspector(m.hooks[m.cursor])
 					return m, nil
 				}
+			case TabTools:
+				// Inspect adapter or plugin based on cursor position
+				if m.cursor >= 0 && m.cursor < len(m.detectedTools) {
+					// Cursor is on an adapter - no inspector for adapters yet
+					return m, nil
+				} else if m.cursor >= len(m.detectedTools) && m.cursor < len(m.detectedTools)+len(m.plugins) {
+					pluginIdx := m.cursor - len(m.detectedTools)
+					m.openInspector(m.plugins[pluginIdx])
+					return m, nil
+				}
+			case TabAgents:
+				agents := m.filteredAgents()
+				if m.cursor >= 0 && m.cursor < len(agents) {
+					m.openInspector(agents[m.cursor])
+					return m, nil
+				}
 			}
 
 		case key.Matches(msg, m.keys.Sync):
@@ -1457,6 +1514,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = TabTools
 			m.cursor = 0
 
+		case key.Matches(msg, m.keys.Tab7):
+			m.activeTab = TabAgents
+			m.cursor = 0
+
 		case key.Matches(msg, m.keys.Import):
 			m.openImportWizard()
 			return m, nil
@@ -1550,6 +1611,8 @@ func (m Model) View() string {
 		sections = append(sections, m.renderHooksList())
 	case TabTools:
 		sections = append(sections, m.renderToolsList())
+	case TabAgents:
+		sections = append(sections, m.renderAgentsList())
 	}
 
 	// Divider
@@ -1621,6 +1684,14 @@ func (m *Model) renderHeader() string {
 			}
 		}
 		countStr = fmt.Sprintf("%d/%d tools detected", detected, len(m.detectedTools))
+		if len(m.plugins) > 0 {
+			countStr += fmt.Sprintf(", %d plugins", len(m.plugins))
+		}
+	case TabAgents:
+		countStr = fmt.Sprintf("%d agents", len(m.filteredAgents()))
+		if m.scopeFilter != ScopeFilterAll {
+			countStr += fmt.Sprintf(" [%s]", ScopeFilterNames[m.scopeFilter])
+		}
 	}
 	counts := HeaderSubtitleStyle.Render(countStr)
 
@@ -2231,7 +2302,7 @@ func (m *Model) renderHookRow(h *hook.Hook, selected bool) string {
 	return row
 }
 
-// renderToolsList renders the detected tools/adapters list
+// renderToolsList renders the detected tools/adapters and plugins list
 func (m *Model) renderToolsList() string {
 	var rows []string
 
@@ -2244,7 +2315,10 @@ func (m *Model) renderToolsList() string {
 		listHeight = 5
 	}
 
-	if len(m.detectedTools) == 0 {
+	// Total items: adapters + plugins
+	totalItems := len(m.detectedTools) + len(m.plugins)
+
+	if totalItems == 0 {
 		emptyMsg := lipgloss.NewStyle().
 			Foreground(colorFgSubtle).
 			Italic(true).
@@ -2256,12 +2330,21 @@ func (m *Model) renderToolsList() string {
 		if m.cursor >= listHeight {
 			startIdx = m.cursor - listHeight + 1
 		}
-		endIdx := min(startIdx+listHeight, len(m.detectedTools))
+		endIdx := min(startIdx+listHeight, totalItems)
 
 		for i := startIdx; i < endIdx; i++ {
-			adapter := m.detectedTools[i]
-			row := m.renderToolRow(adapter, i == m.cursor)
-			rows = append(rows, row)
+			if i < len(m.detectedTools) {
+				// Render adapter
+				adapter := m.detectedTools[i]
+				row := m.renderToolRow(adapter, i == m.cursor)
+				rows = append(rows, row)
+			} else {
+				// Render plugin
+				pluginIdx := i - len(m.detectedTools)
+				plugin := m.plugins[pluginIdx]
+				row := m.renderPluginRow(plugin, i == m.cursor)
+				rows = append(rows, row)
+			}
 		}
 	}
 
@@ -2359,6 +2442,177 @@ func (m *Model) renderToolRow(adapter sync.Adapter, selected bool) string {
 	}
 
 	row := leftPart + strings.Repeat(" ", padding) + desc
+
+	// Apply selection styling
+	if selected {
+		row = ListItemSelectedStyle.Width(m.width).Render(row)
+	} else {
+		row = ListItemNormalStyle.Width(m.width).Render(row)
+	}
+
+	return row
+}
+
+// renderPluginRow renders a single plugin row
+func (m *Model) renderPluginRow(plugin *discovery.Plugin, selected bool) string {
+	// Status icon based on enabled state
+	var icon string
+	var iconStyle lipgloss.Style
+	if plugin.Enabled {
+		icon = StatusInstalled
+		iconStyle = StatusInstalledStyle
+	} else {
+		icon = StatusDisabled
+		iconStyle = StatusDisabledStyle
+	}
+	iconStyled := iconStyle.Render(icon)
+
+	// Plugin name
+	nameStyle := ListItemNameStyle
+	if selected {
+		nameStyle = ListItemNameSelectedStyle
+	}
+	name := nameStyle.Render(plugin.Name)
+
+	// Scope badge
+	scopeBadge := lipgloss.NewStyle().Foreground(colorCyan).Render(fmt.Sprintf(" [%s plugin]", plugin.Scope))
+
+	// Version badge if available
+	versionBadge := ""
+	if plugin.Version != "" {
+		versionBadge = lipgloss.NewStyle().Foreground(colorFgMuted).Render(fmt.Sprintf(" v%s", plugin.Version))
+	}
+
+	// Path (truncated)
+	descStyle := ListItemDescStyle
+	if selected {
+		descStyle = ListItemDescSelectedStyle
+	}
+	pathTrunc := ansi.Truncate(plugin.Path, 40, "...")
+	desc := descStyle.Render(pathTrunc)
+
+	// Build the row
+	leftPart := "  " + iconStyled + " " + name + scopeBadge + versionBadge
+
+	// Calculate padding for right-aligned path
+	leftWidth := lipgloss.Width(leftPart)
+	descWidth := lipgloss.Width(desc)
+	padding := m.width - leftWidth - descWidth - 4
+	if padding < 2 {
+		padding = 2
+	}
+
+	row := leftPart + strings.Repeat(" ", padding) + desc
+
+	// Apply selection styling
+	if selected {
+		row = ListItemSelectedStyle.Width(m.width).Render(row)
+	} else {
+		row = ListItemNormalStyle.Width(m.width).Render(row)
+	}
+
+	return row
+}
+
+// renderAgentsList renders the agents tab list
+func (m *Model) renderAgentsList() string {
+	var rows []string
+
+	// Calculate available height for list
+	listHeight := m.height - 12
+	if m.logExpanded {
+		listHeight = m.height - 8 - m.height/3
+	}
+	if listHeight < 5 {
+		listHeight = 5
+	}
+
+	agents := m.filteredAgents()
+
+	if len(agents) == 0 {
+		emptyMsg := lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Italic(true).
+			Render("No agents found. Create one with 'agentctl new agent <name>'")
+		rows = append(rows, "  "+emptyMsg)
+	} else {
+		// Calculate visible range
+		startIdx := 0
+		if m.cursor >= listHeight {
+			startIdx = m.cursor - listHeight + 1
+		}
+		endIdx := min(startIdx+listHeight, len(agents))
+
+		for i := startIdx; i < endIdx; i++ {
+			row := m.renderAgentRow(agents[i], i == m.cursor)
+			rows = append(rows, row)
+		}
+	}
+
+	// Pad to fill height
+	for len(rows) < listHeight {
+		rows = append(rows, "")
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// renderAgentRow renders a single agent row
+func (m *Model) renderAgentRow(a *agent.Agent, selected bool) string {
+	// Icon based on scope
+	var icon string
+	var iconStyle lipgloss.Style
+	if a.Scope == "local" {
+		icon = StatusInstalled
+		iconStyle = StatusInstalledStyle
+	} else {
+		icon = StatusAvailable
+		iconStyle = StatusAvailableStyle
+	}
+	iconStyled := iconStyle.Render(icon)
+
+	// Agent name
+	nameStyle := ListItemNameStyle
+	if selected {
+		nameStyle = ListItemNameSelectedStyle
+	}
+	name := nameStyle.Render(a.Name)
+
+	// Tool badge
+	toolBadge := lipgloss.NewStyle().Foreground(colorCyan).Render(fmt.Sprintf(" [%s]", a.Tool))
+
+	// Scope badge
+	scopeBadge := lipgloss.NewStyle().Foreground(colorFgMuted).Render(fmt.Sprintf(" (%s)", a.Scope))
+
+	// Model badge if available
+	modelBadge := ""
+	if a.Model != "" {
+		modelBadge = lipgloss.NewStyle().Foreground(colorPink).Render(fmt.Sprintf(" %s", a.Model))
+	}
+
+	// Description (truncated)
+	descStyle := ListItemDescStyle
+	if selected {
+		descStyle = ListItemDescSelectedStyle
+	}
+	desc := a.Description
+	if len(desc) > 40 {
+		desc = ansi.Truncate(desc, 40, "...")
+	}
+	descRendered := descStyle.Render(desc)
+
+	// Build the row
+	leftPart := "  " + iconStyled + " " + name + toolBadge + scopeBadge + modelBadge
+
+	// Calculate padding for right-aligned description
+	leftWidth := lipgloss.Width(leftPart)
+	descWidth := lipgloss.Width(descRendered)
+	padding := m.width - leftWidth - descWidth - 4
+	if padding < 2 {
+		padding = 2
+	}
+
+	row := leftPart + strings.Repeat(" ", padding) + descRendered
 
 	// Apply selection styling
 	if selected {
@@ -4414,7 +4668,9 @@ func (m *Model) currentTabLength() int {
 	case TabHooks:
 		return len(m.filteredHooks())
 	case TabTools:
-		return len(m.detectedTools)
+		return len(m.detectedTools) + len(m.plugins)
+	case TabAgents:
+		return len(m.filteredAgents())
 	}
 	return 0
 }
@@ -4494,6 +4750,24 @@ func (m *Model) filteredHooks() []*hook.Hook {
 			filtered = append(filtered, h)
 		} else if m.scopeFilter == ScopeFilterGlobal && !isLocal {
 			filtered = append(filtered, h)
+		}
+	}
+	return filtered
+}
+
+// filteredAgents returns agents filtered by current scope filter
+func (m *Model) filteredAgents() []*agent.Agent {
+	if m.scopeFilter == ScopeFilterAll {
+		return m.agents
+	}
+	filterScope := "local"
+	if m.scopeFilter == ScopeFilterGlobal {
+		filterScope = "global"
+	}
+	var filtered []*agent.Agent
+	for _, a := range m.agents {
+		if a.Scope == filterScope {
+			filtered = append(filtered, a)
 		}
 	}
 	return filtered

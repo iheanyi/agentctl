@@ -120,8 +120,9 @@ func Load(path string) (*Command, error) {
 
 // MarkdownFrontmatter represents the YAML frontmatter in a markdown command file
 type MarkdownFrontmatter struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
+	Name         string `yaml:"name"`
+	Description  string `yaml:"description"`
+	ArgumentHint string `yaml:"argument-hint"` // Codex-style argument hint
 }
 
 // LoadMarkdown loads a command from a markdown file with YAML frontmatter
@@ -152,10 +153,11 @@ func LoadMarkdown(path string) (*Command, error) {
 	}
 
 	return &Command{
-		Name:        name,
-		Description: fm.Description,
-		Prompt:      strings.TrimSpace(content),
-		Path:        path,
+		Name:         name,
+		Description:  fm.Description,
+		ArgumentHint: fm.ArgumentHint,
+		Prompt:       strings.TrimSpace(content),
+		Path:         path,
 	}, nil
 }
 
