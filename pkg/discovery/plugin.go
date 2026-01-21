@@ -133,3 +133,108 @@ func loadPluginsFromFile(path string, scope string) ([]*Plugin, error) {
 
 	return plugins, nil
 }
+
+// openCodeConfig represents OpenCode's config structure
+type openCodeConfig struct {
+	Plugin []string `json:"plugin"`
+}
+
+// LoadOpenCodePlugins loads plugins from OpenCode's config
+func LoadOpenCodePlugins() ([]*Plugin, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	configPath := filepath.Join(homeDir, ".config", "opencode", "opencode.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var config openCodeConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("parsing opencode config: %w", err)
+	}
+
+	var plugins []*Plugin
+	for _, name := range config.Plugin {
+		// Extract clean name and version from "@scope/name@version" format
+		cleanName := name
+		version := ""
+		if idx := strings.LastIndex(name, "@"); idx > 0 && !strings.HasPrefix(name[idx:], "@") {
+			// Has version suffix like "@latest" or "@1.0.0"
+			cleanName = name[:idx]
+			version = name[idx+1:]
+		}
+
+		plugin := &Plugin{
+			Name:    cleanName,
+			Version: version,
+			Enabled: true,
+			Scope:   "global",
+			Tool:    "opencode",
+		}
+		plugins = append(plugins, plugin)
+	}
+
+	return plugins, nil
+}
+
+// cursorExtension represents an extension in Cursor's extensions.json
+type cursorExtension struct {
+	Identifier struct {
+		ID   string `json:"id"`
+		UUID string `json:"uuid"`
+	} `json:"identifier"`
+	Version  string `json:"version"`
+	Location struct {
+		Path string `json:"path"`
+	} `json:"location"`
+	RelativeLocation string `json:"relativeLocation"`
+	Metadata         struct {
+		InstalledTimestamp   int64  `json:"installedTimestamp"`
+		PublisherDisplayName string `json:"publisherDisplayName"`
+		TargetPlatform       string `json:"targetPlatform"`
+	} `json:"metadata"`
+}
+
+// LoadCursorExtensions loads extensions from Cursor's extensions.json
+func LoadCursorExtensions() ([]*Plugin, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	extensionsPath := filepath.Join(homeDir, ".cursor", "extensions", "extensions.json")
+	data, err := os.ReadFile(extensionsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var extensions []cursorExtension
+	if err := json.Unmarshal(data, &extensions); err != nil {
+		return nil, fmt.Errorf("parsing cursor extensions: %w", err)
+	}
+
+	var plugins []*Plugin
+	for _, ext := range extensions {
+		plugin := &Plugin{
+			Name:    ext.Identifier.ID,
+			Path:    ext.Location.Path,
+			Version: ext.Version,
+			Enabled: true,
+			Scope:   "global",
+			Tool:    "cursor",
+		}
+		plugins = append(plugins, plugin)
+	}
+
+	return plugins, nil
+}

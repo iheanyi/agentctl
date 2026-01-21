@@ -338,17 +338,31 @@ func runList(cmd *cobra.Command, args []string) error {
 	if listNative && (listType == "" || listType == "plugins") {
 		var plugins []*discovery.Plugin
 
-		// Load global plugins
+		// Load global plugins from Claude
 		if scope == config.ScopeAll || scope == config.ScopeGlobal {
 			if globalPlugins, err := discovery.LoadClaudePlugins(); err == nil {
 				plugins = append(plugins, globalPlugins...)
 			}
 		}
 
-		// Load local plugins
+		// Load local plugins from Claude
 		if scope == config.ScopeAll || scope == config.ScopeLocal {
 			if localPlugins, err := discovery.LoadClaudeProjectPlugins(cwd); err == nil {
 				plugins = append(plugins, localPlugins...)
+			}
+		}
+
+		// Load OpenCode plugins (global only)
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if openCodePlugins, err := discovery.LoadOpenCodePlugins(); err == nil {
+				plugins = append(plugins, openCodePlugins...)
+			}
+		}
+
+		// Load Cursor extensions (global only)
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if cursorExtensions, err := discovery.LoadCursorExtensions(); err == nil {
+				plugins = append(plugins, cursorExtensions...)
 			}
 		}
 
@@ -358,14 +372,14 @@ func runList(cmd *cobra.Command, args []string) error {
 			}
 			fmt.Println("Plugins:")
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "  NAME\tSCOPE\tVERSION\tSTATUS")
+			fmt.Fprintln(w, "  NAME\tSCOPE\tTOOL\tVERSION\tSTATUS")
 			for _, p := range plugins {
 				scopeIndicator := scopeToIndicator(p.Scope)
 				status := "enabled"
 				if !p.Enabled {
 					status = "disabled"
 				}
-				fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", p.Name, scopeIndicator, p.Version, status)
+				fmt.Fprintf(w, "  %s\t%s\t[%s]\t%s\t%s\n", p.Name, scopeIndicator, p.Tool, p.Version, status)
 			}
 			w.Flush()
 			hasOutput = true
@@ -597,7 +611,7 @@ func runListJSON(cfg *config.Config, scope config.Scope, nativeResources []*disc
 
 	// Get plugins (only with --native flag)
 	if includeNative && (listType == "" || listType == "plugins") {
-		// Load global plugins
+		// Load global plugins from Claude
 		if scope == config.ScopeAll || scope == config.ScopeGlobal {
 			if globalPlugins, err := discovery.LoadClaudePlugins(); err == nil {
 				for _, p := range globalPlugins {
@@ -617,10 +631,50 @@ func runListJSON(cfg *config.Config, scope config.Scope, nativeResources []*disc
 			}
 		}
 
-		// Load local plugins
+		// Load local plugins from Claude
 		if scope == config.ScopeAll || scope == config.ScopeLocal {
 			if localPlugins, err := discovery.LoadClaudeProjectPlugins(cwd); err == nil {
 				for _, p := range localPlugins {
+					status := "enabled"
+					if !p.Enabled {
+						status = "disabled"
+					}
+					listOutput.Plugins = append(listOutput.Plugins, output.PluginInfo{
+						Name:    p.Name,
+						Scope:   p.Scope,
+						Tool:    p.Tool,
+						Version: p.Version,
+						Status:  status,
+						Path:    p.Path,
+					})
+				}
+			}
+		}
+
+		// Load OpenCode plugins (global only)
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if openCodePlugins, err := discovery.LoadOpenCodePlugins(); err == nil {
+				for _, p := range openCodePlugins {
+					status := "enabled"
+					if !p.Enabled {
+						status = "disabled"
+					}
+					listOutput.Plugins = append(listOutput.Plugins, output.PluginInfo{
+						Name:    p.Name,
+						Scope:   p.Scope,
+						Tool:    p.Tool,
+						Version: p.Version,
+						Status:  status,
+						Path:    p.Path,
+					})
+				}
+			}
+		}
+
+		// Load Cursor extensions (global only)
+		if scope == config.ScopeAll || scope == config.ScopeGlobal {
+			if cursorExtensions, err := discovery.LoadCursorExtensions(); err == nil {
+				for _, p := range cursorExtensions {
 					status := "enabled"
 					if !p.Enabled {
 						status = "disabled"
