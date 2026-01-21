@@ -93,22 +93,22 @@ func (m *InspectorModel) SetSize(width, height int) {
 
 // ScrollUp scrolls the viewport up
 func (m *InspectorModel) ScrollUp() {
-	m.viewport.LineUp(1)
+	m.viewport.ScrollUp(1)
 }
 
 // ScrollDown scrolls the viewport down
 func (m *InspectorModel) ScrollDown() {
-	m.viewport.LineDown(1)
+	m.viewport.ScrollDown(1)
 }
 
 // PageUp scrolls the viewport up by a page
 func (m *InspectorModel) PageUp() {
-	m.viewport.ViewUp()
+	m.viewport.PageUp()
 }
 
 // PageDown scrolls the viewport down by a page
 func (m *InspectorModel) PageDown() {
-	m.viewport.ViewDown()
+	m.viewport.PageDown()
 }
 
 // ScrollToTop scrolls to the top of the content

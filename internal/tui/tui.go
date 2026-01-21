@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -4634,22 +4633,6 @@ func (m *Model) saveServer() tea.Cmd {
 
 		return serverAddedMsg{name: name, scope: string(scope)}
 	}
-}
-
-// Helper function to extract template variables
-func extractTemplateVariables(template string) []string {
-	re := regexp.MustCompile(`\{\{(\w+)\}\}`)
-	matches := re.FindAllStringSubmatch(template, -1)
-
-	seen := make(map[string]bool)
-	var variables []string
-	for _, match := range matches {
-		if len(match) > 1 && !seen[match[1]] {
-			seen[match[1]] = true
-			variables = append(variables, match[1])
-		}
-	}
-	return variables
 }
 
 // Helper functions
