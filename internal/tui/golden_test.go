@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -12,9 +13,9 @@ import (
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/hook"
 	"github.com/iheanyi/agentctl/pkg/mcp"
-	"github.com/iheanyi/agentctl/pkg/prompt"
 	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/skill"
+	"github.com/iheanyi/agentctl/pkg/sync"
 )
 
 // newTestModel creates a Model for testing without loading from disk
@@ -41,11 +42,6 @@ func newTestModel() *Model {
 	ruleEditorContent := textarea.New()
 	ruleEditorContent.Placeholder = "Rule content..."
 	ruleEditorContent.SetHeight(10)
-
-	promptEditorName := textinput.New()
-	promptEditorDesc := textinput.New()
-	promptEditorContent := textarea.New()
-	promptEditorContent.SetHeight(10)
 
 	skillEditorName := textinput.New()
 	skillEditorDesc := textinput.New()
@@ -96,10 +92,6 @@ func newTestModel() *Model {
 		ruleEditorApplies:  ruleEditorApplies,
 		ruleEditorContent:  ruleEditorContent,
 		ruleEditorPriority: 3,
-		// Prompt editor
-		promptEditorName:    promptEditorName,
-		promptEditorDesc:    promptEditorDesc,
-		promptEditorContent: promptEditorContent,
 		// Skill editor
 		skillEditorName:    skillEditorName,
 		skillEditorDesc:    skillEditorDesc,
@@ -359,45 +351,6 @@ func TestGoldenSkillsTabPopulated(t *testing.T) {
 	testdata.AssertGolden(t, "skills_tab_populated", []byte(stripped))
 }
 
-// TestGoldenPromptsTabEmpty tests the prompts tab with no prompts
-func TestGoldenPromptsTabEmpty(t *testing.T) {
-	m := newTestModel()
-	m.activeTab = TabPrompts
-	m.prompts = []*prompt.Prompt{}
-
-	output := m.View()
-	stripped := testdata.StripANSI(output)
-	testdata.AssertGolden(t, "prompts_tab_empty", []byte(stripped))
-}
-
-// TestGoldenPromptsTabPopulated tests the prompts tab with prompts
-func TestGoldenPromptsTabPopulated(t *testing.T) {
-	m := newTestModel()
-	m.activeTab = TabPrompts
-
-	m.prompts = []*prompt.Prompt{
-		{
-			Name:        "expert",
-			Description: "Act as a domain expert",
-			Scope:       "global",
-		},
-		{
-			Name:        "reviewer",
-			Description: "Code review persona",
-			Scope:       "global",
-		},
-		{
-			Name:        "project-persona",
-			Description: "Project-specific persona",
-			Scope:       "local",
-		},
-	}
-
-	output := m.View()
-	stripped := testdata.StripANSI(output)
-	testdata.AssertGolden(t, "prompts_tab_populated", []byte(stripped))
-}
-
 // TestGoldenHooksTabEmpty tests the hooks tab with no hooks
 func TestGoldenHooksTabEmpty(t *testing.T) {
 	m := newTestModel()
@@ -456,18 +409,6 @@ func TestGoldenRuleEditorNew(t *testing.T) {
 	output := m.View()
 	stripped := testdata.StripANSI(output)
 	testdata.AssertGolden(t, "modal_rule_editor_new", []byte(stripped))
-}
-
-// TestGoldenPromptEditorNew tests the prompt editor modal for a new prompt
-func TestGoldenPromptEditorNew(t *testing.T) {
-	m := newTestModel()
-	m.showPromptEditor = true
-	m.promptEditorIsNew = true
-	m.promptEditorFocus = 0
-
-	output := m.View()
-	stripped := testdata.StripANSI(output)
-	testdata.AssertGolden(t, "modal_prompt_editor_new", []byte(stripped))
 }
 
 // TestGoldenSkillEditorNew tests the skill editor modal for a new skill
@@ -616,4 +557,138 @@ func TestGoldenProfilePicker(t *testing.T) {
 	output := m.View()
 	stripped := testdata.StripANSI(output)
 	testdata.AssertGolden(t, "modal_profile_picker", []byte(stripped))
+}
+
+// TestGoldenBackupModalEmpty tests the backup modal with no adapters detected
+func TestGoldenBackupModalEmpty(t *testing.T) {
+	m := newTestModel()
+	m.showBackupModal = true
+	m.backupAdapters = []sync.Adapter{}
+	m.backupCursor = 0
+	m.backupAction = 0 // list
+
+	output := m.View()
+	stripped := testdata.StripANSI(output)
+	testdata.AssertGolden(t, "modal_backup_empty", []byte(stripped))
+}
+
+// TestGoldenBackupModalPopulated tests the backup modal with adapters
+func TestGoldenBackupModalPopulated(t *testing.T) {
+	m := newTestModel()
+	m.showBackupModal = true
+	adapters := sync.All()
+	sort.Slice(adapters, func(i, j int) bool {
+		return adapters[i].Name() < adapters[j].Name()
+	})
+	m.backupAdapters = adapters[:3] // Use first 3 adapters (sorted)
+	m.backupCursor = 0
+	m.backupAction = 0 // list
+
+	output := m.View()
+	stripped := testdata.StripANSI(output)
+	testdata.AssertGolden(t, "modal_backup_populated", []byte(stripped))
+}
+
+// TestGoldenBackupModalWithResult tests the backup modal showing a result
+func TestGoldenBackupModalWithResult(t *testing.T) {
+	m := newTestModel()
+	m.showBackupModal = true
+	adapters := sync.All()
+	sort.Slice(adapters, func(i, j int) bool {
+		return adapters[i].Name() < adapters[j].Name()
+	})
+	m.backupAdapters = adapters[:3]
+	m.backupCursor = 0
+	m.backupAction = 1 // create
+	m.backupResult = "Backup created: claude_settings.json.bak.20260120-153000.json"
+	m.backupResultIsError = false
+
+	output := m.View()
+	stripped := testdata.StripANSI(output)
+	testdata.AssertGolden(t, "modal_backup_with_result", []byte(stripped))
+}
+
+// TestGoldenImportWizardStepTool tests the import wizard at tool selection step
+func TestGoldenImportWizardStepTool(t *testing.T) {
+	m := newTestModel()
+	m.showImportWizard = true
+	m.importWizardStep = 0 // Select tool
+	tools := sync.Detected()
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name() < tools[j].Name()
+	})
+	m.importWizardTools = tools
+	m.importWizardToolCursor = 0
+	m.importWizardResources = map[string]bool{
+		"servers":  true,
+		"commands": true,
+		"rules":    true,
+		"skills":   true,
+	}
+
+	output := m.View()
+	stripped := testdata.StripANSI(output)
+	testdata.AssertGolden(t, "modal_import_wizard_tool", []byte(stripped))
+}
+
+// TestGoldenImportWizardStepResources tests the import wizard at resource selection step
+func TestGoldenImportWizardStepResources(t *testing.T) {
+	m := newTestModel()
+	m.showImportWizard = true
+	m.importWizardStep = 1 // Select resources
+	tools := sync.Detected()
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name() < tools[j].Name()
+	})
+	m.importWizardTools = tools
+	m.importWizardToolCursor = 0
+	m.importWizardResources = map[string]bool{
+		"servers":  true,
+		"commands": false,
+		"rules":    true,
+		"skills":   false,
+	}
+
+	output := m.View()
+	stripped := testdata.StripANSI(output)
+	testdata.AssertGolden(t, "modal_import_wizard_resources", []byte(stripped))
+}
+
+// TestGoldenImportWizardEmpty tests the import wizard with no tools detected
+func TestGoldenImportWizardEmpty(t *testing.T) {
+	m := newTestModel()
+	m.showImportWizard = true
+	m.importWizardStep = 0
+	m.importWizardTools = []sync.Adapter{}
+	m.importWizardToolCursor = 0
+
+	output := m.View()
+	stripped := testdata.StripANSI(output)
+	testdata.AssertGolden(t, "modal_import_wizard_empty", []byte(stripped))
+}
+
+// TestGoldenToolsTabEmpty tests the tools tab with no adapters registered
+func TestGoldenToolsTabEmpty(t *testing.T) {
+	m := newTestModel()
+	m.activeTab = TabTools
+	m.detectedTools = []sync.Adapter{}
+
+	output := m.View()
+	stripped := testdata.StripANSI(output)
+	testdata.AssertGolden(t, "tools_tab_empty", []byte(stripped))
+}
+
+// TestGoldenToolsTabPopulated tests the tools tab with adapters
+func TestGoldenToolsTabPopulated(t *testing.T) {
+	m := newTestModel()
+	m.activeTab = TabTools
+	m.detectedTools = sync.All()
+	// Sort by name for consistent ordering (matches real TUI behavior)
+	sort.Slice(m.detectedTools, func(i, j int) bool {
+		return m.detectedTools[i].Name() < m.detectedTools[j].Name()
+	})
+
+	output := m.View()
+	stripped := testdata.StripANSI(output)
+	testdata.AssertGolden(t, "tools_tab_populated", []byte(stripped))
 }

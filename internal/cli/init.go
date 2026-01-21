@@ -88,7 +88,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 		Servers:   make(map[string]*mcp.Server),
 		Commands:  []string{},
 		Rules:     []string{},
-		Prompts:   []string{},
 		Skills:    []string{},
 		Path:      configPath,
 		ConfigDir: configDir,

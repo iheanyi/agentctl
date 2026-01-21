@@ -16,7 +16,6 @@ const (
 	ResourceMCP      ResourceType = "mcp"
 	ResourceCommands ResourceType = "commands"
 	ResourceRules    ResourceType = "rules"
-	ResourcePrompts  ResourceType = "prompts"
 	ResourceSkills   ResourceType = "skills"
 )
 

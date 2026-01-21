@@ -63,7 +63,6 @@ type ListOutput struct {
 	Servers     []ServerInfo  `json:"servers,omitempty"`
 	Commands    []CommandInfo `json:"commands,omitempty"`
 	Rules       []RuleInfo    `json:"rules,omitempty"`
-	Prompts     []PromptInfo  `json:"prompts,omitempty"`
 	Skills      []SkillInfo   `json:"skills,omitempty"`
 }
 
@@ -82,27 +81,23 @@ type ServerInfo struct {
 type CommandInfo struct {
 	Name        string `json:"name"`
 	Scope       string `json:"scope"`
+	Tool        string `json:"tool,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 
 // RuleInfo represents rule information in JSON output
 type RuleInfo struct {
-	Name  string `json:"name"`
-	Scope string `json:"scope"`
-	Path  string `json:"path,omitempty"`
-}
-
-// PromptInfo represents prompt information in JSON output
-type PromptInfo struct {
-	Name        string `json:"name"`
-	Scope       string `json:"scope"`
-	Description string `json:"description,omitempty"`
+	Name   string `json:"name"`
+	Scope  string `json:"scope"`
+	Tool   string `json:"tool,omitempty"`
+	Path   string `json:"path,omitempty"`
 }
 
 // SkillInfo represents skill information in JSON output
 type SkillInfo struct {
 	Name        string `json:"name"`
 	Scope       string `json:"scope"`
+	Tool        string `json:"tool,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 

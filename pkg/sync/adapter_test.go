@@ -307,9 +307,6 @@ func TestResourceTypeConstants(t *testing.T) {
 	if ResourceRules != "rules" {
 		t.Errorf("ResourceRules should be 'rules', got %q", ResourceRules)
 	}
-	if ResourcePrompts != "prompts" {
-		t.Errorf("ResourcePrompts should be 'prompts', got %q", ResourcePrompts)
-	}
 	if ResourceSkills != "skills" {
 		t.Errorf("ResourceSkills should be 'skills', got %q", ResourceSkills)
 	}

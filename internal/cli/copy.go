@@ -10,7 +10,6 @@ import (
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/output"
-	"github.com/iheanyi/agentctl/pkg/prompt"
 	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/skill"
 )
@@ -27,7 +26,7 @@ This allows you to:
 Examples:
   agentctl copy command my-cmd --to local    # Copy global command to project
   agentctl copy rule my-rule --to global     # Copy local rule to global
-  agentctl copy prompt my-prompt --to local  # Copy global prompt to project`,
+  agentctl copy skill my-skill --to local    # Copy global skill to project`,
 }
 
 var copyTo string
@@ -46,13 +45,6 @@ var copyRuleCmd = &cobra.Command{
 	RunE:  runCopyRule,
 }
 
-var copyPromptCmd = &cobra.Command{
-	Use:   "prompt <name> --to <scope>",
-	Short: "Copy a prompt between global and local scopes",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runCopyPrompt,
-}
-
 var copySkillCmd = &cobra.Command{
 	Use:   "skill <name> --to <scope>",
 	Short: "Copy a skill between global and local scopes",
@@ -68,16 +60,12 @@ func init() {
 	copyRuleCmd.Flags().StringVar(&copyTo, "to", "", "Target scope: local or global (required)")
 	copyRuleCmd.MarkFlagRequired("to")
 
-	copyPromptCmd.Flags().StringVar(&copyTo, "to", "", "Target scope: local or global (required)")
-	copyPromptCmd.MarkFlagRequired("to")
-
 	copySkillCmd.Flags().StringVar(&copyTo, "to", "", "Target scope: local or global (required)")
 	copySkillCmd.MarkFlagRequired("to")
 
 	// Add subcommands
 	copyCmd.AddCommand(copyCommandCmd)
 	copyCmd.AddCommand(copyRuleCmd)
-	copyCmd.AddCommand(copyPromptCmd)
 	copyCmd.AddCommand(copySkillCmd)
 
 	// Register with root
@@ -143,7 +131,7 @@ func runCopyCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Copy the file
-	if err := copyFile(foundCmd.SourcePath, targetPath); err != nil {
+	if err := copyFile(foundCmd.Path, targetPath); err != nil {
 		return fmt.Errorf("failed to copy command: %w", err)
 	}
 
@@ -156,7 +144,7 @@ func runCopyCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	out.Success("Copied command %q from %s to %s", name, fromIndicator, toIndicator)
-	out.Info("Source: %s", foundCmd.SourcePath)
+	out.Info("Source: %s", foundCmd.Path)
 	out.Info("Target: %s", targetPath)
 	out.Println("")
 	out.Println("The copied command is independent - changes to one won't affect the other.")
@@ -240,86 +228,6 @@ func runCopyRule(cmd *cobra.Command, args []string) error {
 	out.Info("Target: %s", targetPath)
 	out.Println("")
 	out.Println("The copied rule is independent - changes to one won't affect the other.")
-
-	return nil
-}
-
-// runCopyPrompt copies a prompt between global and local scopes
-func runCopyPrompt(cmd *cobra.Command, args []string) error {
-	out := output.DefaultWriter()
-	name := args[0]
-
-	// Validate target scope
-	targetScope, err := config.ParseScope(copyTo)
-	if err != nil {
-		return fmt.Errorf("invalid --to value: %s (must be 'local' or 'global')", copyTo)
-	}
-
-	// Load config
-	cfg, err := config.LoadWithProject()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Check if we're in a project for local scope
-	if targetScope == config.ScopeLocal && cfg.ProjectPath == "" {
-		return fmt.Errorf("cannot copy to local scope: not in a project (no .agentctl.json found)")
-	}
-
-	// Find the prompt
-	var foundPrompt *prompt.Prompt
-	for _, p := range cfg.PromptsForScope(config.ScopeAll) {
-		if p.Name == name {
-			foundPrompt = p
-			break
-		}
-	}
-	if foundPrompt == nil {
-		return fmt.Errorf("prompt %q not found", name)
-	}
-
-	// Check if prompt is already in target scope
-	if foundPrompt.Scope == string(targetScope) {
-		return fmt.Errorf("prompt %q is already in %s scope", name, targetScope)
-	}
-
-	// Determine target path
-	var targetDir string
-	if targetScope == config.ScopeLocal {
-		targetDir = filepath.Join(filepath.Dir(cfg.ProjectPath), ".agentctl", "prompts")
-	} else {
-		targetDir = filepath.Join(cfg.ConfigDir, "prompts")
-	}
-	targetPath := filepath.Join(targetDir, name+".json")
-
-	// Check if prompt already exists in target
-	if _, err := os.Stat(targetPath); err == nil {
-		return fmt.Errorf("prompt %q already exists in %s scope at %s", name, targetScope, targetPath)
-	}
-
-	// Ensure target directory exists
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("failed to create target directory: %w", err)
-	}
-
-	// Copy the file
-	if err := copyFile(foundPrompt.SourcePath, targetPath); err != nil {
-		return fmt.Errorf("failed to copy prompt: %w", err)
-	}
-
-	// Show result
-	fromIndicator := "[G]"
-	toIndicator := "[L]"
-	if foundPrompt.Scope == "local" {
-		fromIndicator = "[L]"
-		toIndicator = "[G]"
-	}
-
-	out.Success("Copied prompt %q from %s to %s", name, fromIndicator, toIndicator)
-	out.Info("Source: %s", foundPrompt.SourcePath)
-	out.Info("Target: %s", targetPath)
-	out.Println("")
-	out.Println("The copied prompt is independent - changes to one won't affect the other.")
 
 	return nil
 }

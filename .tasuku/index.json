@@ -144,14 +144,14 @@
       "updated_at": "2026-01-20T16:46:22.7417Z"
     },
     "audit-opencode-adapter-against-l": {
-      "status": "ready",
+      "status": "in_progress",
       "priority": 1,
       "tags": [
         "audit",
         "opencode"
       ],
       "file": "tasks/audit-opencode-adapter-against-l.md",
-      "updated_at": "2026-01-20T16:46:23.003054Z"
+      "updated_at": "2026-01-21T03:22:41.404825Z"
     },
     "audit-opencode-adapter-uses-diff": {
       "status": "ready",
@@ -373,6 +373,16 @@
       ],
       "file": "tasks/fix-claude-adapter-to-support-cl.md",
       "updated_at": "2026-01-20T16:49:36.079885Z"
+    },
+    "implement-agents-syncing-feature": {
+      "status": "ready",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "research"
+      ],
+      "file": "tasks/implement-agents-syncing-feature.md",
+      "updated_at": "2026-01-21T05:20:27.230761Z"
     },
     "implement-claudemd-global-instru": {
       "status": "blocked",
@@ -601,5 +611,5 @@
   "archived_count": 0,
   "learnings_count": 7,
   "decisions_count": 1,
-  "updated_at": "2026-01-21T01:16:13.312606Z"
+  "updated_at": "2026-01-21T05:20:27.23141Z"
 }

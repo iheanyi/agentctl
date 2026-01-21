@@ -1,5 +1,5 @@
- agentctl   Servers       Commands      [Rules]      Skills       Prompts       
- Hooks       Tools   3 rules                                                    
+ agentctl   Servers       Commands      [Rules]      Skills       Hooks         
+ Tools   3 rules                                                                
 ────────────────────────────────────────────────────────────────────────────────
    📜 [G] go-style                                 Go coding style guidelines   
    📜 [G] typescript                                TypeScript best practices   

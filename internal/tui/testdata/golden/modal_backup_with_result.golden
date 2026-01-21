@@ -1,0 +1,25 @@
+         ╭────────────────────────────────────────────────────────────╮         
+         │                                                            │         
+         │  Backup Management                                         │         
+         │                                                            │         
+         │                                                            │         
+         │  Detected Tools:                                           │         
+         │  > claude                                                  │         
+         │    claude-desktop                                          │         
+         │    cline                                                   │         
+         │                                                            │         
+         │  Action: ╭──────────╮                                      │         
+         │  │   List   │                                              │         
+         │  ╰──────────╯ ╭────────────╮                               │         
+         │  │  [Create]  │                                            │         
+         │  ╰────────────╯ ╭─────────────╮                            │         
+         │  │   Restore   │                                           │         
+         │  ╰─────────────╯                                           │         
+         │                                                            │         
+         │  Backup created: claude_settings.json.bak.20260120-        │         
+         │  153000.json                                               │         
+         │                                                            │         
+         │  j/k select tool | Tab/arrow cycle action | Enter execute  │         
+         │  | Esc close                                               │         
+         │                                                            │         
+         ╰────────────────────────────────────────────────────────────╯         

@@ -24,11 +24,12 @@ import (
 	"github.com/iheanyi/agentctl/pkg/aliases"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
+	"github.com/iheanyi/agentctl/pkg/discovery"
 	"github.com/iheanyi/agentctl/pkg/hook"
+	"github.com/iheanyi/agentctl/pkg/inspectable"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/mcpclient"
 	"github.com/iheanyi/agentctl/pkg/profile"
-	"github.com/iheanyi/agentctl/pkg/prompt"
 	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/secrets"
 	"github.com/iheanyi/agentctl/pkg/skill"
@@ -43,13 +44,12 @@ const (
 	TabCommands
 	TabRules
 	TabSkills
-	TabPrompts
 	TabHooks
 	TabTools
 )
 
 // TabNames returns the display names for tabs
-var TabNames = []string{"Servers", "Commands", "Rules", "Skills", "Prompts", "Hooks", "Tools"}
+var TabNames = []string{"Servers", "Commands", "Rules", "Skills", "Hooks", "Tools"}
 
 // FilterMode represents the current filter for the server list
 type FilterMode int
@@ -63,6 +63,18 @@ const (
 
 // FilterModeNames returns the display names for filter modes
 var FilterModeNames = []string{"All", "Installed", "Available", "Disabled"}
+
+// ScopeFilter represents the scope filter for resources
+type ScopeFilter int
+
+const (
+	ScopeFilterAll ScopeFilter = iota
+	ScopeFilterLocal
+	ScopeFilterGlobal
+)
+
+// ScopeFilterNames returns the display names for scope filters
+var ScopeFilterNames = []string{"All", "Local", "Global"}
 
 // LogEntry represents a single log entry in the log panel
 type LogEntry struct {
@@ -107,7 +119,6 @@ type Model struct {
 	commands      []*command.Command
 	rules         []*rule.Rule
 	skills        []*skill.Skill
-	prompts       []*prompt.Prompt
 	hooks         []*hook.Hook
 	detectedTools []sync.Adapter // Detected tool adapters
 
@@ -120,6 +131,7 @@ type Model struct {
 	// State
 	cursor      int
 	filterMode  FilterMode
+	scopeFilter ScopeFilter // Filter by local/global scope
 	searchInput textinput.Model
 	searching   bool
 	profile     string // Current profile name
@@ -162,21 +174,11 @@ type Model struct {
 
 	// Confirm delete modal
 	showConfirmDelete      bool
-	confirmDeleteType      string // "server", "command", "rule", "skill", "prompt", "skill_command"
+	confirmDeleteType      string // "server", "command", "rule", "skill", "skill_command"
 	confirmDeleteName      string
 	confirmDeleteConfirmed bool
 	confirmDeleteSkill     *skill.Skill   // Parent skill when deleting a skill command
 	confirmDeleteCmd       *skill.Command // Command to delete (for skill_command type)
-
-	// Prompt editor modal
-	showPromptEditor    bool
-	promptEditorIsNew   bool
-	promptEditorPrompt  *prompt.Prompt
-	promptEditorName    textinput.Model
-	promptEditorDesc    textinput.Model
-	promptEditorContent textarea.Model
-	promptEditorScope   int // 0=global, 1=local (only shown when in project)
-	promptEditorFocus   int // 0=name, 1=desc, 2=content, 3=scope (when in project)
 
 	// Skill editor modal
 	showSkillEditor    bool
@@ -257,6 +259,10 @@ type Model struct {
 	importWizardImporting  bool            // Currently importing
 	importWizardResult     *importResult   // Result of import operation
 
+	// Inspector modal (read-only view of resource details)
+	showInspector bool
+	inspector     InspectorModel
+
 	// Keys
 	keys keyMap
 }
@@ -306,25 +312,6 @@ func New() (*Model, error) {
 	ruleEditorContent.SetWidth(60)
 	ruleEditorContent.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ruleEditorContent.BlurredStyle.CursorLine = lipgloss.NewStyle()
-
-	// Prompt editor inputs
-	promptEditorName := textinput.New()
-	promptEditorName.Placeholder = "my-prompt"
-	promptEditorName.Prompt = ""
-	promptEditorName.CharLimit = 50
-
-	promptEditorDesc := textinput.New()
-	promptEditorDesc.Placeholder = "Description of this prompt"
-	promptEditorDesc.Prompt = ""
-	promptEditorDesc.CharLimit = 200
-
-	promptEditorContent := textarea.New()
-	promptEditorContent.Placeholder = "You are a {{role}} expert.\n\nAnalyze: {{input}}"
-	promptEditorContent.ShowLineNumbers = false
-	promptEditorContent.SetHeight(10)
-	promptEditorContent.SetWidth(60)
-	promptEditorContent.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	promptEditorContent.BlurredStyle.CursorLine = lipgloss.NewStyle()
 
 	// Skill editor inputs
 	skillEditorName := textinput.New()
@@ -462,10 +449,6 @@ func New() (*Model, error) {
 		ruleEditorApplies:  ruleEditorApplies,
 		ruleEditorContent:  ruleEditorContent,
 		ruleEditorPriority: 3,
-		// Prompt editor
-		promptEditorName:    promptEditorName,
-		promptEditorDesc:    promptEditorDesc,
-		promptEditorContent: promptEditorContent,
 		// Skill editor
 		skillEditorName:    skillEditorName,
 		skillEditorDesc:    skillEditorDesc,
@@ -517,26 +500,125 @@ func New() (*Model, error) {
 	return m, nil
 }
 
-// loadAllResources loads commands, rules, skills, and prompts from config
+// loadAllResources loads commands, rules, and skills from config
 // This reloads from disk to reflect any changes made during the session
 func (m *Model) loadAllResources() {
 	// Reload resources from disk to pick up any changes
 	_ = m.cfg.ReloadResources()
 
-	// Load commands from config (includes both global and local)
+	// Determine project directory - use cwd as fallback for tool-native configs
+	projectDir := m.cfg.ProjectDir()
+	if projectDir == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			projectDir = cwd
+		}
+	}
+
+	// Load commands from config (agentctl directories)
 	m.commands = m.cfg.CommandsForScope(config.ScopeAll)
 
-	// Load rules from config (includes both global and local)
+	// Load rules from config (agentctl directories)
 	m.rules = m.cfg.RulesForScope(config.ScopeAll)
 
-	// Load skills from config (includes both global and local)
+	// Load skills from config (agentctl directories)
 	m.skills = m.cfg.SkillsForScope(config.ScopeAll)
 
-	// Load prompts from config (includes both global and local)
-	m.prompts = m.cfg.PromptsForScope(config.ScopeAll)
+	// Build deduplication sets based on file path
+	seenRules := make(map[string]bool)
+	seenSkills := make(map[string]bool)
+	seenCommands := make(map[string]bool)
 
-	// Load hooks (from all supported tools)
-	if hooks, err := hook.LoadAll(); err == nil {
+	// Mark existing resources as seen
+	for _, r := range m.rules {
+		if r.Path != "" {
+			seenRules[r.Path] = true
+		}
+	}
+	for _, s := range m.skills {
+		if s.Path != "" {
+			seenSkills[s.Path] = true
+		}
+	}
+	for _, c := range m.commands {
+		if c.Path != "" {
+			seenCommands[c.Path] = true
+		}
+	}
+
+	// Discover resources from tool-native directories (.claude/, .gemini/, etc.)
+	// This merges with resources loaded from agentctl directories, deduplicating by path
+	if projectDir != "" {
+		// Discover local resources from tool directories
+		localResources := discovery.DiscoverAll(projectDir)
+		for _, res := range localResources {
+			switch res.Type {
+			case "rule":
+				if r, ok := res.Resource.(*rule.Rule); ok {
+					if r.Path == "" || !seenRules[r.Path] {
+						m.rules = append(m.rules, r)
+						if r.Path != "" {
+							seenRules[r.Path] = true
+						}
+					}
+				}
+			case "skill":
+				if s, ok := res.Resource.(*skill.Skill); ok {
+					if s.Path == "" || !seenSkills[s.Path] {
+						m.skills = append(m.skills, s)
+						if s.Path != "" {
+							seenSkills[s.Path] = true
+						}
+					}
+				}
+			case "command":
+				if c, ok := res.Resource.(*command.Command); ok {
+					if c.Path == "" || !seenCommands[c.Path] {
+						m.commands = append(m.commands, c)
+						if c.Path != "" {
+							seenCommands[c.Path] = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Discover global resources from tool directories (~/.claude/, ~/.gemini/, etc.)
+	globalResources := discovery.DiscoverGlobal()
+	for _, res := range globalResources {
+		switch res.Type {
+		case "rule":
+			if r, ok := res.Resource.(*rule.Rule); ok {
+				if r.Path == "" || !seenRules[r.Path] {
+					m.rules = append(m.rules, r)
+					if r.Path != "" {
+						seenRules[r.Path] = true
+					}
+				}
+			}
+		case "skill":
+			if s, ok := res.Resource.(*skill.Skill); ok {
+				if s.Path == "" || !seenSkills[s.Path] {
+					m.skills = append(m.skills, s)
+					if s.Path != "" {
+						seenSkills[s.Path] = true
+					}
+				}
+			}
+		case "command":
+			if c, ok := res.Resource.(*command.Command); ok {
+				if c.Path == "" || !seenCommands[c.Path] {
+					m.commands = append(m.commands, c)
+					if c.Path != "" {
+						seenCommands[c.Path] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Load hooks (from all supported tools, including project-local)
+	if hooks, err := hook.LoadAllWithProject(projectDir); err == nil {
 		m.hooks = hooks
 	}
 
@@ -812,8 +894,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.resourceType {
 			case "rule":
 				m.showRuleEditor = false
-			case "prompt":
-				m.showPromptEditor = false
 			case "skill":
 				m.showSkillEditor = false
 			case "command":
@@ -831,8 +911,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.resourceType {
 			case "rule":
 				m.showRuleEditor = false
-			case "prompt":
-				m.showPromptEditor = false
 			case "skill":
 				m.showSkillEditor = false
 			case "command":
@@ -1022,11 +1100,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleConfirmDeleteInput(msg)
 		}
 
-		// Handle prompt editor modal
-		if m.showPromptEditor {
-			return m.handlePromptEditorInput(msg)
-		}
-
 		// Handle skill editor modal
 		if m.showSkillEditor {
 			return m.handleSkillEditorInput(msg)
@@ -1065,6 +1138,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle backup modal
 		if m.showBackupModal {
 			return m.handleBackupModalInput(msg)
+		}
+
+		// Handle inspector modal
+		if m.showInspector {
+			return m.handleInspectorInput(msg)
 		}
 
 		switch {
@@ -1154,9 +1232,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case TabSkills:
 				m.openSkillEditor(nil)
 				return m, nil
-			case TabPrompts:
-				m.openPromptEditor(nil)
-				return m, nil
 			}
 
 		case key.Matches(msg, m.keys.Delete):
@@ -1182,12 +1257,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor >= 0 && m.cursor < len(m.skills) {
 					s := m.skills[m.cursor]
 					m.openConfirmDelete("skill", s.Name)
-					return m, nil
-				}
-			case TabPrompts:
-				if m.cursor >= 0 && m.cursor < len(m.prompts) {
-					p := m.prompts[m.cursor]
-					m.openConfirmDelete("prompt", p.Name)
 					return m, nil
 				}
 			}
@@ -1217,12 +1286,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.openSkillEditor(s)
 					return m, nil
 				}
-			case TabPrompts:
-				if m.cursor >= 0 && m.cursor < len(m.prompts) {
-					p := m.prompts[m.cursor]
-					m.openPromptEditor(p)
-					return m, nil
-				}
 			}
 
 		case key.Matches(msg, m.keys.Toggle):
@@ -1231,10 +1294,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if s := m.selectedServer(); s != nil && s.Status != ServerStatusAvailable {
 					return m, m.toggleServer(s.Name)
 				}
+			}
+
+		case key.Matches(msg, m.keys.Inspect):
+			switch m.activeTab {
+			case TabServers:
+				if s := m.selectedServer(); s != nil && s.ServerConfig != nil {
+					m.openInspector(s.ServerConfig)
+					return m, nil
+				}
+			case TabCommands:
+				if m.cursor >= 0 && m.cursor < len(m.commands) {
+					m.openInspector(m.commands[m.cursor])
+					return m, nil
+				}
+			case TabRules:
+				if m.cursor >= 0 && m.cursor < len(m.rules) {
+					m.openInspector(m.rules[m.cursor])
+					return m, nil
+				}
 			case TabSkills:
 				if m.cursor >= 0 && m.cursor < len(m.skills) {
 					s := m.skills[m.cursor]
 					m.openSkillDetail(s)
+					return m, nil
+				}
+			case TabHooks:
+				if m.cursor >= 0 && m.cursor < len(m.hooks) {
+					m.openInspector(m.hooks[m.cursor])
 					return m, nil
 				}
 			}
@@ -1289,6 +1376,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.CycleFilter):
 			m.filterMode = (m.filterMode + 1) % FilterMode(len(FilterModeNames))
 			m.applyFilter()
+
+		case key.Matches(msg, m.keys.CycleScopeFilter):
+			m.scopeFilter = (m.scopeFilter + 1) % ScopeFilter(len(ScopeFilterNames))
+			m.cursor = 0 // Reset cursor when changing filter
+			m.addLog("info", fmt.Sprintf("Scope filter: %s", ScopeFilterNames[m.scopeFilter]))
 
 		case key.Matches(msg, m.keys.FilterAll):
 			m.filterMode = FilterAll
@@ -1358,14 +1450,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 
 		case key.Matches(msg, m.keys.Tab5):
-			m.activeTab = TabPrompts
-			m.cursor = 0
-
-		case key.Matches(msg, m.keys.Tab6):
 			m.activeTab = TabHooks
 			m.cursor = 0
 
-		case key.Matches(msg, m.keys.Tab7):
+		case key.Matches(msg, m.keys.Tab6):
 			m.activeTab = TabTools
 			m.cursor = 0
 
@@ -1404,10 +1492,6 @@ func (m Model) View() string {
 		return m.renderConfirmDelete()
 	}
 
-	if m.showPromptEditor {
-		return m.renderPromptEditor()
-	}
-
 	if m.showSkillEditor {
 		return m.renderSkillEditor()
 	}
@@ -1440,6 +1524,10 @@ func (m Model) View() string {
 		return m.renderBackupModal()
 	}
 
+	if m.showInspector {
+		return m.renderInspector()
+	}
+
 	var sections []string
 
 	// Header
@@ -1458,8 +1546,6 @@ func (m Model) View() string {
 		sections = append(sections, m.renderRulesList())
 	case TabSkills:
 		sections = append(sections, m.renderSkillsList())
-	case TabPrompts:
-		sections = append(sections, m.renderPromptsList())
 	case TabHooks:
 		sections = append(sections, m.renderHooksList())
 	case TabTools:
@@ -1508,15 +1594,25 @@ func (m *Model) renderHeader() string {
 			StatusDisabledStyle.Render(StatusDisabled), disabled,
 		)
 	case TabCommands:
-		countStr = fmt.Sprintf("%d commands", len(m.commands))
+		countStr = fmt.Sprintf("%d commands", len(m.filteredCommands()))
+		if m.scopeFilter != ScopeFilterAll {
+			countStr += fmt.Sprintf(" [%s]", ScopeFilterNames[m.scopeFilter])
+		}
 	case TabRules:
-		countStr = fmt.Sprintf("%d rules", len(m.rules))
+		countStr = fmt.Sprintf("%d rules", len(m.filteredRules()))
+		if m.scopeFilter != ScopeFilterAll {
+			countStr += fmt.Sprintf(" [%s]", ScopeFilterNames[m.scopeFilter])
+		}
 	case TabSkills:
-		countStr = fmt.Sprintf("%d skills", len(m.skills))
-	case TabPrompts:
-		countStr = fmt.Sprintf("%d prompts", len(m.prompts))
+		countStr = fmt.Sprintf("%d skills", len(m.filteredSkills()))
+		if m.scopeFilter != ScopeFilterAll {
+			countStr += fmt.Sprintf(" [%s]", ScopeFilterNames[m.scopeFilter])
+		}
 	case TabHooks:
-		countStr = fmt.Sprintf("%d hooks", len(m.hooks))
+		countStr = fmt.Sprintf("%d hooks", len(m.filteredHooks()))
+		if m.scopeFilter != ScopeFilterAll {
+			countStr += fmt.Sprintf(" [%s]", ScopeFilterNames[m.scopeFilter])
+		}
 	case TabTools:
 		detected := 0
 		for _, a := range m.detectedTools {
@@ -1710,7 +1806,8 @@ func (m *Model) renderCommandsList() string {
 		listHeight = 5
 	}
 
-	if len(m.commands) == 0 {
+	commands := m.filteredCommands()
+	if len(commands) == 0 {
 		emptyMsg := lipgloss.NewStyle().
 			Foreground(colorFgSubtle).
 			Italic(true).
@@ -1726,10 +1823,10 @@ func (m *Model) renderCommandsList() string {
 		if m.cursor >= listHeight {
 			startIdx = m.cursor - listHeight + 1
 		}
-		endIdx := min(startIdx+listHeight, len(m.commands))
+		endIdx := min(startIdx+listHeight, len(commands))
 
 		for i := startIdx; i < endIdx; i++ {
-			cmd := m.commands[i]
+			cmd := commands[i]
 			row := m.renderCommandRow(cmd, i == m.cursor)
 			rows = append(rows, row)
 		}
@@ -1801,7 +1898,8 @@ func (m *Model) renderRulesList() string {
 		listHeight = 5
 	}
 
-	if len(m.rules) == 0 {
+	rules := m.filteredRules()
+	if len(rules) == 0 {
 		emptyMsg := lipgloss.NewStyle().
 			Foreground(colorFgSubtle).
 			Italic(true).
@@ -1817,10 +1915,10 @@ func (m *Model) renderRulesList() string {
 		if m.cursor >= listHeight {
 			startIdx = m.cursor - listHeight + 1
 		}
-		endIdx := min(startIdx+listHeight, len(m.rules))
+		endIdx := min(startIdx+listHeight, len(rules))
 
 		for i := startIdx; i < endIdx; i++ {
-			r := m.rules[i]
+			r := rules[i]
 			row := m.renderRuleRow(r, i == m.cursor)
 			rows = append(rows, row)
 		}
@@ -1906,7 +2004,8 @@ func (m *Model) renderSkillsList() string {
 		listHeight = 5
 	}
 
-	if len(m.skills) == 0 {
+	skills := m.filteredSkills()
+	if len(skills) == 0 {
 		emptyMsg := lipgloss.NewStyle().
 			Foreground(colorFgSubtle).
 			Italic(true).
@@ -1922,10 +2021,10 @@ func (m *Model) renderSkillsList() string {
 		if m.cursor >= listHeight {
 			startIdx = m.cursor - listHeight + 1
 		}
-		endIdx := min(startIdx+listHeight, len(m.skills))
+		endIdx := min(startIdx+listHeight, len(skills))
 
 		for i := startIdx; i < endIdx; i++ {
-			s := m.skills[i]
+			s := skills[i]
 			row := m.renderSkillRow(s, i == m.cursor)
 			rows = append(rows, row)
 		}
@@ -1976,115 +2075,10 @@ func (m *Model) renderSkillRow(s *skill.Skill, selected bool) string {
 		descStyle = ListItemDescSelectedStyle
 	}
 	descText := s.Description
-	if descText == "" && len(s.Prompts) > 0 {
-		descText = fmt.Sprintf("%d prompts", len(s.Prompts))
-	}
 	desc := descStyle.Render(ansi.Truncate(descText, 35, "..."))
 
 	// Build the row
 	leftPart := "  " + icon + " " + scopeIndicator + " " + name + versionBadge + cmdBadge
-
-	// Calculate padding for right-aligned description
-	leftWidth := lipgloss.Width(leftPart)
-	descWidth := lipgloss.Width(desc)
-	padding := m.width - leftWidth - descWidth - 4
-	if padding < 2 {
-		padding = 2
-	}
-
-	row := leftPart + strings.Repeat(" ", padding) + desc
-
-	// Apply selection styling
-	if selected {
-		row = ListItemSelectedStyle.Width(m.width).Render(row)
-	} else {
-		row = ListItemNormalStyle.Width(m.width).Render(row)
-	}
-
-	return row
-}
-
-// renderPromptsList renders the prompts list
-func (m *Model) renderPromptsList() string {
-	var rows []string
-
-	// Calculate available height for list
-	listHeight := m.height - 12
-	if m.logExpanded {
-		listHeight = m.height - 8 - m.height/3
-	}
-	if listHeight < 5 {
-		listHeight = 5
-	}
-
-	if len(m.prompts) == 0 {
-		emptyMsg := lipgloss.NewStyle().
-			Foreground(colorFgSubtle).
-			Italic(true).
-			Render("No prompts defined")
-		rows = append(rows, "  "+emptyMsg)
-		rows = append(rows, "")
-		rows = append(rows, lipgloss.NewStyle().
-			Foreground(colorFgSubtle).
-			Render("  Create prompts in ~/.config/agentctl/prompts/"))
-	} else {
-		// Calculate visible range
-		startIdx := 0
-		if m.cursor >= listHeight {
-			startIdx = m.cursor - listHeight + 1
-		}
-		endIdx := min(startIdx+listHeight, len(m.prompts))
-
-		for i := startIdx; i < endIdx; i++ {
-			p := m.prompts[i]
-			row := m.renderPromptRow(p, i == m.cursor)
-			rows = append(rows, row)
-		}
-	}
-
-	// Pad to fill height
-	for len(rows) < listHeight {
-		rows = append(rows, "")
-	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
-}
-
-// renderPromptRow renders a single prompt row
-func (m *Model) renderPromptRow(p *prompt.Prompt, selected bool) string {
-	// Icon
-	icon := StatusInstalledStyle.Render("💬")
-
-	// Scope indicator
-	scopeIndicator := RenderScopeIndicator(p.Scope)
-
-	// Prompt name
-	nameStyle := ListItemNameStyle
-	if selected {
-		nameStyle = ListItemNameSelectedStyle
-	}
-	name := nameStyle.Render(p.Name)
-
-	// Variables badge if available
-	varsBadge := ""
-	if len(p.Variables) > 0 {
-		varsBadge = lipgloss.NewStyle().Foreground(colorCyan).Render(fmt.Sprintf(" (%d vars)", len(p.Variables)))
-	}
-
-	// Description
-	descStyle := ListItemDescStyle
-	if selected {
-		descStyle = ListItemDescSelectedStyle
-	}
-	descText := p.Description
-	if descText == "" {
-		// Use truncated template as description
-		descText = ansi.Truncate(strings.ReplaceAll(p.Template, "\n", " "), 40, "...")
-	}
-	desc := descStyle.Render(ansi.Truncate(descText, 40, "..."))
-
-	// Build the row
-	leftPart := "  " + icon + " " + scopeIndicator + " " + name + varsBadge
 
 	// Calculate padding for right-aligned description
 	leftWidth := lipgloss.Width(leftPart)
@@ -2119,16 +2113,33 @@ func (m *Model) renderHooksList() string {
 		listHeight = 5
 	}
 
-	if len(m.hooks) == 0 {
+	hooks := m.filteredHooks()
+	if len(hooks) == 0 {
 		emptyMsg := lipgloss.NewStyle().
 			Foreground(colorFgSubtle).
 			Italic(true).
 			Render("No hooks configured")
 		rows = append(rows, "  "+emptyMsg)
 		rows = append(rows, "")
+		// Show hook config paths for supported tools
 		rows = append(rows, lipgloss.NewStyle().
 			Foreground(colorFgSubtle).
-			Render("  Hooks are configured in ~/.claude/settings.json"))
+			Render("  Claude Code:"))
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Render("    ~/.claude/settings.json"))
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Render("    .claude/settings.json (project)"))
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Render("  Gemini CLI:"))
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Render("    ~/.gemini/settings.json"))
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Render("    .gemini/settings.json (project)"))
 		rows = append(rows, lipgloss.NewStyle().
 			Foreground(colorFgSubtle).
 			Render("  (Read-only view - edit settings.json directly)"))
@@ -2138,10 +2149,10 @@ func (m *Model) renderHooksList() string {
 		if m.cursor >= listHeight {
 			startIdx = m.cursor - listHeight + 1
 		}
-		endIdx := min(startIdx+listHeight, len(m.hooks))
+		endIdx := min(startIdx+listHeight, len(hooks))
 
 		for i := startIdx; i < endIdx; i++ {
-			h := m.hooks[i]
+			h := hooks[i]
 			row := m.renderHookRow(h, i == m.cursor)
 			rows = append(rows, row)
 		}
@@ -2420,7 +2431,7 @@ func (m *Model) renderKeyHints() string {
 			struct{ Key, Desc string }{"x", "tools"},
 			struct{ Key, Desc string }{"s", "sync"},
 		)
-	case TabCommands, TabRules, TabSkills, TabPrompts:
+	case TabCommands, TabRules, TabSkills:
 		hints = append(hints,
 			struct{ Key, Desc string }{"a", "add"},
 			struct{ Key, Desc string }{"e", "edit"},
@@ -2454,7 +2465,7 @@ func (m *Model) renderHelpOverlay() string {
   Tabs                 ────────             q    quit
   ────                 P      switch
   Tab/Shift+Tab  next/prev tab
-  F1-F6          jump to tab (Servers/Commands/Rules/Skills/Prompts/Hooks)
+  F1-F6          jump to tab (Servers/Commands/Rules/Skills/Hooks/Tools)
 
                        Press any key to close
 `
@@ -3076,13 +3087,6 @@ func (m *Model) executeDelete() tea.Cmd {
 					break
 				}
 			}
-		case "prompt":
-			for _, p := range m.prompts {
-				if p.Name == m.confirmDeleteName {
-					err = m.resourceCRUD.DeletePrompt(p)
-					break
-				}
-			}
 		case "skill_command":
 			if m.confirmDeleteSkill != nil && m.confirmDeleteCmd != nil {
 				err = m.confirmDeleteSkill.RemoveCommand(m.confirmDeleteCmd.Name)
@@ -3092,262 +3096,6 @@ func (m *Model) executeDelete() tea.Cmd {
 			}
 		}
 		return resourceDeletedMsg{resourceType: m.confirmDeleteType, name: m.confirmDeleteName, err: err}
-	}
-}
-
-// ============================================================================
-// Prompt Editor Modal
-// ============================================================================
-
-func (m *Model) renderPromptEditor() string {
-	title := "Create Prompt"
-	if !m.promptEditorIsNew {
-		title = "Edit Prompt"
-	}
-
-	var content strings.Builder
-	content.WriteString(ModalTitleStyle.Render(title))
-	content.WriteString("\n\n")
-
-	// Name field
-	nameLabel := "Name:"
-	if m.promptEditorFocus == 0 {
-		nameLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Name:")
-	}
-	content.WriteString(fmt.Sprintf("%s ", nameLabel))
-	if m.promptEditorIsNew {
-		content.WriteString(m.promptEditorName.View())
-	} else {
-		content.WriteString(lipgloss.NewStyle().Faint(true).Render(m.promptEditorName.Value() + " (readonly)"))
-	}
-	content.WriteString("\n\n")
-
-	// Description field
-	descLabel := "Description:"
-	if m.promptEditorFocus == 1 {
-		descLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Description:")
-	}
-	content.WriteString(fmt.Sprintf("%s ", descLabel))
-	content.WriteString(m.promptEditorDesc.View())
-	content.WriteString("\n\n")
-
-	// Content field
-	contentLabel := "Template (use {{var}} for placeholders):"
-	if m.promptEditorFocus == 2 {
-		contentLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Template (use {{var}} for placeholders):")
-	}
-	content.WriteString(contentLabel)
-	content.WriteString("\n")
-	content.WriteString(m.promptEditorContent.View())
-	content.WriteString("\n\n")
-
-	// Scope selector - always shown with icons
-	scopeLabel := "Scope:"
-	if m.promptEditorFocus == 3 && m.hasProjectConfig() {
-		scopeLabel = lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Scope:")
-	}
-	content.WriteString(fmt.Sprintf("%s ", scopeLabel))
-
-	scopeIcons := []string{"🌐", "📁"}
-	scopeLabels := []string{"global", "local (project)"}
-
-	if m.hasProjectConfig() {
-		for i, label := range scopeLabels {
-			icon := scopeIcons[i]
-			if i == m.promptEditorScope {
-				content.WriteString(lipgloss.NewStyle().Background(colorCyan).Foreground(colorBg).Bold(true).Render(" " + icon + " " + label + " "))
-			} else {
-				content.WriteString(lipgloss.NewStyle().Foreground(colorFgMuted).Render(" " + icon + " " + label + " "))
-			}
-		}
-	} else {
-		content.WriteString(lipgloss.NewStyle().Foreground(colorTeal).Render("🌐 global"))
-		content.WriteString(lipgloss.NewStyle().Foreground(colorFgSubtle).Italic(true).Render(" (open a project for local scope)"))
-	}
-	content.WriteString("\n\n")
-
-	helpText := "Tab: next field • ←/→: change scope • Ctrl+S: save • Esc: cancel"
-	content.WriteString(KeyDescStyle.Render(helpText))
-
-	modal := ModalStyle.Width(70).Render(content.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
-}
-
-func (m *Model) handlePromptEditorInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.showPromptEditor = false
-		return m, nil
-	case "tab":
-		m.cyclePromptEditorFocus(1)
-		return m, nil
-	case "shift+tab":
-		m.cyclePromptEditorFocus(-1)
-		return m, nil
-	case "ctrl+s":
-		return m, m.savePrompt()
-	case "left", "h":
-		if m.promptEditorFocus == 3 && m.hasProjectConfig() {
-			m.promptEditorScope = (m.promptEditorScope - 1 + len(scopeNames)) % len(scopeNames)
-			return m, nil
-		}
-	case "right", "l":
-		if m.promptEditorFocus == 3 && m.hasProjectConfig() {
-			m.promptEditorScope = (m.promptEditorScope + 1) % len(scopeNames)
-			return m, nil
-		}
-	}
-
-	// Delegate to focused input
-	var cmd tea.Cmd
-	switch m.promptEditorFocus {
-	case 0:
-		if m.promptEditorIsNew {
-			m.promptEditorName, cmd = m.promptEditorName.Update(msg)
-		}
-	case 1:
-		m.promptEditorDesc, cmd = m.promptEditorDesc.Update(msg)
-	case 2:
-		m.promptEditorContent, cmd = m.promptEditorContent.Update(msg)
-	}
-	return m, cmd
-}
-
-func (m *Model) cyclePromptEditorFocus(delta int) {
-	maxFocus := 2
-	if m.hasProjectConfig() {
-		maxFocus = 3 // Include scope field when in project
-	}
-	if !m.promptEditorIsNew {
-		// Skip name field when editing
-		if m.promptEditorFocus == 1 && delta < 0 {
-			m.promptEditorFocus = maxFocus
-			delta = 0
-		}
-	}
-	m.promptEditorFocus = (m.promptEditorFocus + delta + maxFocus + 1) % (maxFocus + 1)
-	if !m.promptEditorIsNew && m.promptEditorFocus == 0 {
-		m.promptEditorFocus = 1
-	}
-
-	// Update focus state
-	m.promptEditorName.Blur()
-	m.promptEditorDesc.Blur()
-	m.promptEditorContent.Blur()
-
-	switch m.promptEditorFocus {
-	case 0:
-		m.promptEditorName.Focus()
-	case 1:
-		m.promptEditorDesc.Focus()
-	case 2:
-		m.promptEditorContent.Focus()
-	}
-}
-
-func (m *Model) openPromptEditor(p *prompt.Prompt) {
-	m.showPromptEditor = true
-	m.promptEditorIsNew = (p == nil)
-	m.promptEditorPrompt = p
-
-	if p != nil {
-		m.promptEditorName.SetValue(p.Name)
-		m.promptEditorDesc.SetValue(p.Description)
-		m.promptEditorContent.SetValue(p.Template)
-		// Set scope based on existing prompt
-		m.promptEditorScope = scopeIndexGlobal
-		if p.Scope == "local" {
-			m.promptEditorScope = scopeIndexLocal
-		}
-		m.promptEditorFocus = 1
-		m.promptEditorDesc.Focus()
-	} else {
-		m.promptEditorName.SetValue("")
-		m.promptEditorDesc.SetValue("")
-		m.promptEditorContent.SetValue("")
-		m.promptEditorScope = m.defaultScopeIndex()
-		m.promptEditorFocus = 0
-		m.promptEditorName.Focus()
-	}
-	m.promptEditorName.Blur()
-	m.promptEditorDesc.Blur()
-	m.promptEditorContent.Blur()
-
-	if m.promptEditorIsNew {
-		m.promptEditorName.Focus()
-	} else {
-		m.promptEditorDesc.Focus()
-	}
-}
-
-func (m *Model) savePrompt() tea.Cmd {
-	return func() tea.Msg {
-		name := strings.TrimSpace(m.promptEditorName.Value())
-		desc := strings.TrimSpace(m.promptEditorDesc.Value())
-		template := m.promptEditorContent.Value()
-
-		if name == "" {
-			return resourceCreatedMsg{resourceType: "prompt", err: fmt.Errorf("name is required")}
-		}
-		if strings.ContainsAny(name, " \t\n/\\") {
-			return resourceCreatedMsg{resourceType: "prompt", err: fmt.Errorf("name cannot contain spaces or path separators")}
-		}
-
-		// Determine scope and resource directory
-		scope := config.ScopeGlobal
-		resourceDir := m.cfg.ConfigDir
-		if m.promptEditorScope == scopeIndexLocal {
-			scope = config.ScopeLocal
-			// Use project's .agentctl directory for local scope
-			if m.cfg.ProjectPath != "" {
-				resourceDir = filepath.Join(filepath.Dir(m.cfg.ProjectPath), ".agentctl")
-			}
-		}
-
-		promptsDir := filepath.Join(resourceDir, "prompts")
-		if err := os.MkdirAll(promptsDir, 0755); err != nil {
-			return resourceCreatedMsg{resourceType: "prompt", err: err}
-		}
-
-		promptPath := filepath.Join(promptsDir, name+".json")
-
-		if m.promptEditorIsNew {
-			if _, err := os.Stat(promptPath); err == nil {
-				return resourceCreatedMsg{resourceType: "prompt", err: fmt.Errorf("prompt %q already exists", name)}
-			}
-		}
-
-		if desc == "" {
-			desc = "No description"
-		}
-		if template == "" {
-			template = "{{input}}"
-		}
-
-		// Extract variables from template
-		variables := extractTemplateVariables(template)
-
-		p := &prompt.Prompt{
-			Name:        name,
-			Description: desc,
-			Template:    template,
-			Variables:   variables,
-			Scope:       string(scope),
-		}
-
-		data, err := json.MarshalIndent(p, "", "  ")
-		if err != nil {
-			return resourceCreatedMsg{resourceType: "prompt", err: err}
-		}
-
-		if err := os.WriteFile(promptPath, data, 0644); err != nil {
-			return resourceCreatedMsg{resourceType: "prompt", err: err}
-		}
-
-		if m.promptEditorIsNew {
-			return resourceCreatedMsg{resourceType: "prompt", name: name, scope: string(scope)}
-		}
-		return resourceEditedMsg{resourceType: "prompt"}
 	}
 }
 
@@ -3610,6 +3358,12 @@ func (m *Model) openSkillDetail(s *skill.Skill) {
 	m.showSkillDetail = true
 	m.skillDetailSkill = s
 	m.skillDetailCursor = 0
+}
+
+// openInspector opens the inspector modal for the given resource
+func (m *Model) openInspector(resource inspectable.Inspectable) {
+	m.inspector = NewInspector(resource, m.width, m.height)
+	m.showInspector = true
 }
 
 func (m *Model) renderSkillDetail() string {
@@ -4652,15 +4406,13 @@ func (m *Model) currentTabLength() int {
 	case TabServers:
 		return len(m.filteredItems)
 	case TabCommands:
-		return len(m.commands)
+		return len(m.filteredCommands())
 	case TabRules:
-		return len(m.rules)
+		return len(m.filteredRules())
 	case TabSkills:
-		return len(m.skills)
-	case TabPrompts:
-		return len(m.prompts)
+		return len(m.filteredSkills())
 	case TabHooks:
-		return len(m.hooks)
+		return len(m.filteredHooks())
 	case TabTools:
 		return len(m.detectedTools)
 	}
@@ -4673,6 +4425,78 @@ func (m *Model) adjustCursorForCurrentTab() {
 	if m.cursor > maxIndex {
 		m.cursor = max(0, maxIndex)
 	}
+}
+
+// filteredCommands returns commands filtered by current scope filter
+func (m *Model) filteredCommands() []*command.Command {
+	if m.scopeFilter == ScopeFilterAll {
+		return m.commands
+	}
+	filterScope := "local"
+	if m.scopeFilter == ScopeFilterGlobal {
+		filterScope = "global"
+	}
+	var filtered []*command.Command
+	for _, c := range m.commands {
+		if c.Scope == filterScope {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
+// filteredRules returns rules filtered by current scope filter
+func (m *Model) filteredRules() []*rule.Rule {
+	if m.scopeFilter == ScopeFilterAll {
+		return m.rules
+	}
+	filterScope := "local"
+	if m.scopeFilter == ScopeFilterGlobal {
+		filterScope = "global"
+	}
+	var filtered []*rule.Rule
+	for _, r := range m.rules {
+		if r.Scope == filterScope {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
+// filteredSkills returns skills filtered by current scope filter
+func (m *Model) filteredSkills() []*skill.Skill {
+	if m.scopeFilter == ScopeFilterAll {
+		return m.skills
+	}
+	filterScope := "local"
+	if m.scopeFilter == ScopeFilterGlobal {
+		filterScope = "global"
+	}
+	var filtered []*skill.Skill
+	for _, s := range m.skills {
+		if s.Scope == filterScope {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered
+}
+
+// filteredHooks returns hooks filtered by current scope filter
+func (m *Model) filteredHooks() []*hook.Hook {
+	if m.scopeFilter == ScopeFilterAll {
+		return m.hooks
+	}
+	// For hooks, check if Source contains "-local" for local scope
+	var filtered []*hook.Hook
+	for _, h := range m.hooks {
+		isLocal := strings.HasSuffix(h.Source, "-local")
+		if m.scopeFilter == ScopeFilterLocal && isLocal {
+			filtered = append(filtered, h)
+		} else if m.scopeFilter == ScopeFilterGlobal && !isLocal {
+			filtered = append(filtered, h)
+		}
+	}
+	return filtered
 }
 
 func max(a, b int) int {
@@ -5765,4 +5589,70 @@ func formatBytes(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// renderInspector renders the read-only inspector modal for viewing resource details
+func (m *Model) renderInspector() string {
+	var content strings.Builder
+
+	// Title
+	content.WriteString(ModalTitleStyle.Render(m.inspector.Title()))
+	content.WriteString("\n\n")
+
+	// Viewport content
+	content.WriteString(m.inspector.View())
+	content.WriteString("\n\n")
+
+	// Scroll indicator
+	scrollPercent := m.inspector.ScrollPercent()
+	scrollIndicator := fmt.Sprintf("%.0f%%", scrollPercent*100)
+	if m.inspector.AtTop() && m.inspector.AtBottom() {
+		scrollIndicator = "---"
+	}
+	content.WriteString(lipgloss.NewStyle().Foreground(colorFgSubtle).Render(scrollIndicator))
+	content.WriteString("\n\n")
+
+	// Help text
+	helpText := "↑/↓/j/k: scroll • PgUp/PgDn: page • Home/End: top/bottom • Esc/q: close"
+	content.WriteString(KeyDescStyle.Render(helpText))
+
+	// Calculate modal width based on terminal width
+	modalWidth := m.width - 10
+	if modalWidth > 100 {
+		modalWidth = 100
+	}
+	if modalWidth < 50 {
+		modalWidth = 50
+	}
+
+	modal := ModalStyle.Width(modalWidth).Render(content.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+// handleInspectorInput handles keyboard input when the inspector modal is open
+func (m *Model) handleInspectorInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.showInspector = false
+		return m, nil
+	case "up", "k":
+		m.inspector.ScrollUp()
+		return m, nil
+	case "down", "j":
+		m.inspector.ScrollDown()
+		return m, nil
+	case "pgup", "ctrl+u":
+		m.inspector.PageUp()
+		return m, nil
+	case "pgdown", "ctrl+d":
+		m.inspector.PageDown()
+		return m, nil
+	case "home", "g":
+		m.inspector.ScrollToTop()
+		return m, nil
+	case "end", "G":
+		m.inspector.ScrollToBottom()
+		return m, nil
+	}
+	return m, nil
 }

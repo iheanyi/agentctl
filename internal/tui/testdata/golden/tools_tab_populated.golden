@@ -1,0 +1,27 @@
+ agentctl   Servers       Commands       Rules       Skills       Hooks         
+ [Tools]  7/11 tools detected                                                   
+────────────────────────────────────────────────────────────────────────────────
+   ● claude [mcp, commands, rules, skills] (9 servers)                          
+ /Users/iheanyi/.claude/settings.json ✓                                         
+   ● claude-desktop [mcp] (3 servers)  /Users/iheanyi/Library/Application Su... 
+ ✓                                                                              
+   ○ cline [mcp]         /Users/iheanyi/.cline/cline_mcp_setti... (no config)   
+   ● codex [mcp, commands, rules, skills] (2 servers)                           
+ /Users/iheanyi/.codex/config.toml ✓                                            
+   ○ continue [mcp, rules]   /Users/iheanyi/.continue/config.json (no config)   
+   ● copilot [mcp, commands, rules, skills]  /Users/iheanyi/.config/github-     
+ copilot... (no config)                                                         
+   ● cursor [mcp, rules, commands] (8 servers)  /Users/iheanyi/.cursor/mcp.json 
+ ✓                                                                              
+   ● gemini [mcp] (8 servers)            /Users/iheanyi/.gemini/config.json ✓   
+   ● opencode [mcp, commands, rules, skills] (13 servers)                       
+ /Users/iheanyi/.config/opencode/openc... ✓                                     
+   ○ windsurf [mcp, rules]      /Users/iheanyi/.windsurf/mcp.json (no config)   
+   ○ zed [mcp]           /Users/iheanyi/.config/zed/settings.json (no config)   
+                                                                                
+────────────────────────────────────────────────────────────────────────────────
+                                                                                
+                                                                                
+                                                                                
+────────────────────────────────────────────────────────────────────────────────
+ j/k navigate │ Tab switch tab │ / search │ ? help                              

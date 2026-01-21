@@ -11,6 +11,53 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// InspectTitle returns the display name for the inspector modal header
+func (s *Skill) InspectTitle() string {
+	return fmt.Sprintf("Skill: %s", s.Name)
+}
+
+// InspectContent returns the formatted content for the inspector viewport
+func (s *Skill) InspectContent() string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf("Tool:  %s\n", s.Tool))
+	b.WriteString(fmt.Sprintf("Scope: %s\n", s.Scope))
+	b.WriteString(fmt.Sprintf("Path:  %s\n\n", s.Path))
+
+	if s.Description != "" {
+		b.WriteString(fmt.Sprintf("Description: %s\n\n", s.Description))
+	}
+
+	if s.Version != "" {
+		b.WriteString(fmt.Sprintf("Version: %s\n", s.Version))
+	}
+	if s.Author != "" {
+		b.WriteString(fmt.Sprintf("Author: %s\n", s.Author))
+	}
+	if s.Version != "" || s.Author != "" {
+		b.WriteString("\n")
+	}
+
+	if len(s.Commands) > 0 {
+		b.WriteString("Commands:\n")
+		for _, cmd := range s.Commands {
+			desc := ""
+			if cmd.Description != "" {
+				desc = " - " + cmd.Description
+			}
+			b.WriteString(fmt.Sprintf("  /%s:%s%s\n", s.Name, cmd.Name, desc))
+		}
+		b.WriteString("\n")
+	}
+
+	if s.Content != "" {
+		b.WriteString("Content:\n")
+		b.WriteString(s.Content)
+	}
+
+	return b.String()
+}
+
 const (
 	// SkillFileName is the standard skill file name (Claude Code format)
 	SkillFileName = "SKILL.md"
@@ -50,6 +97,9 @@ type Skill struct {
 
 	// Scope indicates where this skill came from ("local" or "global")
 	Scope string `yaml:"-" json:"-"`
+
+	// Tool indicates which tool owns this skill (e.g., "claude", "gemini", "agentctl")
+	Tool string `yaml:"-" json:"-"`
 
 	// Legacy fields (for backwards compatibility with skill.json)
 	Version string            `yaml:"version,omitempty" json:"version,omitempty"`

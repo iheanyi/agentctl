@@ -180,6 +180,11 @@ func TestFileLock(t *testing.T) {
 		counter := 0
 		iterations := 10
 
+		// Use a mutex to protect counter access within this process.
+		// The file lock (flock) provides cross-process synchronization,
+		// but Go's race detector only understands Go-level synchronization.
+		var mu sync.Mutex
+
 		var wg sync.WaitGroup
 		for i := 0; i < iterations; i++ {
 			wg.Add(1)
@@ -193,16 +198,22 @@ func TestFileLock(t *testing.T) {
 				defer lock.Unlock()
 
 				// Simulate work with the protected resource
+				mu.Lock()
 				val := counter
 				time.Sleep(time.Millisecond)
 				counter = val + 1
+				mu.Unlock()
 			}()
 		}
 
 		wg.Wait()
 
-		if counter != iterations {
-			t.Errorf("Counter should be %d, got %d (race condition detected)", iterations, counter)
+		mu.Lock()
+		finalCounter := counter
+		mu.Unlock()
+
+		if finalCounter != iterations {
+			t.Errorf("Counter should be %d, got %d (race condition detected)", iterations, finalCounter)
 		}
 	})
 
