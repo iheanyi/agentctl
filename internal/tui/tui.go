@@ -4916,8 +4916,8 @@ func (m *Model) syncAll() tea.Cmd {
 			}
 		}
 
-		// Sync to all detected tools (servers, commands, rules, skills)
-		results := sync.SyncAll(servers, m.commands, m.rules, m.skills)
+		// Sync to all detected tools (servers, commands, rules, skills, agents)
+		results := sync.SyncAll(servers, m.commands, m.rules, m.skills, m.agents)
 
 		errors := make(map[string]error)
 		for _, result := range results {

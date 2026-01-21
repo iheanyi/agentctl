@@ -1,11 +1,13 @@
 package sync
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
+	"github.com/iheanyi/agentctl/pkg/agent"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/rule"
@@ -89,8 +91,12 @@ func (a *CopilotAdapter) agentsFilePath() string {
 	return filepath.Join(a.configDir(), "AGENTS.md")
 }
 
+func (a *CopilotAdapter) agentsDir() string {
+	return filepath.Join(a.configDir(), "agents")
+}
+
 func (a *CopilotAdapter) SupportedResources() []ResourceType {
-	return []ResourceType{ResourceMCP, ResourceCommands, ResourceRules, ResourceSkills}
+	return []ResourceType{ResourceMCP, ResourceCommands, ResourceRules, ResourceSkills, ResourceAgents}
 }
 
 func (a *CopilotAdapter) ReadServers() ([]*mcp.Server, error) {
@@ -230,4 +236,39 @@ func formatCopilotCommand(cmd *command.Command) string {
 	sb.WriteString(cmd.Prompt)
 
 	return sb.String()
+}
+
+// AgentsAdapter implementation for Copilot
+
+// ReadAgents reads agents from Copilot's agents directory
+func (a *CopilotAdapter) ReadAgents() ([]*agent.Agent, error) {
+	agentsDir := a.agentsDir()
+	return agent.LoadAll(agentsDir)
+}
+
+// WriteAgents writes agents to Copilot's agents directory
+// Note: GitHub Copilot expects .agent.md extension for agents
+func (a *CopilotAdapter) WriteAgents(agents []*agent.Agent) error {
+	agentsDir := a.agentsDir()
+
+	// Ensure directory exists
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		return err
+	}
+
+	for _, ag := range agents {
+		// Validate agent name to prevent path traversal
+		if err := SanitizeName(ag.Name); err != nil {
+			return fmt.Errorf("invalid agent name: %w", err)
+		}
+
+		// Copilot uses .agent.md extension
+		filename := ag.Name + ".agent.md"
+		path := filepath.Join(agentsDir, filename)
+		if err := ag.SaveToFile(path); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

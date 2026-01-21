@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/iheanyi/agentctl/pkg/agent"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/rule"
@@ -89,8 +90,12 @@ func (a *ClaudeAdapter) pluginsDir() string {
 	return filepath.Join(a.configDir(), "plugins")
 }
 
+func (a *ClaudeAdapter) agentsDir() string {
+	return filepath.Join(a.configDir(), "agents")
+}
+
 func (a *ClaudeAdapter) SupportedResources() []ResourceType {
-	return []ResourceType{ResourceMCP, ResourceCommands, ResourceRules, ResourceSkills}
+	return []ResourceType{ResourceMCP, ResourceCommands, ResourceRules, ResourceSkills, ResourceAgents}
 }
 
 func (a *ClaudeAdapter) ReadServers() ([]*mcp.Server, error) {
@@ -594,4 +599,35 @@ func (a *ClaudeAdapter) WriteWorkspaceServers(projectDir string, servers []*mcp.
 	}
 
 	return os.WriteFile(path, data, 0644)
+}
+
+// AgentsAdapter implementation for Claude Code
+
+// ReadAgents reads agents from Claude Code's agents directory
+func (a *ClaudeAdapter) ReadAgents() ([]*agent.Agent, error) {
+	agentsDir := a.agentsDir()
+	return agent.LoadAll(agentsDir)
+}
+
+// WriteAgents writes agents to Claude Code's agents directory
+func (a *ClaudeAdapter) WriteAgents(agents []*agent.Agent) error {
+	agentsDir := a.agentsDir()
+
+	// Ensure directory exists
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		return err
+	}
+
+	for _, ag := range agents {
+		// Validate agent name to prevent path traversal
+		if err := SanitizeName(ag.Name); err != nil {
+			return fmt.Errorf("invalid agent name: %w", err)
+		}
+
+		if err := ag.Save(agentsDir); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

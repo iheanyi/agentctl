@@ -323,3 +323,15 @@ func (a *Agent) ToToolFormat(targetTool string) *Agent {
 
 	return &copy
 }
+
+// LoadAll loads all agents from a directory (simple wrapper for syncing)
+func LoadAll(dir string) ([]*Agent, error) {
+	return LoadFromDirectory(dir, "global", "")
+}
+
+// Save saves an agent to a directory using the agent's name as the filename
+func (a *Agent) Save(dir string) error {
+	filename := a.Name + ".md"
+	path := filepath.Join(dir, filename)
+	return a.SaveToFile(path)
+}
