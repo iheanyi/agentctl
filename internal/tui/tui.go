@@ -134,8 +134,7 @@ type Model struct {
 	quitting  bool
 	width     int
 	height    int
-	spinner   spinner.Model
-	statusMsg string
+	spinner spinner.Model
 
 	// Profile picker
 	showProfilePicker bool
@@ -230,27 +229,14 @@ type Model struct {
 	serverEditorFocus     int // 0=name, 1=source, 2=command, 3=args, 4=transport, 5=scope (when in project)
 
 	// Alias wizard modal (multi-step)
-	showAliasWizard            bool
-	aliasWizardIsNew           bool
-	aliasWizardStep            int // 0=basic, 1=type, 2=simple/variants config, 3=git url
-	aliasWizardName            textinput.Model
-	aliasWizardDesc            textinput.Model
-	aliasWizardConfigType      int // 0=simple, 1=variants
-	aliasWizardTransport       int // 0=stdio, 1=http, 2=sse
-	aliasWizardRuntime         int // 0=node, 1=python, 2=go, 3=docker
-	aliasWizardPackage         textinput.Model
-	aliasWizardURL             textinput.Model
-	aliasWizardHasLocal        bool
-	aliasWizardHasRemote       bool
-	aliasWizardLocalRuntime    int // 0=node, 1=python
-	aliasWizardLocalPackage    textinput.Model
-	aliasWizardRemoteTransport int // 0=http, 1=sse
-	aliasWizardRemoteURL       textinput.Model
-	aliasWizardDefaultVariant  int // 0=local, 1=remote
-	aliasWizardWantGitURL      bool
-	aliasWizardGitURL          textinput.Model
-	aliasWizardFocus           int            // current focused field within step
-	aliasWizardExisting        *aliases.Alias // for editing
+	showAliasWizard         bool
+	aliasWizardName         textinput.Model
+	aliasWizardDesc         textinput.Model
+	aliasWizardPackage      textinput.Model
+	aliasWizardURL          textinput.Model
+	aliasWizardLocalPackage textinput.Model
+	aliasWizardRemoteURL    textinput.Model
+	aliasWizardGitURL       textinput.Model
 
 	// Backup modal
 	showBackupModal     bool
@@ -4010,16 +3996,6 @@ type skillCmdSavedMsg struct {
 	isNew   bool
 }
 
-func (m *Model) deleteSkillCommand(s *skill.Skill, cmd *skill.Command) tea.Cmd {
-	return func() tea.Msg {
-		if err := s.RemoveCommand(cmd.Name); err != nil {
-			return resourceCreatedMsg{resourceType: "skill command", err: fmt.Errorf("failed to delete command: %w", err)}
-		}
-
-		return skillCmdDeletedMsg{skill: s, cmdName: cmd.Name}
-	}
-}
-
 // skillCmdDeletedMsg is sent when a skill command is deleted
 type skillCmdDeletedMsg struct {
 	skill   *skill.Skill
@@ -4780,16 +4756,6 @@ type backupOperationMsg struct {
 
 // Commands
 
-func (m *Model) deleteServer(name string) tea.Cmd {
-	return func() tea.Msg {
-		delete(m.cfg.Servers, name)
-		if err := m.cfg.Save(); err != nil {
-			return serverDeletedMsg{name: name}
-		}
-		return serverDeletedMsg{name: name}
-	}
-}
-
 func (m *Model) testServer(name string) tea.Cmd {
 	return func() tea.Msg {
 		server, ok := m.cfg.Servers[name]
@@ -4880,29 +4846,6 @@ func (m *Model) toggleServer(name string) tea.Cmd {
 
 		return serverToggledMsg{name: name, disabled: server.Disabled}
 	}
-}
-
-func (m *Model) editServer(name string) tea.Cmd {
-	// Use project config if available, otherwise global config
-	configPath := m.cfg.Path
-	if m.cfg.ProjectPath != "" {
-		configPath = m.cfg.ProjectPath
-	}
-
-	// Determine editor
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = os.Getenv("VISUAL")
-	}
-	if editor == "" {
-		editor = "vi" // fallback
-	}
-
-	// Use tea.ExecProcess to run the editor
-	c := exec.Command(editor, configPath)
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return editorFinishedMsg{err: err}
-	})
 }
 
 func (m *Model) addServer(name string) tea.Cmd {

@@ -35,7 +35,6 @@ type AliasManagerModel struct {
 	cursor      int
 	searchQuery string
 	searchInput textinput.Model
-	searching   bool
 
 	// UI state
 	width         int
@@ -47,7 +46,6 @@ type AliasManagerModel struct {
 
 	// Mode
 	mode          aliasManagerMode
-	editEntry     *AliasEntry
 	confirmDelete string
 
 	// Wizard state

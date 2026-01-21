@@ -21,7 +21,7 @@ var (
 
 	// Accent colors
 	poimandresTeal = lipgloss.Color("#5DE4c7")
-	poimandresCyan = lipgloss.Color("#89ddff")
+	_              = lipgloss.Color("#89ddff") // poimandresCyan - reserved for future use
 	poimandresPink = lipgloss.Color("#f087bd")
 )
 

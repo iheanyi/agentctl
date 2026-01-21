@@ -19,10 +19,10 @@ var (
 	colorYellow = lipgloss.Color("#fffac2")
 
 	// Derived colors for specific UI states
-	colorSuccess = colorTeal
-	colorWarning = colorYellow
-	colorError   = colorPink
-	colorInfo    = colorCyan
+	_ = colorTeal   // colorSuccess - reserved for future use
+	_ = colorYellow // colorWarning - reserved for future use
+	colorError = colorPink
+	_          = colorCyan // colorInfo - reserved for future use
 )
 
 // Status badge symbols

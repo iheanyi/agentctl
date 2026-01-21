@@ -628,11 +628,6 @@ func mergeServers(existing, new []*mcp.Server) []*mcp.Server {
 	return result
 }
 
-// performSync syncs config to detected tools and returns count (legacy, kept for compatibility)
-func performSync(cfg *config.Config, server *mcp.Server, out *output.Writer, targetTool string) int {
-	return performScopedSync(cfg, server, config.ScopeGlobal, out, targetTool)
-}
-
 func parseAddTarget(target string) (*mcp.Server, error) {
 	// Check for version suffix (name@version)
 	var version string

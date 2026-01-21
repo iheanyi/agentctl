@@ -213,7 +213,7 @@ func TestPromptWithEmptyVariables(t *testing.T) {
 		t.Fatalf("Failed to unmarshal: %v", err)
 	}
 
-	if decoded.Variables != nil && len(decoded.Variables) != 0 {
+	if len(decoded.Variables) != 0 {
 		t.Errorf("Expected nil or empty variables, got %v", decoded.Variables)
 	}
 }
