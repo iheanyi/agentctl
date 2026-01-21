@@ -135,6 +135,18 @@ func runCopyCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to copy command: %w", err)
 	}
 
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.CopyResourceResult{
+			Type:       "command",
+			Name:       name,
+			FromScope:  foundCmd.Scope,
+			ToScope:    string(targetScope),
+			SourcePath: foundCmd.Path,
+			TargetPath: targetPath,
+		})
+	}
+
 	// Show result
 	fromIndicator := "[G]"
 	toIndicator := "[L]"
@@ -215,6 +227,18 @@ func runCopyRule(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to copy rule: %w", err)
 	}
 
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.CopyResourceResult{
+			Type:       "rule",
+			Name:       name,
+			FromScope:  foundRule.Scope,
+			ToScope:    string(targetScope),
+			SourcePath: foundRule.Path,
+			TargetPath: targetPath,
+		})
+	}
+
 	// Show result
 	fromIndicator := "[G]"
 	toIndicator := "[L]"
@@ -287,6 +311,18 @@ func runCopySkill(cmd *cobra.Command, args []string) error {
 	// Copy the skill directory
 	if err := copyDir(foundSkill.Path, targetDir); err != nil {
 		return fmt.Errorf("failed to copy skill: %w", err)
+	}
+
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.CopyResourceResult{
+			Type:       "skill",
+			Name:       name,
+			FromScope:  foundSkill.Scope,
+			ToScope:    string(targetScope),
+			SourcePath: foundSkill.Path,
+			TargetPath: targetDir,
+		})
 	}
 
 	// Show result

@@ -261,3 +261,21 @@ func MustPrintJSON(data interface{}) {
 		fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
 	}
 }
+
+// NewResourceResult represents the JSON output for resource creation commands (new)
+type NewResourceResult struct {
+	Type  string `json:"type"`  // "command", "rule", "skill", "prompt", "agent"
+	Name  string `json:"name"`
+	Scope string `json:"scope"` // "local" or "global"
+	Path  string `json:"path"`
+}
+
+// CopyResourceResult represents the JSON output for resource copy commands
+type CopyResourceResult struct {
+	Type       string `json:"type"` // "command", "rule", "skill"
+	Name       string `json:"name"`
+	FromScope  string `json:"fromScope"`
+	ToScope    string `json:"toScope"`
+	SourcePath string `json:"sourcePath"`
+	TargetPath string `json:"targetPath"`
+}

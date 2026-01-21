@@ -80,9 +80,17 @@ func runList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Discover native resources once if --native flag is set
+	var nativeResources []*discovery.NativeResource
+	var cwd string
+	if listNative {
+		cwd, _ = os.Getwd()
+		nativeResources = discovery.DiscoverBoth(cwd)
+	}
+
 	// JSON output mode
 	if JSONOutput {
-		return runListJSON(cfg, scope, listNative)
+		return runListJSON(cfg, scope, nativeResources, cwd)
 	}
 
 	// Show project config notice if applicable
@@ -129,14 +137,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		// Include native commands if --native flag is set
 		var nativeCommands []*discovery.NativeResource
 		if listNative {
-			cwd, _ := os.Getwd()
-			for _, res := range discovery.DiscoverBoth(cwd) {
-				if res.Type == "command" {
-					if scope == config.ScopeAll || string(scope) == res.Scope {
-						nativeCommands = append(nativeCommands, res)
-					}
-				}
-			}
+			nativeCommands = filterNativeByType(nativeResources, "command", scope)
 		}
 
 		if len(commands) > 0 || len(nativeCommands) > 0 {
@@ -186,15 +187,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		// Include native rules if --native flag is set
 		var nativeRules []*discovery.NativeResource
 		if listNative {
-			cwd, _ := os.Getwd()
-			for _, res := range discovery.DiscoverBoth(cwd) {
-				if res.Type == "rule" {
-					// Filter by scope if specified
-					if scope == config.ScopeAll || string(scope) == res.Scope {
-						nativeRules = append(nativeRules, res)
-					}
-				}
-			}
+			nativeRules = filterNativeByType(nativeResources, "rule", scope)
 		}
 
 		if len(rules) > 0 || len(nativeRules) > 0 {
@@ -232,14 +225,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		// Include native skills if --native flag is set
 		var nativeSkills []*discovery.NativeResource
 		if listNative {
-			cwd, _ := os.Getwd()
-			for _, res := range discovery.DiscoverBoth(cwd) {
-				if res.Type == "skill" {
-					if scope == config.ScopeAll || string(scope) == res.Scope {
-						nativeSkills = append(nativeSkills, res)
-					}
-				}
-			}
+			nativeSkills = filterNativeByType(nativeResources, "skill", scope)
 		}
 
 		if len(skills) > 0 || len(nativeSkills) > 0 {
@@ -294,7 +280,6 @@ func runList(cmd *cobra.Command, args []string) error {
 
 		// Load local plugins
 		if scope == config.ScopeAll || scope == config.ScopeLocal {
-			cwd, _ := os.Getwd()
 			if localPlugins, err := discovery.LoadClaudeProjectPlugins(cwd); err == nil {
 				plugins = append(plugins, localPlugins...)
 			}
@@ -323,8 +308,6 @@ func runList(cmd *cobra.Command, args []string) error {
 	// List agents (only with --native flag since they're tool-native)
 	if listNative && (listType == "" || listType == "agents") {
 		var agents []*agent.Agent
-
-		cwd, _ := os.Getwd()
 
 		// Discover local agents
 		if scope == config.ScopeAll || scope == config.ScopeLocal {
@@ -371,19 +354,14 @@ func runList(cmd *cobra.Command, args []string) error {
 }
 
 // runListJSON outputs the list results as JSON
-func runListJSON(cfg *config.Config, scope config.Scope, includeNative bool) error {
+func runListJSON(cfg *config.Config, scope config.Scope, nativeResources []*discovery.NativeResource, cwd string) error {
 	jw := output.NewJSONWriter()
 
 	listOutput := output.ListOutput{
 		ProjectPath: cfg.ProjectPath,
 	}
 
-	// Get native resources if --native flag is set
-	var nativeResources []*discovery.NativeResource
-	if includeNative {
-		cwd, _ := os.Getwd()
-		nativeResources = discovery.DiscoverBoth(cwd)
-	}
+	includeNative := len(nativeResources) > 0
 
 	// Get servers filtered by scope and type
 	if listType == "" || listType == "servers" {
@@ -533,7 +511,6 @@ func runListJSON(cfg *config.Config, scope config.Scope, includeNative bool) err
 
 		// Load local plugins
 		if scope == config.ScopeAll || scope == config.ScopeLocal {
-			cwd, _ := os.Getwd()
 			if localPlugins, err := discovery.LoadClaudeProjectPlugins(cwd); err == nil {
 				for _, p := range localPlugins {
 					status := "enabled"
@@ -555,7 +532,6 @@ func runListJSON(cfg *config.Config, scope config.Scope, includeNative bool) err
 
 	// Get agents (only with --native flag)
 	if includeNative && (listType == "" || listType == "agents") {
-		cwd, _ := os.Getwd()
 
 		// Discover local agents
 		if scope == config.ScopeAll || scope == config.ScopeLocal {
@@ -603,4 +579,17 @@ func scopeToIndicator(scope string) string {
 	default:
 		return "[G]" // Default to global
 	}
+}
+
+// filterNativeByType filters native resources by type and scope
+func filterNativeByType(resources []*discovery.NativeResource, resType string, scope config.Scope) []*discovery.NativeResource {
+	var filtered []*discovery.NativeResource
+	for _, res := range resources {
+		if res.Type == resType {
+			if scope == config.ScopeAll || string(scope) == res.Scope {
+				filtered = append(filtered, res)
+			}
+		}
+	}
+	return filtered
 }

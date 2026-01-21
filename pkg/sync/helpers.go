@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/iheanyi/agentctl/pkg/agent"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/skill"
@@ -375,6 +376,27 @@ func WriteSkillsToDir(skillsDir string, skills []*skill.Skill) error {
 
 		skillDir := filepath.Join(skillsDir, s.Name)
 		if err := s.Save(skillDir); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// WriteAgentsToDir writes agents to an agents directory.
+// Each agent is written as a markdown file.
+func WriteAgentsToDir(agentsDir string, agents []*agent.Agent) error {
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		return err
+	}
+
+	for _, ag := range agents {
+		// Validate agent name to prevent path traversal
+		if err := SanitizeName(ag.Name); err != nil {
+			return fmt.Errorf("invalid agent name: %w", err)
+		}
+
+		if err := ag.Save(agentsDir); err != nil {
 			return err
 		}
 	}

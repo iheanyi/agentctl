@@ -11,6 +11,7 @@ import (
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/jsonutil"
 	"github.com/iheanyi/agentctl/pkg/output"
+	"github.com/iheanyi/agentctl/pkg/pathutil"
 )
 
 var newCmd = &cobra.Command{
@@ -121,6 +122,11 @@ func getResourceDir(resourceType string) (string, config.Scope, error) {
 func runNewCommand(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
+	// Validate name to prevent path traversal
+	if err := pathutil.SanitizeName(name); err != nil {
+		return fmt.Errorf("invalid command name: %w", err)
+	}
+
 	commandsDir, scope, err := getResourceDir("commands")
 	if err != nil {
 		return err
@@ -161,6 +167,16 @@ func runNewCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create command: %w", err)
 	}
 
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.NewResourceResult{
+			Type:  "command",
+			Name:  name,
+			Scope: string(scope),
+			Path:  commandPath,
+		})
+	}
+
 	scopeLabel := ""
 	if scope == config.ScopeLocal {
 		scopeLabel = " (local)"
@@ -177,6 +193,11 @@ func runNewCommand(cmd *cobra.Command, args []string) error {
 
 func runNewRule(cmd *cobra.Command, args []string) error {
 	name := args[0]
+
+	// Validate name to prevent path traversal
+	if err := pathutil.SanitizeName(name); err != nil {
+		return fmt.Errorf("invalid rule name: %w", err)
+	}
 
 	rulesDir, scope, err := getResourceDir("rules")
 	if err != nil {
@@ -224,6 +245,16 @@ Add your rules and guidelines here.
 		return fmt.Errorf("failed to create rule: %w", err)
 	}
 
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.NewResourceResult{
+			Type:  "rule",
+			Name:  name,
+			Scope: string(scope),
+			Path:  rulePath,
+		})
+	}
+
 	scopeLabel := ""
 	if scope == config.ScopeLocal {
 		scopeLabel = " (local)"
@@ -240,6 +271,11 @@ Add your rules and guidelines here.
 
 func runNewPrompt(cmd *cobra.Command, args []string) error {
 	name := args[0]
+
+	// Validate name to prevent path traversal
+	if err := pathutil.SanitizeName(name); err != nil {
+		return fmt.Errorf("invalid prompt name: %w", err)
+	}
 
 	promptsDir, scope, err := getResourceDir("prompts")
 	if err != nil {
@@ -273,6 +309,16 @@ func runNewPrompt(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create prompt: %w", err)
 	}
 
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.NewResourceResult{
+			Type:  "prompt",
+			Name:  name,
+			Scope: string(scope),
+			Path:  promptPath,
+		})
+	}
+
 	scopeLabel := ""
 	if scope == config.ScopeLocal {
 		scopeLabel = " (local)"
@@ -287,6 +333,11 @@ func runNewPrompt(cmd *cobra.Command, args []string) error {
 
 func runNewSkill(cmd *cobra.Command, args []string) error {
 	name := args[0]
+
+	// Validate name to prevent path traversal
+	if err := pathutil.SanitizeName(name); err != nil {
+		return fmt.Errorf("invalid skill name: %w", err)
+	}
 
 	skillsDir, scope, err := getResourceDir("skills")
 	if err != nil {
@@ -333,6 +384,16 @@ Example: "Analyze $ARGUMENTS and provide feedback."
 		return fmt.Errorf("failed to create SKILL.md: %w", err)
 	}
 
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.NewResourceResult{
+			Type:  "skill",
+			Name:  name,
+			Scope: string(scope),
+			Path:  skillDir,
+		})
+	}
+
 	scopeLabel := ""
 	if scope == config.ScopeLocal {
 		scopeLabel = " (local)"
@@ -349,6 +410,11 @@ Example: "Analyze $ARGUMENTS and provide feedback."
 
 func runNewAgent(cmd *cobra.Command, args []string) error {
 	name := args[0]
+
+	// Validate name to prevent path traversal
+	if err := pathutil.SanitizeName(name); err != nil {
+		return fmt.Errorf("invalid agent name: %w", err)
+	}
 
 	agentsDir, scope, err := getResourceDir("agents")
 	if err != nil {
@@ -396,6 +462,16 @@ Describe what this agent is designed to do.
 
 	if err := os.WriteFile(agentPath, []byte(template), 0644); err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)
+	}
+
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.NewResourceResult{
+			Type:  "agent",
+			Name:  name,
+			Scope: string(scope),
+			Path:  agentPath,
+		})
 	}
 
 	scopeLabel := ""

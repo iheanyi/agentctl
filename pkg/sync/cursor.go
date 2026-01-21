@@ -357,23 +357,5 @@ func (a *CursorAdapter) ReadAgents() ([]*agent.Agent, error) {
 
 // WriteAgents writes agents to Cursor's agents directory
 func (a *CursorAdapter) WriteAgents(agents []*agent.Agent) error {
-	agentsDir := a.agentsDir()
-
-	// Ensure directory exists
-	if err := os.MkdirAll(agentsDir, 0755); err != nil {
-		return err
-	}
-
-	for _, ag := range agents {
-		// Validate agent name to prevent path traversal
-		if err := SanitizeName(ag.Name); err != nil {
-			return fmt.Errorf("invalid agent name: %w", err)
-		}
-
-		if err := ag.Save(agentsDir); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return WriteAgentsToDir(a.agentsDir(), agents)
 }
