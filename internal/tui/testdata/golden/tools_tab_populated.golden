@@ -1,9 +1,10 @@
  agentctl   Servers       Commands       Rules       Skills       Hooks         
  [Tools]      Agents   2/3 tools detected                                       
 ────────────────────────────────────────────────────────────────────────────────
-   ● claude [mcp, commands, rules, skills]          ~/.claude/settings.json ✓   
-   ○ codex [mcp]                                       ~/.codex/config.json ✓   
-   ● cursor [mcp, rules, commands]                       ~/.cursor/mcp.json ✓   
+   ● claude [mcp, commands, rules, skills]  /mock/claude/settings.json (no      
+ config)                                                                        
+   ○ codex [mcp]                          /mock/codex/config.json (no config)   
+   ● cursor [mcp, rules, commands]          /mock/cursor/mcp.json (no config)   
                                                                                 
                                                                                 
                                                                                 

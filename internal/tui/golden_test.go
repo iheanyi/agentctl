@@ -26,30 +26,31 @@ type stubAdapter struct {
 	resources  []sync.ResourceType
 }
 
-func (s *stubAdapter) Name() string                        { return s.name }
-func (s *stubAdapter) Detect() (bool, error)               { return s.detected, nil }
-func (s *stubAdapter) ConfigPath() string                  { return s.configPath }
+func (s *stubAdapter) Name() string                            { return s.name }
+func (s *stubAdapter) Detect() (bool, error)                   { return s.detected, nil }
+func (s *stubAdapter) ConfigPath() string                      { return s.configPath }
 func (s *stubAdapter) SupportedResources() []sync.ResourceType { return s.resources }
 
 // testAdapters returns a deterministic set of mock adapters for testing
+// Uses fixed fake paths that won't exist on any system, producing consistent "(no config)" output
 func testAdapters() []sync.Adapter {
 	return []sync.Adapter{
 		&stubAdapter{
 			name:       "claude",
 			detected:   true,
-			configPath: "~/.claude/settings.json",
+			configPath: "/mock/claude/settings.json",
 			resources:  []sync.ResourceType{sync.ResourceMCP, sync.ResourceCommands, sync.ResourceRules, sync.ResourceSkills},
 		},
 		&stubAdapter{
 			name:       "cursor",
 			detected:   true,
-			configPath: "~/.cursor/mcp.json",
+			configPath: "/mock/cursor/mcp.json",
 			resources:  []sync.ResourceType{sync.ResourceMCP, sync.ResourceRules, sync.ResourceCommands},
 		},
 		&stubAdapter{
 			name:       "codex",
 			detected:   false,
-			configPath: "~/.codex/config.json",
+			configPath: "/mock/codex/config.json",
 			resources:  []sync.ResourceType{sync.ResourceMCP},
 		},
 	}
@@ -660,8 +661,8 @@ func TestGoldenBackupModalWithResult(t *testing.T) {
 func TestGoldenImportWizardStepTool(t *testing.T) {
 	m := newTestModel()
 	m.showImportWizard = true
-	m.importWizardStep = 0 // Select tool
-	tools := testDetectedAdapters() // Use mock adapters for deterministic testing
+	m.importWizardStep = 0          // Select tool
+	tools := testDetectedAdapters() // Use mock adapters with fixed paths
 	sort.Slice(tools, func(i, j int) bool {
 		return tools[i].Name() < tools[j].Name()
 	})
@@ -683,8 +684,8 @@ func TestGoldenImportWizardStepTool(t *testing.T) {
 func TestGoldenImportWizardStepResources(t *testing.T) {
 	m := newTestModel()
 	m.showImportWizard = true
-	m.importWizardStep = 1 // Select resources
-	tools := testDetectedAdapters() // Use mock adapters for deterministic testing
+	m.importWizardStep = 1          // Select resources
+	tools := testDetectedAdapters() // Use mock adapters with fixed paths
 	sort.Slice(tools, func(i, j int) bool {
 		return tools[i].Name() < tools[j].Name()
 	})
@@ -730,7 +731,7 @@ func TestGoldenToolsTabEmpty(t *testing.T) {
 func TestGoldenToolsTabPopulated(t *testing.T) {
 	m := newTestModel()
 	m.activeTab = TabTools
-	m.detectedTools = testAdapters() // Use mock adapters for deterministic testing
+	m.detectedTools = testAdapters() // Use mock adapters with fixed paths
 	// Sort by name for consistent ordering (matches real TUI behavior)
 	sort.Slice(m.detectedTools, func(i, j int) bool {
 		return m.detectedTools[i].Name() < m.detectedTools[j].Name()
