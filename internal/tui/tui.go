@@ -130,11 +130,11 @@ type Model struct {
 	logViewport viewport.Model
 
 	// UI state
-	showHelp  bool
-	quitting  bool
-	width     int
-	height    int
-	spinner spinner.Model
+	showHelp bool
+	quitting bool
+	width    int
+	height   int
+	spinner  spinner.Model
 
 	// Profile picker
 	showProfilePicker bool

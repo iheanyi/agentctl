@@ -19,8 +19,8 @@ var (
 	colorYellow = lipgloss.Color("#fffac2")
 
 	// Derived colors for specific UI states
-	_ = colorTeal   // colorSuccess - reserved for future use
-	_ = colorYellow // colorWarning - reserved for future use
+	_          = colorTeal   // colorSuccess - reserved for future use
+	_          = colorYellow // colorWarning - reserved for future use
 	colorError = colorPink
 	_          = colorCyan // colorInfo - reserved for future use
 )

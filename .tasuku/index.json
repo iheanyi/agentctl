@@ -222,6 +222,147 @@
       "file": "tasks/cut-v-release-for-agentctl-inclu.md",
       "updated_at": "2026-01-13T02:41:08.256647Z"
     },
+    "discovery-claude-scanner": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "discovery"
+      ],
+      "file": "tasks/discovery-claude-scanner.md",
+      "updated_at": "2026-01-21T01:15:52.521385Z"
+    },
+    "discovery-cli-import": {
+      "status": "blocked",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "discovery",
+        "cli"
+      ],
+      "blocked_by": [
+        "discovery-cli-list"
+      ],
+      "file": "tasks/discovery-cli-import.md",
+      "updated_at": "2026-01-21T01:16:12.611159Z"
+    },
+    "discovery-cli-init": {
+      "status": "blocked",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "discovery",
+        "cli"
+      ],
+      "blocked_by": [
+        "discovery-cli-list"
+      ],
+      "file": "tasks/discovery-cli-init.md",
+      "updated_at": "2026-01-21T01:16:12.262596Z"
+    },
+    "discovery-cli-list": {
+      "status": "blocked",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "discovery",
+        "cli"
+      ],
+      "blocked_by": [
+        "discovery-core",
+        "discovery-claude-scanner",
+        "discovery-toplevel-scanner"
+      ],
+      "file": "tasks/discovery-cli-list.md",
+      "updated_at": "2026-01-21T01:16:11.901029Z"
+    },
+    "discovery-codex-scanner": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "discovery"
+      ],
+      "file": "tasks/discovery-codex-scanner.md",
+      "updated_at": "2026-01-21T01:15:53.27547Z"
+    },
+    "discovery-copilot-scanner": {
+      "status": "ready",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "discovery"
+      ],
+      "file": "tasks/discovery-copilot-scanner.md",
+      "updated_at": "2026-01-21T01:15:53.94326Z"
+    },
+    "discovery-core": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "discovery"
+      ],
+      "file": "tasks/discovery-core.md",
+      "updated_at": "2026-01-21T01:15:52.092973Z"
+    },
+    "discovery-cursor-scanner": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "discovery"
+      ],
+      "file": "tasks/discovery-cursor-scanner.md",
+      "updated_at": "2026-01-21T01:15:52.936332Z"
+    },
+    "discovery-opencode-scanner": {
+      "status": "ready",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "discovery"
+      ],
+      "file": "tasks/discovery-opencode-scanner.md",
+      "updated_at": "2026-01-21T01:15:53.609124Z"
+    },
+    "discovery-tests": {
+      "status": "blocked",
+      "priority": 2,
+      "tags": [
+        "test",
+        "discovery"
+      ],
+      "blocked_by": [
+        "discovery-core"
+      ],
+      "file": "tasks/discovery-tests.md",
+      "updated_at": "2026-01-21T01:16:13.311414Z"
+    },
+    "discovery-toplevel-scanner": {
+      "status": "ready",
+      "priority": 1,
+      "tags": [
+        "feature",
+        "discovery"
+      ],
+      "file": "tasks/discovery-toplevel-scanner.md",
+      "updated_at": "2026-01-21T01:15:54.345378Z"
+    },
+    "discovery-tui-integration": {
+      "status": "blocked",
+      "priority": 2,
+      "tags": [
+        "feature",
+        "discovery",
+        "tui"
+      ],
+      "blocked_by": [
+        "discovery-cli-list"
+      ],
+      "file": "tasks/discovery-tui-integration.md",
+      "updated_at": "2026-01-21T01:16:12.960266Z"
+    },
     "fix-claude-adapter-to-support-cl": {
       "status": "ready",
       "priority": 1,
@@ -460,5 +601,5 @@
   "archived_count": 0,
   "learnings_count": 7,
   "decisions_count": 1,
-  "updated_at": "2026-01-20T16:55:23.535818Z"
+  "updated_at": "2026-01-21T01:16:13.312606Z"
 }
