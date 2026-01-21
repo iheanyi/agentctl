@@ -1,8 +1,9 @@
 package cli
 
 import (
-	"github.com/iheanyi/agentctl/internal/tui"
 	"github.com/spf13/cobra"
+
+	"github.com/iheanyi/agentctl/internal/tui"
 )
 
 var uiCmd = &cobra.Command{

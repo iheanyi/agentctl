@@ -7,8 +7,9 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/iheanyi/agentctl/pkg/mcp"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/iheanyi/agentctl/pkg/mcp"
 )
 
 // Tool represents an MCP tool exposed by a server
@@ -28,12 +29,12 @@ type ToolCallResult struct {
 
 // HealthResult represents the result of a health check
 type HealthResult struct {
-	Healthy     bool          `json:"healthy"`
-	ServerName  string        `json:"serverName,omitempty"`
-	Version     string        `json:"version,omitempty"`
-	Tools       []Tool        `json:"tools,omitempty"`
-	Error       error         `json:"error,omitempty"`
-	Latency     time.Duration `json:"latency"`
+	Healthy    bool          `json:"healthy"`
+	ServerName string        `json:"serverName,omitempty"`
+	Version    string        `json:"version,omitempty"`
+	Tools      []Tool        `json:"tools,omitempty"`
+	Error      error         `json:"error,omitempty"`
+	Latency    time.Duration `json:"latency"`
 }
 
 // Client wraps the MCP SDK client for health checks and tool discovery

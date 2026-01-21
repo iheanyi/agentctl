@@ -221,7 +221,7 @@ func (b *Builder) buildGo(dir string, server *mcp.Server) error {
 
 	target := "."
 	outputName := "server"
-	
+
 	cmdDir := filepath.Join(dir, "cmd")
 	if entries, err := os.ReadDir(cmdDir); err == nil {
 		// Look for a directory matching the server name
@@ -232,7 +232,7 @@ func (b *Builder) buildGo(dir string, server *mcp.Server) error {
 				break
 			}
 		}
-		
+
 		// If not found, look for any main package in cmd?
 		// For now, let's just default to the first one if only one exists
 		if target == "." && len(entries) > 0 {
@@ -255,7 +255,7 @@ func (b *Builder) buildGo(dir string, server *mcp.Server) error {
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go build failed: %w", err)
 	}

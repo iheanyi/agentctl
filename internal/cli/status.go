@@ -5,9 +5,10 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/sync"
-	"github.com/spf13/cobra"
 )
 
 var statusCmd = &cobra.Command{

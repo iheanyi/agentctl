@@ -318,7 +318,7 @@ func (a *CodexAdapter) writeServersToJSON(servers []*mcp.Server) error {
 	// Load existing config
 	var config CodexJSONConfig
 	if data, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(data, &config)
+		_ = json.Unmarshal(data, &config) // Ignore error, start with empty config if invalid
 	}
 
 	if config.MCPServers == nil {

@@ -431,7 +431,7 @@ func SafeWriteFileWithLock(path string, data []byte, perm os.FileMode, keepBacku
 	if err := lock.Lock(); err != nil {
 		return fmt.Errorf("acquiring lock: %w", err)
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 
 	return SafeWriteFile(path, data, perm, keepBackups)
 }

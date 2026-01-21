@@ -12,10 +12,11 @@ import (
 	stdsync "sync"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/sync"
-	"github.com/spf13/cobra"
 )
 
 var doctorCmd = &cobra.Command{
@@ -40,8 +41,8 @@ Examples:
 }
 
 var (
-	doctorVerbose   bool
-	doctorRunTools  bool
+	doctorVerbose  bool
+	doctorRunTools bool
 )
 
 func init() {

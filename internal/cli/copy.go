@@ -5,13 +5,14 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/prompt"
 	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/skill"
-	"github.com/spf13/cobra"
 )
 
 var copyCmd = &cobra.Command{

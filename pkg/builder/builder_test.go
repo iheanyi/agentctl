@@ -12,9 +12,9 @@ func TestServerDir(t *testing.T) {
 	b := New("/cache")
 
 	tests := []struct {
-		name      string
-		server    *mcp.Server
-		wantPath  string
+		name     string
+		server   *mcp.Server
+		wantPath string
 	}{
 		{
 			name: "simple name",
@@ -112,7 +112,7 @@ func TestResolveCommand(t *testing.T) {
 
 	// Create a server directory with entry point
 	server := &mcp.Server{
-		Name: "test-server",
+		Name:   "test-server",
 		Source: mcp.Source{Type: "git"},
 	}
 	serverDir := b.ServerDir(server)

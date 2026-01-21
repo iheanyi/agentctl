@@ -7,9 +7,10 @@ import (
 	"text/tabwriter"
 
 	"github.com/charmbracelet/huh"
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/internal/tui"
 	"github.com/iheanyi/agentctl/pkg/aliases"
-	"github.com/spf13/cobra"
 )
 
 var aliasCmd = &cobra.Command{

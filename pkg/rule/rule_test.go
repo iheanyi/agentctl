@@ -107,9 +107,9 @@ func TestLoadAllRules(t *testing.T) {
 
 	// Create multiple rule files
 	rules := map[string]string{
-		"rule1.md": "# Rule 1\nContent 1",
-		"rule2.md": "# Rule 2\nContent 2",
-		"rule3.md": "# Rule 3\nContent 3",
+		"rule1.md":       "# Rule 1\nContent 1",
+		"rule2.md":       "# Rule 2\nContent 2",
+		"rule3.md":       "# Rule 3\nContent 3",
 		"not-a-rule.txt": "This should be ignored",
 	}
 

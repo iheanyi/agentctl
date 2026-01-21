@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/iheanyi/agentctl/pkg/aliases"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/mcpclient"

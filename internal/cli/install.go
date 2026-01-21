@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh"
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/pkg/aliases"
 	"github.com/iheanyi/agentctl/pkg/builder"
 	"github.com/iheanyi/agentctl/pkg/config"
@@ -16,7 +18,6 @@ import (
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/sync"
-	"github.com/spf13/cobra"
 )
 
 var addCmd = &cobra.Command{
@@ -140,7 +141,6 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		name = server.Name
 	} else {
 		// Get name from args
 		if len(args) > 0 {
@@ -283,7 +283,7 @@ func runInteractiveConfig(server *mcp.Server, defaultCmd string) error {
 				Value(&argsStr),
 		),
 	)
-	
+
 	// Set default values
 	command = defaultCmd
 
@@ -296,7 +296,7 @@ func runInteractiveConfig(server *mcp.Server, defaultCmd string) error {
 		server.Args = strings.Fields(argsStr)
 	}
 	server.Transport = mcp.TransportStdio
-	
+
 	return nil
 }
 

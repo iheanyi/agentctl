@@ -15,12 +15,12 @@ import (
 
 // Status represents the daemon status
 type Status struct {
-	Running     bool      `json:"running"`
-	PID         int       `json:"pid"`
-	StartedAt   time.Time `json:"startedAt,omitempty"`
-	LastCheck   time.Time `json:"lastCheck,omitempty"`
-	CheckCount  int       `json:"checkCount"`
-	UpdatesAvailable []string `json:"updatesAvailable,omitempty"`
+	Running          bool      `json:"running"`
+	PID              int       `json:"pid"`
+	StartedAt        time.Time `json:"startedAt,omitempty"`
+	LastCheck        time.Time `json:"lastCheck,omitempty"`
+	CheckCount       int       `json:"checkCount"`
+	UpdatesAvailable []string  `json:"updatesAvailable,omitempty"`
 }
 
 // Daemon manages background update checks

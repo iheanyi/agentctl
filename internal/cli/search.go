@@ -3,10 +3,11 @@ package cli
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/pkg/aliases"
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/registry"
-	"github.com/spf13/cobra"
 )
 
 var searchCmd = &cobra.Command{

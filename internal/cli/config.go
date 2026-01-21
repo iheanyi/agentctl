@@ -7,9 +7,10 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/output"
-	"github.com/spf13/cobra"
 )
 
 var configCmd = &cobra.Command{

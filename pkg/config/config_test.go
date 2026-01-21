@@ -23,16 +23,16 @@ func TestDefaultConfigDir(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name        string
+		name         string
 		agentctlHome string
-		xdgConfig   string
-		wantSuffix  string
+		xdgConfig    string
+		wantSuffix   string
 	}{
 		{
-			name:        "AGENTCTL_HOME takes precedence",
+			name:         "AGENTCTL_HOME takes precedence",
 			agentctlHome: "/custom/agentctl",
-			xdgConfig:   "/xdg/config",
-			wantSuffix:  "/custom/agentctl",
+			xdgConfig:    "/xdg/config",
+			wantSuffix:   "/custom/agentctl",
 		},
 		{
 			name:       "XDG_CONFIG_HOME used if no AGENTCTL_HOME",
@@ -405,11 +405,11 @@ func TestLoadScoped(t *testing.T) {
 func TestServersForScope(t *testing.T) {
 	cfg := &Config{
 		Servers: map[string]*mcp.Server{
-			"global1": {Name: "global1", Scope: string(ScopeGlobal)},
-			"global2": {Name: "global2", Scope: string(ScopeGlobal)},
-			"local1":  {Name: "local1", Scope: string(ScopeLocal)},
-			"local2":  {Name: "local2", Scope: string(ScopeLocal)},
-			"unset":   {Name: "unset", Scope: ""},           // Unset scope defaults to global
+			"global1":  {Name: "global1", Scope: string(ScopeGlobal)},
+			"global2":  {Name: "global2", Scope: string(ScopeGlobal)},
+			"local1":   {Name: "local1", Scope: string(ScopeLocal)},
+			"local2":   {Name: "local2", Scope: string(ScopeLocal)},
+			"unset":    {Name: "unset", Scope: ""}, // Unset scope defaults to global
 			"disabled": {Name: "disabled", Scope: string(ScopeGlobal), Disabled: true},
 		},
 	}

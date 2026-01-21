@@ -372,4 +372,3 @@ func formatOpenCodeCommand(cmd *command.Command) string {
 
 	return sb.String()
 }
-

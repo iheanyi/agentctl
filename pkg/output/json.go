@@ -108,29 +108,29 @@ type SkillInfo struct {
 
 // SyncOutput represents the JSON output for the sync command
 type SyncOutput struct {
-	DryRun       bool               `json:"dryRun"`
-	ProjectPath  string             `json:"projectPath,omitempty"`
-	ToolResults  []SyncToolResult   `json:"toolResults"`
-	Summary      SyncSummary        `json:"summary"`
+	DryRun      bool             `json:"dryRun"`
+	ProjectPath string           `json:"projectPath,omitempty"`
+	ToolResults []SyncToolResult `json:"toolResults"`
+	Summary     SyncSummary      `json:"summary"`
 }
 
 // SyncToolResult represents the sync result for a single tool
 type SyncToolResult struct {
-	Tool          string       `json:"tool"`
-	ConfigPath    string       `json:"configPath"`
-	Success       bool         `json:"success"`
-	Error         string       `json:"error,omitempty"`
-	ServersAdded  int          `json:"serversAdded,omitempty"`
-	ServersUpdated int         `json:"serversUpdated,omitempty"`
-	ServersRemoved int         `json:"serversRemoved,omitempty"`
-	CommandsSynced int         `json:"commandsSynced,omitempty"`
-	RulesSynced    int         `json:"rulesSynced,omitempty"`
-	Changes       []SyncChange `json:"changes,omitempty"`
+	Tool           string       `json:"tool"`
+	ConfigPath     string       `json:"configPath"`
+	Success        bool         `json:"success"`
+	Error          string       `json:"error,omitempty"`
+	ServersAdded   int          `json:"serversAdded,omitempty"`
+	ServersUpdated int          `json:"serversUpdated,omitempty"`
+	ServersRemoved int          `json:"serversRemoved,omitempty"`
+	CommandsSynced int          `json:"commandsSynced,omitempty"`
+	RulesSynced    int          `json:"rulesSynced,omitempty"`
+	Changes        []SyncChange `json:"changes,omitempty"`
 }
 
 // SyncChange represents a single change during sync
 type SyncChange struct {
-	Type     string `json:"type"` // "add", "update", "remove", "preserve"
+	Type     string `json:"type"`     // "add", "update", "remove", "preserve"
 	Resource string `json:"resource"` // "server", "command", "rule"
 	Name     string `json:"name"`
 }
@@ -146,13 +146,13 @@ type SyncSummary struct {
 
 // DoctorOutput represents the JSON output for the doctor command
 type DoctorOutput struct {
-	Config      DoctorConfigResult   `json:"config"`
-	Runtimes    []DoctorRuntimeResult `json:"runtimes"`
-	Tools       []DoctorToolResult    `json:"tools"`
-	Servers     []DoctorServerResult  `json:"servers,omitempty"`
-	SyncState   DoctorSyncState       `json:"syncState"`
-	System      DoctorSystemInfo      `json:"system"`
-	IssueCount  int                   `json:"issueCount"`
+	Config     DoctorConfigResult    `json:"config"`
+	Runtimes   []DoctorRuntimeResult `json:"runtimes"`
+	Tools      []DoctorToolResult    `json:"tools"`
+	Servers    []DoctorServerResult  `json:"servers,omitempty"`
+	SyncState  DoctorSyncState       `json:"syncState"`
+	System     DoctorSystemInfo      `json:"system"`
+	IssueCount int                   `json:"issueCount"`
 }
 
 // DoctorConfigResult represents the config check result
@@ -202,8 +202,8 @@ type DoctorSyncState struct {
 
 // DoctorSystemInfo represents system information
 type DoctorSystemInfo struct {
-	OS            string `json:"os"`
-	Arch          string `json:"arch"`
+	OS              string `json:"os"`
+	Arch            string `json:"arch"`
 	AgentctlVersion string `json:"agentctlVersion"`
 	AgentctlCommit  string `json:"agentctlCommit"`
 }
@@ -226,8 +226,8 @@ type ValidateToolResult struct {
 
 // ValidateSummary represents the summary of validation
 type ValidateSummary struct {
-	TotalTools  int `json:"totalTools"`
-	ValidTools  int `json:"validTools"`
+	TotalTools   int `json:"totalTools"`
+	ValidTools   int `json:"validTools"`
 	InvalidTools int `json:"invalidTools"`
 }
 

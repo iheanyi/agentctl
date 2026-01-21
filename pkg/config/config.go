@@ -22,8 +22,8 @@ type AutoUpdateConfig struct {
 
 // ToolConfig configures a specific tool
 type ToolConfig struct {
-	Enabled   bool                `json:"enabled"`
-	Overrides map[string]any      `json:"overrides,omitempty"`
+	Enabled   bool           `json:"enabled"`
+	Overrides map[string]any `json:"overrides,omitempty"`
 }
 
 // Settings contains global settings

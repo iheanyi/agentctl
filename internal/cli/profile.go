@@ -8,10 +8,11 @@ import (
 	"sort"
 
 	"github.com/charmbracelet/huh"
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/profile"
-	"github.com/spf13/cobra"
 )
 
 var profileCmd = &cobra.Command{
