@@ -1,0 +1,21 @@
+ agentctl  [Servers]      Commands       Rules       Skills       Prompts                             
+ Hooks       Tools   ● 0  ○ 0  ◌ 0                                                                    
+────────────────────────────────────────────────────────────────────────────────                      
+  No servers match the current filter                                                                 
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+────────────────────────────────────────────────────────────────────────────────                      
+HH:MM:SS  ✓ Added server: filesystem                                                                  
+HH:MM:SS  ⚠ Server github is slow                                                                     
+HH:MM:SS  ✗ Failed to connect to postgres                                                             
+────────────────────────────────────────────────────────────────────────────────                      
+ j/k navigate │ Tab switch tab │ i install │ d delete │ t test │ x tools │ s sync │ / search │ ? help 

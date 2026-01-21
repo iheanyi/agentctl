@@ -1,0 +1,21 @@
+ agentctl   Servers       Commands       Rules       Skills       Prompts       
+ [Hooks]      Tools   2 hooks                                                   
+────────────────────────────────────────────────────────────────────────────────
+   ⏮ PreToolUse [*] (claude)                           echo 'Session started'   
+   ⏭ PostToolUse [Bash] (claude)                                     npm test   
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+────────────────────────────────────────────────────────────────────────────────
+                                                                                
+                                                                                
+                                                                                
+────────────────────────────────────────────────────────────────────────────────
+ j/k navigate │ Tab switch tab │ / search │ ? help                              

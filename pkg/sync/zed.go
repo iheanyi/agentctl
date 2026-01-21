@@ -63,7 +63,7 @@ func (a *ZedAdapter) ConfigPath() string {
 }
 
 func (a *ZedAdapter) SupportedResources() []ResourceType {
-	return []ResourceType{ResourceMCP, ResourceCommands}
+	return []ResourceType{ResourceMCP}
 }
 
 func (a *ZedAdapter) ReadServers() ([]*mcp.Server, error) {

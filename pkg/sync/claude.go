@@ -2,6 +2,7 @@ package sync
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,12 +81,16 @@ func (a *ClaudeAdapter) commandsDir() string {
 	return filepath.Join(a.configDir(), "commands")
 }
 
+func (a *ClaudeAdapter) rulesDir() string {
+	return filepath.Join(a.configDir(), "rules")
+}
+
 func (a *ClaudeAdapter) pluginsDir() string {
 	return filepath.Join(a.configDir(), "plugins")
 }
 
 func (a *ClaudeAdapter) SupportedResources() []ResourceType {
-	return []ResourceType{ResourceMCP, ResourceCommands, ResourceSkills}
+	return []ResourceType{ResourceMCP, ResourceCommands, ResourceRules, ResourceSkills}
 }
 
 func (a *ClaudeAdapter) ReadServers() ([]*mcp.Server, error) {
@@ -199,6 +204,11 @@ func (a *ClaudeAdapter) WriteCommands(commands []*command.Command) error {
 	}
 
 	for _, cmd := range commands {
+		// Validate command name to prevent path traversal
+		if err := SanitizeName(cmd.Name); err != nil {
+			return fmt.Errorf("invalid command name: %w", err)
+		}
+
 		content := formatClaudeCommand(cmd)
 		filename := cmd.Name + ".md"
 		path := filepath.Join(commandsDir, filename)
@@ -212,11 +222,25 @@ func (a *ClaudeAdapter) WriteCommands(commands []*command.Command) error {
 }
 
 func (a *ClaudeAdapter) ReadRules() ([]*rule.Rule, error) {
-	return nil, nil // Claude Code doesn't have rules
+	rulesDir := a.rulesDir()
+	return rule.LoadAll(rulesDir)
 }
 
 func (a *ClaudeAdapter) WriteRules(rules []*rule.Rule) error {
-	return nil // Claude Code doesn't have rules
+	rulesDir := a.rulesDir()
+
+	// Ensure directory exists
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		return err
+	}
+
+	for _, r := range rules {
+		if err := rule.Save(r, rulesDir); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // ReadSkills reads installed plugins as skills
@@ -262,6 +286,30 @@ func (a *ClaudeAdapter) ReadSkills() ([]*skill.Skill, error) {
 	}
 
 	return skills, nil
+}
+
+// WriteSkills writes skills to Claude Code's skills directory
+// Note: This writes to ~/.claude/skills/, not the plugins system
+func (a *ClaudeAdapter) WriteSkills(skills []*skill.Skill) error {
+	skillsDir := filepath.Join(a.configDir(), "skills")
+
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		return err
+	}
+
+	for _, s := range skills {
+		// Validate skill name to prevent path traversal
+		if err := SanitizeName(s.Name); err != nil {
+			return fmt.Errorf("invalid skill name: %w", err)
+		}
+
+		skillDir := filepath.Join(skillsDir, s.Name)
+		if err := s.Save(skillDir); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (a *ClaudeAdapter) loadSettings() (*ClaudeCodeSettings, error) {
@@ -356,28 +404,6 @@ func parseClaudeCommand(filename string, content string) *command.Command {
 	}
 
 	return cmd
-}
-
-// parseToolsList parses a YAML list or comma-separated tools string
-func parseToolsList(s string) []string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil
-	}
-	// Handle YAML array format [tool1, tool2]
-	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
-		s = strings.TrimPrefix(s, "[")
-		s = strings.TrimSuffix(s, "]")
-	}
-	parts := strings.Split(s, ",")
-	var tools []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			tools = append(tools, p)
-		}
-	}
-	return tools
 }
 
 // formatClaudeCommand formats a command for Claude Code

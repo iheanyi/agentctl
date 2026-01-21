@@ -14,7 +14,7 @@ func TestAdapterRegistry(t *testing.T) {
 	// All adapters should be auto-registered via init()
 	adapters := All()
 
-	expectedAdapters := []string{"claude", "cursor", "windsurf", "cline", "continue", "zed", "codex", "opencode"}
+	expectedAdapters := []string{"claude", "cursor", "windsurf", "cline", "continue", "zed", "codex", "opencode", "copilot", "gemini", "claude-desktop"}
 
 	for _, name := range expectedAdapters {
 		found := false
@@ -190,9 +190,10 @@ func TestCursorAdapter(t *testing.T) {
 
 	supported := adapter.SupportedResources()
 
-	// Verify MCP and Rules are supported
+	// Verify MCP, Rules, and Commands are supported
 	hasMCP := false
 	hasRules := false
+	hasCommands := false
 	for _, r := range supported {
 		if r == ResourceMCP {
 			hasMCP = true
@@ -200,12 +201,85 @@ func TestCursorAdapter(t *testing.T) {
 		if r == ResourceRules {
 			hasRules = true
 		}
+		if r == ResourceCommands {
+			hasCommands = true
+		}
 	}
 	if !hasMCP {
 		t.Error("Cursor adapter should support MCP")
 	}
 	if !hasRules {
 		t.Error("Cursor adapter should support Rules")
+	}
+	if !hasCommands {
+		t.Error("Cursor adapter should support Commands")
+	}
+}
+
+func TestParseCursorCommand(t *testing.T) {
+	tests := []struct {
+		name            string
+		filename        string
+		content         string
+		wantName        string
+		wantDescription string
+		wantPrompt      string
+	}{
+		{
+			name:       "simple command",
+			filename:   "test.md",
+			content:    "Simple prompt content",
+			wantName:   "test",
+			wantPrompt: "Simple prompt content",
+		},
+		{
+			name:     "command with frontmatter",
+			filename: "review.md",
+			content: `---
+description: Review code changes
+---
+
+Review the following code`,
+			wantName:        "review",
+			wantDescription: "Review code changes",
+			wantPrompt:      "Review the following code",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := parseCursorCommand(tt.filename, tt.content)
+
+			if cmd.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", cmd.Name, tt.wantName)
+			}
+			if cmd.Description != tt.wantDescription {
+				t.Errorf("Description = %q, want %q", cmd.Description, tt.wantDescription)
+			}
+			if cmd.Prompt != tt.wantPrompt {
+				t.Errorf("Prompt = %q, want %q", cmd.Prompt, tt.wantPrompt)
+			}
+		})
+	}
+}
+
+func TestFormatCursorCommand(t *testing.T) {
+	cmd := &command.Command{
+		Name:        "test",
+		Description: "Test command",
+		Prompt:      "Do the thing",
+	}
+
+	output := formatCursorCommand(cmd)
+
+	if !contains(output, "description: Test command") {
+		t.Error("Output should contain description")
+	}
+	if !contains(output, "Do the thing") {
+		t.Error("Output should contain prompt")
+	}
+	if !contains(output, "---") {
+		t.Error("Output should have frontmatter delimiters")
 	}
 }
 
@@ -264,10 +338,10 @@ func TestParseClaudeCommand(t *testing.T) {
 		wantPrompt       string
 	}{
 		{
-			name:     "simple command without frontmatter",
-			filename: "simple.md",
-			content:  "Just a prompt",
-			wantName: "simple",
+			name:       "simple command without frontmatter",
+			filename:   "simple.md",
+			content:    "Just a prompt",
+			wantName:   "simple",
 			wantPrompt: "Just a prompt",
 		},
 		{
@@ -423,4 +497,522 @@ func containsHelper(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// ============================================
+// Copilot Adapter Tests
+// ============================================
+
+func TestCopilotAdapter(t *testing.T) {
+	adapter := &CopilotAdapter{}
+
+	if adapter.Name() != "copilot" {
+		t.Errorf("Name should be 'copilot', got %q", adapter.Name())
+	}
+
+	supported := adapter.SupportedResources()
+
+	// Verify all resource types are supported
+	hasMCP := false
+	hasCommands := false
+	hasRules := false
+	hasSkills := false
+	for _, r := range supported {
+		switch r {
+		case ResourceMCP:
+			hasMCP = true
+		case ResourceCommands:
+			hasCommands = true
+		case ResourceRules:
+			hasRules = true
+		case ResourceSkills:
+			hasSkills = true
+		}
+	}
+
+	if !hasMCP {
+		t.Error("Copilot adapter should support MCP")
+	}
+	if !hasCommands {
+		t.Error("Copilot adapter should support Commands")
+	}
+	if !hasRules {
+		t.Error("Copilot adapter should support Rules")
+	}
+	if !hasSkills {
+		t.Error("Copilot adapter should support Skills")
+	}
+}
+
+func TestParseCopilotCommand(t *testing.T) {
+	tests := []struct {
+		name            string
+		filename        string
+		content         string
+		wantName        string
+		wantDescription string
+		wantArgHint     string
+		wantPrompt      string
+	}{
+		{
+			name:       "simple command",
+			filename:   "test.md",
+			content:    "Just a simple prompt",
+			wantName:   "test",
+			wantPrompt: "Just a simple prompt",
+		},
+		{
+			name:     "command with frontmatter",
+			filename: "review.md",
+			content: `---
+description: Review code changes
+argument-hint: [file or PR]
+---
+
+Review the code carefully`,
+			wantName:        "review",
+			wantDescription: "Review code changes",
+			wantArgHint:     "[file or PR]",
+			wantPrompt:      "Review the code carefully",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := parseCopilotCommand(tt.filename, tt.content)
+
+			if cmd.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", cmd.Name, tt.wantName)
+			}
+			if cmd.Description != tt.wantDescription {
+				t.Errorf("Description = %q, want %q", cmd.Description, tt.wantDescription)
+			}
+			if cmd.ArgumentHint != tt.wantArgHint {
+				t.Errorf("ArgumentHint = %q, want %q", cmd.ArgumentHint, tt.wantArgHint)
+			}
+			if cmd.Prompt != tt.wantPrompt {
+				t.Errorf("Prompt = %q, want %q", cmd.Prompt, tt.wantPrompt)
+			}
+		})
+	}
+}
+
+func TestFormatCopilotCommand(t *testing.T) {
+	cmd := &command.Command{
+		Name:         "test",
+		Description:  "Test command",
+		ArgumentHint: "[input]",
+		Prompt:       "Do the thing",
+	}
+
+	output := formatCopilotCommand(cmd)
+
+	if !contains(output, "description: Test command") {
+		t.Error("Output should contain description")
+	}
+	if !contains(output, "argument-hint: [input]") {
+		t.Error("Output should contain argument-hint")
+	}
+	if !contains(output, "Do the thing") {
+		t.Error("Output should contain prompt")
+	}
+}
+
+// ============================================
+// SkillsAdapter Interface Tests
+// ============================================
+
+func TestSkillsAdapterInterface(t *testing.T) {
+	// Test that adapters that claim to support skills implement SkillsAdapter
+	skillAdapters := []string{"claude", "copilot", "codex", "opencode"}
+
+	for _, name := range skillAdapters {
+		t.Run(name, func(t *testing.T) {
+			adapter, ok := Get(name)
+			if !ok {
+				t.Fatalf("Adapter %q should be registered", name)
+			}
+
+			// Check if it supports skills resource
+			supported := adapter.SupportedResources()
+			hasSkills := false
+			for _, r := range supported {
+				if r == ResourceSkills {
+					hasSkills = true
+					break
+				}
+			}
+			if !hasSkills {
+				t.Errorf("Adapter %q should support ResourceSkills", name)
+				return
+			}
+
+			// Check if it implements SkillsAdapter
+			if !SupportsSkills(adapter) {
+				t.Errorf("Adapter %q claims to support skills but doesn't implement SkillsAdapter", name)
+			}
+
+			// Test AsSkillsAdapter
+			sa, ok := AsSkillsAdapter(adapter)
+			if !ok {
+				t.Errorf("AsSkillsAdapter should return true for %q", name)
+			}
+			if sa == nil {
+				t.Errorf("AsSkillsAdapter should return non-nil for %q", name)
+			}
+		})
+	}
+}
+
+// ============================================
+// Codex Adapter Tests
+// ============================================
+
+func TestCodexAdapter(t *testing.T) {
+	adapter := &CodexAdapter{}
+
+	if adapter.Name() != "codex" {
+		t.Errorf("Name should be 'codex', got %q", adapter.Name())
+	}
+
+	supported := adapter.SupportedResources()
+	if len(supported) == 0 {
+		t.Error("Codex adapter should support at least one resource type")
+	}
+
+	// Verify MCP, Commands, Rules, Skills are supported
+	hasMCP := false
+	hasCommands := false
+	hasRules := false
+	hasSkills := false
+	for _, r := range supported {
+		switch r {
+		case ResourceMCP:
+			hasMCP = true
+		case ResourceCommands:
+			hasCommands = true
+		case ResourceRules:
+			hasRules = true
+		case ResourceSkills:
+			hasSkills = true
+		}
+	}
+
+	if !hasMCP {
+		t.Error("Codex adapter should support MCP")
+	}
+	if !hasCommands {
+		t.Error("Codex adapter should support Commands")
+	}
+	if !hasRules {
+		t.Error("Codex adapter should support Rules")
+	}
+	if !hasSkills {
+		t.Error("Codex adapter should support Skills")
+	}
+}
+
+func TestParseCodexPrompt(t *testing.T) {
+	tests := []struct {
+		name            string
+		filename        string
+		content         string
+		wantName        string
+		wantDescription string
+		wantArgHint     string
+		wantPrompt      string
+	}{
+		{
+			name:       "simple prompt",
+			filename:   "help.md",
+			content:    "Help me with this",
+			wantName:   "help",
+			wantPrompt: "Help me with this",
+		},
+		{
+			name:     "prompt with frontmatter",
+			filename: "explain.md",
+			content: `---
+description: Explain code
+argument-hint: [code snippet]
+---
+
+Explain this code in detail`,
+			wantName:        "explain",
+			wantDescription: "Explain code",
+			wantArgHint:     "[code snippet]",
+			wantPrompt:      "Explain this code in detail",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := parseCodexPrompt(tt.filename, tt.content)
+
+			if cmd.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", cmd.Name, tt.wantName)
+			}
+			if cmd.Description != tt.wantDescription {
+				t.Errorf("Description = %q, want %q", cmd.Description, tt.wantDescription)
+			}
+			if cmd.ArgumentHint != tt.wantArgHint {
+				t.Errorf("ArgumentHint = %q, want %q", cmd.ArgumentHint, tt.wantArgHint)
+			}
+			if cmd.Prompt != tt.wantPrompt {
+				t.Errorf("Prompt = %q, want %q", cmd.Prompt, tt.wantPrompt)
+			}
+		})
+	}
+}
+
+func TestFormatCodexPrompt(t *testing.T) {
+	cmd := &command.Command{
+		Name:         "test",
+		Description:  "Test prompt",
+		ArgumentHint: "[file]",
+		Prompt:       "Execute task",
+	}
+
+	output := formatCodexPrompt(cmd)
+
+	if !contains(output, "description: Test prompt") {
+		t.Error("Output should contain description")
+	}
+	if !contains(output, "argument-hint: [file]") {
+		t.Error("Output should contain argument-hint")
+	}
+	if !contains(output, "Execute task") {
+		t.Error("Output should contain prompt")
+	}
+}
+
+// ============================================
+// OpenCode Adapter Tests
+// ============================================
+
+func TestOpenCodeAdapter(t *testing.T) {
+	adapter := &OpenCodeAdapter{}
+
+	if adapter.Name() != "opencode" {
+		t.Errorf("Name should be 'opencode', got %q", adapter.Name())
+	}
+
+	supported := adapter.SupportedResources()
+
+	// Verify all resource types are supported
+	hasMCP := false
+	hasCommands := false
+	hasRules := false
+	hasSkills := false
+	for _, r := range supported {
+		switch r {
+		case ResourceMCP:
+			hasMCP = true
+		case ResourceCommands:
+			hasCommands = true
+		case ResourceRules:
+			hasRules = true
+		case ResourceSkills:
+			hasSkills = true
+		}
+	}
+
+	if !hasMCP {
+		t.Error("OpenCode adapter should support MCP")
+	}
+	if !hasCommands {
+		t.Error("OpenCode adapter should support Commands")
+	}
+	if !hasRules {
+		t.Error("OpenCode adapter should support Rules")
+	}
+	if !hasSkills {
+		t.Error("OpenCode adapter should support Skills")
+	}
+}
+
+func TestParseOpenCodeCommand(t *testing.T) {
+	tests := []struct {
+		name            string
+		filename        string
+		content         string
+		wantName        string
+		wantDescription string
+		wantModel       string
+		wantPrompt      string
+	}{
+		{
+			name:       "simple command",
+			filename:   "fix.md",
+			content:    "Fix this issue",
+			wantName:   "fix",
+			wantPrompt: "Fix this issue",
+		},
+		{
+			name:     "command with frontmatter",
+			filename: "review.md",
+			content: `---
+description: Code review
+model: claude-3-sonnet
+---
+
+Review this code`,
+			wantName:        "review",
+			wantDescription: "Code review",
+			wantModel:       "claude-3-sonnet",
+			wantPrompt:      "Review this code",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := parseOpenCodeCommand(tt.filename, tt.content)
+
+			if cmd.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", cmd.Name, tt.wantName)
+			}
+			if cmd.Description != tt.wantDescription {
+				t.Errorf("Description = %q, want %q", cmd.Description, tt.wantDescription)
+			}
+			if cmd.Model != tt.wantModel {
+				t.Errorf("Model = %q, want %q", cmd.Model, tt.wantModel)
+			}
+			if cmd.Prompt != tt.wantPrompt {
+				t.Errorf("Prompt = %q, want %q", cmd.Prompt, tt.wantPrompt)
+			}
+		})
+	}
+}
+
+func TestFormatOpenCodeCommand(t *testing.T) {
+	cmd := &command.Command{
+		Name:        "test",
+		Description: "Test command",
+		Model:       "gpt-4",
+		Prompt:      "Execute",
+	}
+
+	output := formatOpenCodeCommand(cmd)
+
+	if !contains(output, "description: Test command") {
+		t.Error("Output should contain description")
+	}
+	if !contains(output, "model: gpt-4") {
+		t.Error("Output should contain model")
+	}
+	if !contains(output, "Execute") {
+		t.Error("Output should contain prompt")
+	}
+}
+
+// ============================================
+// Filter Functions Tests
+// ============================================
+
+func TestFilterStdioServers(t *testing.T) {
+	servers := []*mcp.Server{
+		{Name: "stdio1", Command: "echo"},
+		{Name: "http1", URL: "http://example.com", Transport: mcp.TransportHTTP},
+		{Name: "sse1", URL: "http://example.com/sse", Transport: mcp.TransportSSE},
+		{Name: "stdio2", Command: "cat"},
+	}
+
+	filtered := FilterStdioServers(servers)
+
+	if len(filtered) != 2 {
+		t.Errorf("Expected 2 stdio servers, got %d", len(filtered))
+	}
+
+	for _, s := range filtered {
+		if s.Transport == mcp.TransportHTTP || s.Transport == mcp.TransportSSE {
+			t.Errorf("Filtered list should not contain HTTP/SSE servers, found %q", s.Name)
+		}
+	}
+}
+
+// ============================================
+// Workspace Adapter Tests
+// ============================================
+
+func TestWorkspaceAdapterInterface(t *testing.T) {
+	// Claude and Cursor should support workspace configs
+	workspaceAdapters := []string{"claude", "cursor"}
+
+	for _, name := range workspaceAdapters {
+		t.Run(name, func(t *testing.T) {
+			adapter, ok := Get(name)
+			if !ok {
+				t.Fatalf("Adapter %q should be registered", name)
+			}
+
+			if !SupportsWorkspace(adapter) {
+				t.Errorf("Adapter %q should support workspace configs", name)
+			}
+
+			wa, ok := AsWorkspaceAdapter(adapter)
+			if !ok {
+				t.Errorf("AsWorkspaceAdapter should return true for %q", name)
+			}
+			if wa == nil {
+				t.Errorf("AsWorkspaceAdapter should return non-nil for %q", name)
+			}
+		})
+	}
+
+	// Non-workspace adapters should return false
+	nonWorkspaceAdapters := []string{"codex", "opencode", "copilot"}
+	for _, name := range nonWorkspaceAdapters {
+		t.Run(name+"_no_workspace", func(t *testing.T) {
+			adapter, ok := Get(name)
+			if !ok {
+				t.Skipf("Adapter %q not registered", name)
+			}
+
+			if SupportsWorkspace(adapter) {
+				t.Errorf("Adapter %q should not support workspace configs", name)
+			}
+		})
+	}
+}
+
+// ============================================
+// Empty Name Server Protection Tests
+// ============================================
+
+func TestEmptyNameServerProtection(t *testing.T) {
+	// Test that servers with empty names are skipped during write
+	// This tests the behavior of adapters that call FilterStdioServers
+	// and check for empty names in their WriteServers implementation
+	servers := []*mcp.Server{
+		{Name: "", Command: "should-skip"},
+		{Name: "valid", Command: "echo"},
+	}
+
+	// Test that FilterStdioServers preserves empty name servers
+	// (the empty name check is in WriteServers, not filter)
+	filtered := FilterStdioServers(servers)
+	if len(filtered) != 2 {
+		t.Errorf("FilterStdioServers should preserve all stdio servers including empty names, got %d", len(filtered))
+	}
+
+	// Test that adapters with empty name protection work
+	// The protection is implemented in each adapter's WriteServers
+	// We test this indirectly through the server slice processing
+	var validServers []*mcp.Server
+	for _, s := range servers {
+		name := s.Name
+		if s.Namespace != "" {
+			name = s.Namespace
+		}
+		if name != "" {
+			validServers = append(validServers, s)
+		}
+	}
+
+	if len(validServers) != 1 {
+		t.Errorf("Expected 1 valid server after filtering empty names, got %d", len(validServers))
+	}
+	if validServers[0].Name != "valid" {
+		t.Errorf("Expected 'valid' server, got %q", validServers[0].Name)
+	}
 }

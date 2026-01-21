@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/sync"
 	"github.com/spf13/cobra"
 )
@@ -43,15 +44,22 @@ type ValidationResult struct {
 }
 
 func runValidate(cmd *cobra.Command, args []string) error {
-	fmt.Println("Validating configurations...")
-	fmt.Println()
+	if !JSONOutput {
+		fmt.Println("Validating configurations...")
+		fmt.Println()
+	}
 
 	// Get adapters to validate
 	var adapters []sync.Adapter
 	if validateTool != "" {
 		adapter, ok := sync.Get(validateTool)
 		if !ok {
-			return fmt.Errorf("unknown tool %q", validateTool)
+			err := fmt.Errorf("unknown tool %q", validateTool)
+			if JSONOutput {
+				jw := output.NewJSONWriter()
+				return jw.WriteError(err)
+			}
+			return err
 		}
 		adapters = []sync.Adapter{adapter}
 	} else {
@@ -59,6 +67,17 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(adapters) == 0 {
+		if JSONOutput {
+			jw := output.NewJSONWriter()
+			return jw.WriteSuccess(output.ValidateOutput{
+				Results: []output.ValidateToolResult{},
+				Summary: output.ValidateSummary{
+					TotalTools:   0,
+					ValidTools:   0,
+					InvalidTools: 0,
+				},
+			})
+		}
 		fmt.Println("No supported tools detected.")
 		return nil
 	}
@@ -72,6 +91,46 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		if !result.Valid {
 			hasErrors = true
 		}
+	}
+
+	// JSON output
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		validateOutput := output.ValidateOutput{
+			Results: make([]output.ValidateToolResult, len(results)),
+		}
+
+		validCount := 0
+		for i, r := range results {
+			validateOutput.Results[i] = output.ValidateToolResult{
+				Tool:        r.Tool,
+				ConfigPath:  r.ConfigPath,
+				Valid:       r.Valid,
+				Errors:      r.Errors,
+				Warnings:    r.Warnings,
+				ServerCount: r.ServerCount,
+			}
+			if r.Valid {
+				validCount++
+			}
+		}
+
+		validateOutput.Summary = output.ValidateSummary{
+			TotalTools:   len(results),
+			ValidTools:   validCount,
+			InvalidTools: len(results) - validCount,
+		}
+
+		return jw.Write(output.CLIOutput{
+			Success: !hasErrors,
+			Data:    validateOutput,
+			Error: func() string {
+				if hasErrors {
+					return "validation failed"
+				}
+				return ""
+			}(),
+		})
 	}
 
 	// Print results

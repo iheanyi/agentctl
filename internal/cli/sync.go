@@ -8,6 +8,7 @@ import (
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/mcp"
+	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/sync"
 	"github.com/spf13/cobra"
@@ -64,6 +65,10 @@ func runSync(cmd *cobra.Command, args []string) error {
 		var err error
 		scope, err = config.ParseScope(syncScope)
 		if err != nil {
+			if JSONOutput {
+				jw := output.NewJSONWriter()
+				return jw.WriteError(err)
+			}
 			return err
 		}
 	} else {
@@ -73,11 +78,15 @@ func runSync(cmd *cobra.Command, args []string) error {
 	// Load config (including project config if present)
 	cfg, err := config.LoadWithProject()
 	if err != nil {
+		if JSONOutput {
+			jw := output.NewJSONWriter()
+			return jw.WriteError(fmt.Errorf("failed to load config: %w", err))
+		}
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Show project config notice if applicable
-	if cfg.ProjectPath != "" {
+	// Show project config notice if applicable (not in JSON mode)
+	if cfg.ProjectPath != "" && !JSONOutput {
 		fmt.Printf("Using project config: %s\n\n", cfg.ProjectPath)
 	}
 
@@ -103,14 +112,29 @@ func runSync(cmd *cobra.Command, args []string) error {
 	rules := cfg.LoadedRules
 
 	if len(servers) == 0 && len(commands) == 0 && len(rules) == 0 {
+		if JSONOutput {
+			jw := output.NewJSONWriter()
+			return jw.WriteSuccess(output.SyncOutput{
+				DryRun:      syncDryRun,
+				ProjectPath: cfg.ProjectPath,
+				ToolResults: []output.SyncToolResult{},
+				Summary: output.SyncSummary{
+					ToolsSucceeded: 0,
+					ToolsFailed:    0,
+					TotalServers:   0,
+					TotalCommands:  0,
+					TotalRules:     0,
+				},
+			})
+		}
 		fmt.Println("No resources to sync.")
 		fmt.Println("Use 'agentctl install <server>' to add servers.")
 		fmt.Println("Use 'agentctl import <tool>' to import existing config.")
 		return nil
 	}
 
-	// Show verbose summary of resources to sync
-	if syncVerbose {
+	// Show verbose summary of resources to sync (not in JSON mode)
+	if syncVerbose && !JSONOutput {
 		fmt.Println("Resources to sync:")
 		if len(servers) > 0 {
 			fmt.Printf("\nServers (%d):\n", len(servers))
@@ -132,7 +156,12 @@ func runSync(cmd *cobra.Command, args []string) error {
 	if syncTool != "" {
 		adapter, ok := sync.Get(syncTool)
 		if !ok {
-			return fmt.Errorf("unknown tool %q", syncTool)
+			err := fmt.Errorf("unknown tool %q", syncTool)
+			if JSONOutput {
+				jw := output.NewJSONWriter()
+				return jw.WriteError(err)
+			}
+			return err
 		}
 		adapters = []sync.Adapter{adapter}
 	} else {
@@ -140,12 +169,27 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(adapters) == 0 {
+		if JSONOutput {
+			jw := output.NewJSONWriter()
+			return jw.WriteSuccess(output.SyncOutput{
+				DryRun:      syncDryRun,
+				ProjectPath: cfg.ProjectPath,
+				ToolResults: []output.SyncToolResult{},
+				Summary: output.SyncSummary{
+					ToolsSucceeded: 0,
+					ToolsFailed:    0,
+					TotalServers:   len(servers),
+					TotalCommands:  len(commands),
+					TotalRules:     len(rules),
+				},
+			})
+		}
 		fmt.Println("No supported tools detected.")
 		fmt.Println("\nSupported tools: Claude Code, Cursor, Codex, OpenCode, Cline, Windsurf, Zed, Continue")
 		return nil
 	}
 
-	if syncDryRun {
+	if syncDryRun && !JSONOutput {
 		fmt.Println("Dry run - no changes will be made")
 	}
 
@@ -155,6 +199,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 		state = nil // Continue without state if loading fails
 	}
 
+	// JSON output tracking
+	var toolResults []output.SyncToolResult
+
 	// Sync to each adapter
 	var successCount, errorCount int
 	for _, adapter := range adapters {
@@ -163,20 +210,34 @@ func runSync(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		fmt.Printf("Syncing to %s...\n", adapter.Name())
+		if !JSONOutput {
+			fmt.Printf("Syncing to %s...\n", adapter.Name())
+		}
 
 		// Show config path in verbose mode
-		if syncVerbose {
+		if syncVerbose && !JSONOutput {
 			fmt.Printf("  Config: %s\n", adapter.ConfigPath())
 		}
 
 		// Get supported resources
 		supported := adapter.SupportedResources()
 
+		// Track tool result for JSON output
+		toolResult := output.SyncToolResult{
+			Tool:       adapter.Name(),
+			ConfigPath: adapter.ConfigPath(),
+			Success:    true,
+		}
+
 		if syncDryRun {
 			if containsResourceType(supported, sync.ResourceMCP) && len(servers) > 0 {
 				// Read existing servers and compute diff
-				existingServers, readErr := adapter.ReadServers()
+				sa, saOk := sync.AsServerAdapter(adapter)
+				var existingServers []*mcp.Server
+				var readErr error
+				if saOk {
+					existingServers, readErr = sa.ReadServers()
+				}
 				var managedNames []string
 				if state != nil {
 					managedNames = state.GetManagedServers(adapter.Name())
@@ -184,41 +245,100 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 				if readErr == nil {
 					diff := computeServerDiff(existingServers, servers, managedNames)
-					if syncVerbose {
-						printServerDiff(diff, "  ")
-					} else {
-						// Show summary in non-verbose mode
-						fmt.Printf("  Would sync %d server(s)", len(servers))
-						if len(diff.toAdd) > 0 {
-							fmt.Printf(" (+%d new)", len(diff.toAdd))
+
+					// Track changes for JSON
+					toolResult.ServersAdded = len(diff.toAdd)
+					toolResult.ServersUpdated = len(diff.toUpdate)
+					toolResult.ServersRemoved = len(diff.toRemove)
+
+					for _, s := range diff.toAdd {
+						name := s.Name
+						if s.Namespace != "" {
+							name = s.Namespace
 						}
-						if len(diff.toUpdate) > 0 {
-							fmt.Printf(" (~%d update)", len(diff.toUpdate))
+						toolResult.Changes = append(toolResult.Changes, output.SyncChange{
+							Type:     "add",
+							Resource: "server",
+							Name:     name,
+						})
+					}
+					for _, s := range diff.toUpdate {
+						name := s.Name
+						if s.Namespace != "" {
+							name = s.Namespace
 						}
-						if len(diff.unmanaged) > 0 {
-							fmt.Printf(" (=%d preserved)", len(diff.unmanaged))
+						toolResult.Changes = append(toolResult.Changes, output.SyncChange{
+							Type:     "update",
+							Resource: "server",
+							Name:     name,
+						})
+					}
+					for _, name := range diff.toRemove {
+						toolResult.Changes = append(toolResult.Changes, output.SyncChange{
+							Type:     "remove",
+							Resource: "server",
+							Name:     name,
+						})
+					}
+					for _, s := range diff.unmanaged {
+						name := s.Name
+						if s.Namespace != "" {
+							name = s.Namespace
 						}
-						fmt.Println()
+						toolResult.Changes = append(toolResult.Changes, output.SyncChange{
+							Type:     "preserve",
+							Resource: "server",
+							Name:     name,
+						})
+					}
+
+					if !JSONOutput {
+						if syncVerbose {
+							printServerDiff(diff, "  ")
+						} else {
+							// Show summary in non-verbose mode
+							fmt.Printf("  Would sync %d server(s)", len(servers))
+							if len(diff.toAdd) > 0 {
+								fmt.Printf(" (+%d new)", len(diff.toAdd))
+							}
+							if len(diff.toUpdate) > 0 {
+								fmt.Printf(" (~%d update)", len(diff.toUpdate))
+							}
+							if len(diff.unmanaged) > 0 {
+								fmt.Printf(" (=%d preserved)", len(diff.unmanaged))
+							}
+							fmt.Println()
+						}
 					}
 				} else {
-					fmt.Printf("  Would sync %d server(s)\n", len(servers))
-					if syncVerbose {
-						printVerboseServers(servers, "    ")
+					toolResult.ServersAdded = len(servers)
+					if !JSONOutput {
+						fmt.Printf("  Would sync %d server(s)\n", len(servers))
+						if syncVerbose {
+							printVerboseServers(servers, "    ")
+						}
 					}
 				}
 			}
 			if containsResourceType(supported, sync.ResourceCommands) && len(commands) > 0 {
-				fmt.Printf("  Would sync %d command(s)\n", len(commands))
-				if syncVerbose {
-					printVerboseCommands(commands, "    ")
+				toolResult.CommandsSynced = len(commands)
+				if !JSONOutput {
+					fmt.Printf("  Would sync %d command(s)\n", len(commands))
+					if syncVerbose {
+						printVerboseCommands(commands, "    ")
+					}
 				}
 			}
 			if containsResourceType(supported, sync.ResourceRules) && len(rules) > 0 {
-				fmt.Printf("  Would sync %d rule(s)\n", len(rules))
-				if syncVerbose {
-					printVerboseRules(rules, "    ")
+				toolResult.RulesSynced = len(rules)
+				if !JSONOutput {
+					fmt.Printf("  Would sync %d rule(s)\n", len(rules))
+					if syncVerbose {
+						printVerboseRules(rules, "    ")
+					}
 				}
 			}
+			toolResults = append(toolResults, toolResult)
 			successCount++
 			continue
 		}
@@ -242,32 +362,56 @@ func runSync(cmd *cobra.Command, args []string) error {
 			if len(localServers) > 0 && hasWorkspace && projectDir != "" {
 				workspacePath := wa.WorkspaceConfigPath(projectDir)
 				if err := wa.WriteWorkspaceServers(projectDir, localServers); err != nil {
-					fmt.Printf("  Error syncing local servers to workspace: %v\n", err)
+					if !JSONOutput {
+						fmt.Printf("  Error syncing local servers to workspace: %v\n", err)
+					}
+					toolResult.Success = false
+					toolResult.Error = fmt.Sprintf("Error syncing local servers: %v", err)
 					errorCount++
 				} else {
-					fmt.Printf("  Synced %d local server(s) to %s\n", len(localServers), workspacePath)
-					if syncVerbose {
-						printVerboseServers(localServers, "    ")
+					if !JSONOutput {
+						fmt.Printf("  Synced %d local server(s) to %s\n", len(localServers), workspacePath)
+						if syncVerbose {
+							printVerboseServers(localServers, "    ")
+						}
 					}
+					toolResult.ServersAdded += len(localServers)
 					syncedAny = true
 				}
 			} else if len(localServers) > 0 {
 				// Tool doesn't support workspace configs - warn and sync to global
-				fmt.Printf("  Warning: %s doesn't support workspace configs\n", adapter.Name())
-				fmt.Printf("  Syncing %d local server(s) to global config\n", len(localServers))
+				if !JSONOutput {
+					fmt.Printf("  Warning: %s doesn't support workspace configs\n", adapter.Name())
+					fmt.Printf("  Syncing %d local server(s) to global config\n", len(localServers))
+				}
 				globalServers = append(globalServers, localServers...)
 			}
 
 			// Sync global servers to global config
 			if len(globalServers) > 0 {
-				if err := adapter.WriteServers(globalServers); err != nil {
-					fmt.Printf("  Error syncing global servers: %v\n", err)
+				sa, ok := sync.AsServerAdapter(adapter)
+				if !ok {
+					if !JSONOutput {
+						fmt.Printf("  Error: adapter doesn't support servers\n")
+					}
+					toolResult.Success = false
+					toolResult.Error = "Adapter doesn't support servers"
+					errorCount++
+				} else if err := sa.WriteServers(globalServers); err != nil {
+					if !JSONOutput {
+						fmt.Printf("  Error syncing global servers: %v\n", err)
+					}
+					toolResult.Success = false
+					toolResult.Error = fmt.Sprintf("Error syncing global servers: %v", err)
 					errorCount++
 				} else {
-					fmt.Printf("  Synced %d global server(s)\n", len(globalServers))
-					if syncVerbose {
-						printVerboseServers(globalServers, "    ")
+					if !JSONOutput {
+						fmt.Printf("  Synced %d global server(s)\n", len(globalServers))
+						if syncVerbose {
+							printVerboseServers(globalServers, "    ")
+						}
 					}
+					toolResult.ServersAdded += len(globalServers)
 					syncedAny = true
 				}
 			}
@@ -275,33 +419,75 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 		// Sync commands if supported
 		if containsResourceType(supported, sync.ResourceCommands) && len(commands) > 0 {
-			if err := adapter.WriteCommands(commands); err != nil {
-				fmt.Printf("  Error syncing commands: %v\n", err)
-			} else {
-				fmt.Printf("  Synced %d command(s)\n", len(commands))
-				if syncVerbose {
-					printVerboseCommands(commands, "    ")
+			ca, ok := sync.AsCommandsAdapter(adapter)
+			if !ok {
+				if !JSONOutput {
+					fmt.Printf("  Error: adapter doesn't support commands\n")
 				}
+				toolResult.Error = "Adapter doesn't support commands"
+			} else if err := ca.WriteCommands(commands); err != nil {
+				if !JSONOutput {
+					fmt.Printf("  Error syncing commands: %v\n", err)
+				}
+				toolResult.Error = fmt.Sprintf("Error syncing commands: %v", err)
+			} else {
+				if !JSONOutput {
+					fmt.Printf("  Synced %d command(s)\n", len(commands))
+					if syncVerbose {
+						printVerboseCommands(commands, "    ")
+					}
+				}
+				toolResult.CommandsSynced = len(commands)
 				syncedAny = true
 			}
 		}
 
 		// Sync rules if supported
 		if containsResourceType(supported, sync.ResourceRules) && len(rules) > 0 {
-			if err := adapter.WriteRules(rules); err != nil {
-				fmt.Printf("  Error syncing rules: %v\n", err)
-			} else {
-				fmt.Printf("  Synced %d rule(s)\n", len(rules))
-				if syncVerbose {
-					printVerboseRules(rules, "    ")
+			ra, ok := sync.AsRulesAdapter(adapter)
+			if !ok {
+				if !JSONOutput {
+					fmt.Printf("  Error: adapter doesn't support rules\n")
 				}
+				toolResult.Error = "Adapter doesn't support rules"
+			} else if err := ra.WriteRules(rules); err != nil {
+				if !JSONOutput {
+					fmt.Printf("  Error syncing rules: %v\n", err)
+				}
+				toolResult.Error = fmt.Sprintf("Error syncing rules: %v", err)
+			} else {
+				if !JSONOutput {
+					fmt.Printf("  Synced %d rule(s)\n", len(rules))
+					if syncVerbose {
+						printVerboseRules(rules, "    ")
+					}
+				}
+				toolResult.RulesSynced = len(rules)
 				syncedAny = true
 			}
 		}
 
+		toolResults = append(toolResults, toolResult)
 		if syncedAny {
 			successCount++
 		}
+	}
+
+	// JSON output
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.WriteSuccess(output.SyncOutput{
+			DryRun:      syncDryRun,
+			ProjectPath: cfg.ProjectPath,
+			ToolResults: toolResults,
+			Summary: output.SyncSummary{
+				ToolsSucceeded: successCount,
+				ToolsFailed:    errorCount,
+				TotalServers:   len(servers),
+				TotalCommands:  len(commands),
+				TotalRules:     len(rules),
+			},
+		})
 	}
 
 	fmt.Println()

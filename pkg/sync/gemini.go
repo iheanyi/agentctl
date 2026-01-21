@@ -87,7 +87,7 @@ func (a *GeminiAdapter) ReadServers() ([]*mcp.Server, error) {
 			Args:    serverCfg.Args,
 			Env:     serverCfg.Env,
 		}
-		
+
 		if serverCfg.Transport == "http" || serverCfg.Transport == "sse" {
 			server.Transport = mcp.Transport(serverCfg.Transport)
 			server.URL = serverCfg.URL
@@ -182,7 +182,7 @@ func (a *GeminiAdapter) loadConfig() (*GeminiConfig, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
-	
+
 	config.Other = raw
 
 	return &config, nil

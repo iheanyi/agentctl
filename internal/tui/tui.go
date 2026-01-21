@@ -44,10 +44,11 @@ const (
 	TabSkills
 	TabPrompts
 	TabHooks
+	TabTools
 )
 
 // TabNames returns the display names for tabs
-var TabNames = []string{"Servers", "Commands", "Rules", "Skills", "Prompts", "Hooks"}
+var TabNames = []string{"Servers", "Commands", "Rules", "Skills", "Prompts", "Hooks", "Tools"}
 
 // FilterMode represents the current filter for the server list
 type FilterMode int
@@ -69,6 +70,30 @@ type LogEntry struct {
 	Message string
 }
 
+// backupInfo represents information about a single backup
+type backupInfo struct {
+	path      string
+	timestamp time.Time
+	size      int64
+}
+
+// importPreview holds resources to be imported
+type importPreview struct {
+	servers  []*mcp.Server
+	commands []*command.Command
+	rules    []*rule.Rule
+	skills   []*skill.Skill
+}
+
+// importResult holds the result of an import operation
+type importResult struct {
+	serverCount  int
+	commandCount int
+	ruleCount    int
+	skillCount   int
+	errors       []string
+}
+
 // Model is the Bubble Tea model for the TUI
 type Model struct {
 	// Data
@@ -78,11 +103,12 @@ type Model struct {
 	selected      map[string]bool
 
 	// Other resource types
-	commands []*command.Command
-	rules    []*rule.Rule
-	skills   []*skill.Skill
-	prompts  []*prompt.Prompt
-	hooks    []*hook.Hook
+	commands      []*command.Command
+	rules         []*rule.Rule
+	skills        []*skill.Skill
+	prompts       []*prompt.Prompt
+	hooks         []*hook.Hook
+	detectedTools []sync.Adapter // Detected tool adapters
 
 	// Resource CRUD handler
 	resourceCRUD *ResourceCRUD
@@ -91,8 +117,8 @@ type Model struct {
 	activeTab ResourceTab
 
 	// State
-	cursor     int
-	filterMode FilterMode
+	cursor      int
+	filterMode  FilterMode
 	searchInput textinput.Model
 	searching   bool
 	profile     string // Current profile name
@@ -124,15 +150,15 @@ type Model struct {
 	toolExecuting   bool
 
 	// Rule editor modal
-	showRuleEditor    bool
-	ruleEditorIsNew   bool            // true if creating new, false if editing
-	ruleEditorRule    *rule.Rule      // nil if new, existing rule if editing
-	ruleEditorName    textinput.Model // Rule name (filename)
-	ruleEditorApplies textinput.Model // Applies pattern (e.g., "*.go")
-	ruleEditorContent textarea.Model  // Markdown content
-	ruleEditorPriority int            // Priority (1-10)
-	ruleEditorScope   int             // 0=global, 1=local (only shown when in project)
-	ruleEditorFocus   int             // Which field is focused (0=name, 1=priority, 2=applies, 3=content, 4=scope when in project)
+	showRuleEditor     bool
+	ruleEditorIsNew    bool            // true if creating new, false if editing
+	ruleEditorRule     *rule.Rule      // nil if new, existing rule if editing
+	ruleEditorName     textinput.Model // Rule name (filename)
+	ruleEditorApplies  textinput.Model // Applies pattern (e.g., "*.go")
+	ruleEditorContent  textarea.Model  // Markdown content
+	ruleEditorPriority int             // Priority (1-10)
+	ruleEditorScope    int             // 0=global, 1=local (only shown when in project)
+	ruleEditorFocus    int             // Which field is focused (0=name, 1=priority, 2=applies, 3=content, 4=scope when in project)
 
 	// Confirm delete modal
 	showConfirmDelete      bool
@@ -143,14 +169,14 @@ type Model struct {
 	confirmDeleteCmd       *skill.Command // Command to delete (for skill_command type)
 
 	// Prompt editor modal
-	showPromptEditor     bool
-	promptEditorIsNew    bool
-	promptEditorPrompt   *prompt.Prompt
-	promptEditorName     textinput.Model
-	promptEditorDesc     textinput.Model
-	promptEditorContent  textarea.Model
-	promptEditorScope    int // 0=global, 1=local (only shown when in project)
-	promptEditorFocus    int // 0=name, 1=desc, 2=content, 3=scope (when in project)
+	showPromptEditor    bool
+	promptEditorIsNew   bool
+	promptEditorPrompt  *prompt.Prompt
+	promptEditorName    textinput.Model
+	promptEditorDesc    textinput.Model
+	promptEditorContent textarea.Model
+	promptEditorScope   int // 0=global, 1=local (only shown when in project)
+	promptEditorFocus   int // 0=name, 1=desc, 2=content, 3=scope (when in project)
 
 	// Skill editor modal
 	showSkillEditor    bool
@@ -164,9 +190,9 @@ type Model struct {
 	skillEditorFocus   int // 0=name, 1=desc, 2=author, 3=version, 4=scope (when in project)
 
 	// Skill detail modal (shows commands/invocations)
-	showSkillDetail    bool
-	skillDetailSkill   *skill.Skill
-	skillDetailCursor  int // For selecting commands within the skill
+	showSkillDetail   bool
+	skillDetailSkill  *skill.Skill
+	skillDetailCursor int // For selecting commands within the skill
 
 	// Skill command editor modal (for editing commands within a skill)
 	showSkillCmdEditor    bool
@@ -179,51 +205,70 @@ type Model struct {
 	skillCmdEditorFocus   int // 0=name, 1=desc, 2=content
 
 	// Command editor modal
-	showCommandEditor      bool
-	commandEditorIsNew     bool
-	commandEditorCommand   *command.Command
-	commandEditorName      textinput.Model
-	commandEditorDesc      textinput.Model
-	commandEditorArgHint   textinput.Model
-	commandEditorModel     int    // 0=default, 1=opus, 2=sonnet, 3=haiku
-	commandEditorContent   textarea.Model
-	commandEditorScope     int // 0=global, 1=local (only shown when in project)
-	commandEditorFocus     int // 0=name, 1=desc, 2=argHint, 3=model, 4=content, 5=scope (when in project)
+	showCommandEditor    bool
+	commandEditorIsNew   bool
+	commandEditorCommand *command.Command
+	commandEditorName    textinput.Model
+	commandEditorDesc    textinput.Model
+	commandEditorArgHint textinput.Model
+	commandEditorModel   int // 0=default, 1=opus, 2=sonnet, 3=haiku
+	commandEditorContent textarea.Model
+	commandEditorScope   int // 0=global, 1=local (only shown when in project)
+	commandEditorFocus   int // 0=name, 1=desc, 2=argHint, 3=model, 4=content, 5=scope (when in project)
 
 	// Server editor modal
-	showServerEditor     bool
-	serverEditorIsNew    bool
-	serverEditorServer   *mcp.Server
-	serverEditorName     textinput.Model
-	serverEditorSource   textinput.Model // alias, URL, or path
-	serverEditorCommand  textinput.Model
-	serverEditorArgs     textinput.Model
+	showServerEditor      bool
+	serverEditorIsNew     bool
+	serverEditorServer    *mcp.Server
+	serverEditorName      textinput.Model
+	serverEditorSource    textinput.Model // alias, URL, or path
+	serverEditorCommand   textinput.Model
+	serverEditorArgs      textinput.Model
 	serverEditorTransport int // 0=stdio, 1=http, 2=sse
 	serverEditorScope     int // 0=global, 1=local (only shown when in project)
-	serverEditorFocus    int // 0=name, 1=source, 2=command, 3=args, 4=transport, 5=scope (when in project)
+	serverEditorFocus     int // 0=name, 1=source, 2=command, 3=args, 4=transport, 5=scope (when in project)
 
 	// Alias wizard modal (multi-step)
-	showAliasWizard      bool
-	aliasWizardIsNew     bool
-	aliasWizardStep      int // 0=basic, 1=type, 2=simple/variants config, 3=git url
-	aliasWizardName      textinput.Model
-	aliasWizardDesc      textinput.Model
-	aliasWizardConfigType int // 0=simple, 1=variants
-	aliasWizardTransport  int // 0=stdio, 1=http, 2=sse
-	aliasWizardRuntime    int // 0=node, 1=python, 2=go, 3=docker
-	aliasWizardPackage    textinput.Model
-	aliasWizardURL        textinput.Model
-	aliasWizardHasLocal   bool
-	aliasWizardHasRemote  bool
-	aliasWizardLocalRuntime int // 0=node, 1=python
-	aliasWizardLocalPackage textinput.Model
+	showAliasWizard            bool
+	aliasWizardIsNew           bool
+	aliasWizardStep            int // 0=basic, 1=type, 2=simple/variants config, 3=git url
+	aliasWizardName            textinput.Model
+	aliasWizardDesc            textinput.Model
+	aliasWizardConfigType      int // 0=simple, 1=variants
+	aliasWizardTransport       int // 0=stdio, 1=http, 2=sse
+	aliasWizardRuntime         int // 0=node, 1=python, 2=go, 3=docker
+	aliasWizardPackage         textinput.Model
+	aliasWizardURL             textinput.Model
+	aliasWizardHasLocal        bool
+	aliasWizardHasRemote       bool
+	aliasWizardLocalRuntime    int // 0=node, 1=python
+	aliasWizardLocalPackage    textinput.Model
 	aliasWizardRemoteTransport int // 0=http, 1=sse
-	aliasWizardRemoteURL  textinput.Model
-	aliasWizardDefaultVariant int // 0=local, 1=remote
-	aliasWizardWantGitURL bool
-	aliasWizardGitURL     textinput.Model
-	aliasWizardFocus      int // current focused field within step
-	aliasWizardExisting   *aliases.Alias // for editing
+	aliasWizardRemoteURL       textinput.Model
+	aliasWizardDefaultVariant  int // 0=local, 1=remote
+	aliasWizardWantGitURL      bool
+	aliasWizardGitURL          textinput.Model
+	aliasWizardFocus           int            // current focused field within step
+	aliasWizardExisting        *aliases.Alias // for editing
+
+	// Backup modal
+	showBackupModal     bool
+	backupAdapters      []sync.Adapter // Detected adapters
+	backupCursor        int            // Selected adapter index
+	backupAction        int            // 0=list, 1=create, 2=restore
+	backupResult        string         // Result message to display
+	backupResultIsError bool           // Whether result is an error
+	backupBackups       []backupInfo   // Backups for selected tool
+
+	// Import wizard modal (multi-step)
+	showImportWizard       bool
+	importWizardStep       int             // 0=select tool, 1=select resources, 2=preview, 3=importing
+	importWizardTools      []sync.Adapter  // Detected tools
+	importWizardToolCursor int             // Selected tool index
+	importWizardResources  map[string]bool // Selected resource types (servers, commands, rules, skills)
+	importWizardPreview    *importPreview  // Resources to be imported
+	importWizardImporting  bool            // Currently importing
+	importWizardResult     *importResult   // Result of import operation
 
 	// Keys
 	keys keyMap
@@ -416,19 +461,19 @@ func New() (*Model, error) {
 	aliasWizardGitURL.CharLimit = 200
 
 	m := &Model{
-		cfg:               cfg,
-		selected:          make(map[string]bool),
-		filterMode:        FilterAll,
-		profile:           "default",
-		logs:              []LogEntry{},
-		keys:              newKeyMap(),
-		spinner:           s,
-		searchInput:       searchInput,
-		toolArgInput:      toolArgInput,
+		cfg:          cfg,
+		selected:     make(map[string]bool),
+		filterMode:   FilterAll,
+		profile:      "default",
+		logs:         []LogEntry{},
+		keys:         newKeyMap(),
+		spinner:      s,
+		searchInput:  searchInput,
+		toolArgInput: toolArgInput,
 		// Rule editor
-		ruleEditorName:    ruleEditorName,
-		ruleEditorApplies: ruleEditorApplies,
-		ruleEditorContent: ruleEditorContent,
+		ruleEditorName:     ruleEditorName,
+		ruleEditorApplies:  ruleEditorApplies,
+		ruleEditorContent:  ruleEditorContent,
 		ruleEditorPriority: 3,
 		// Prompt editor
 		promptEditorName:    promptEditorName,
@@ -507,6 +552,12 @@ func (m *Model) loadAllResources() {
 	if hooks, err := hook.LoadAll(); err == nil {
 		m.hooks = hooks
 	}
+
+	// Load detected tool adapters (sorted by name for consistent display)
+	m.detectedTools = sync.All()
+	sort.Slice(m.detectedTools, func(i, j int) bool {
+		return m.detectedTools[i].Name() < m.detectedTools[j].Name()
+	})
 }
 
 // buildServerList constructs the unified server list from config and aliases
@@ -812,6 +863,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.adjustCursorForCurrentTab()
 		}
 
+	case backupOperationMsg:
+		if msg.err != nil {
+			m.backupResult = fmt.Sprintf("Error: %v", msg.err)
+			m.backupResultIsError = true
+			m.addLog("error", fmt.Sprintf("Backup %s failed for %s: %v", msg.action, msg.tool, msg.err))
+		} else {
+			m.backupResult = msg.result
+			m.backupResultIsError = false
+			m.backupBackups = msg.backups
+			m.addLog("success", fmt.Sprintf("Backup %s completed for %s", msg.action, msg.tool))
+		}
+
 	case skillCmdSavedMsg:
 		action := "Created"
 		if !msg.isNew {
@@ -830,6 +893,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Re-open skill detail to show updated commands
 		m.openSkillDetail(msg.skill)
+
+	case importCompletedMsg:
+		m.importWizardImporting = false
+		m.importWizardResult = msg.result
+		m.importWizardStep = 3 // Move to completion step
+		totalImported := msg.result.serverCount + msg.result.commandCount + msg.result.ruleCount + msg.result.skillCount
+		if totalImported > 0 {
+			m.addLog("success", fmt.Sprintf("Imported %d resource(s)", totalImported))
+		}
 
 	case tea.KeyMsg:
 		// Handle search input mode
@@ -996,6 +1068,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle alias wizard modal
 		if m.showAliasWizard {
 			return m.handleAliasWizardInput(msg)
+		}
+
+		// Handle import wizard modal
+		if m.showImportWizard {
+			return m.handleImportWizardInput(msg)
+		}
+
+		// Handle backup modal
+		if m.showBackupModal {
+			return m.handleBackupModalInput(msg)
 		}
 
 		switch {
@@ -1256,6 +1338,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case key.Matches(msg, m.keys.Backup):
+			m.openBackupModal()
+
 		// Tab switching
 		case key.Matches(msg, m.keys.NextTab):
 			m.activeTab = (m.activeTab + 1) % ResourceTab(len(TabNames))
@@ -1292,6 +1377,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Tab6):
 			m.activeTab = TabHooks
 			m.cursor = 0
+
+		case key.Matches(msg, m.keys.Tab7):
+			m.activeTab = TabTools
+			m.cursor = 0
+
+		case key.Matches(msg, m.keys.Import):
+			m.openImportWizard()
+			return m, nil
 		}
 	}
 
@@ -1352,6 +1445,14 @@ func (m Model) View() string {
 		return m.renderAliasWizard()
 	}
 
+	if m.showImportWizard {
+		return m.renderImportWizard()
+	}
+
+	if m.showBackupModal {
+		return m.renderBackupModal()
+	}
+
 	var sections []string
 
 	// Header
@@ -1374,6 +1475,8 @@ func (m Model) View() string {
 		sections = append(sections, m.renderPromptsList())
 	case TabHooks:
 		sections = append(sections, m.renderHooksList())
+	case TabTools:
+		sections = append(sections, m.renderToolsList())
 	}
 
 	// Divider
@@ -1427,6 +1530,14 @@ func (m *Model) renderHeader() string {
 		countStr = fmt.Sprintf("%d prompts", len(m.prompts))
 	case TabHooks:
 		countStr = fmt.Sprintf("%d hooks", len(m.hooks))
+	case TabTools:
+		detected := 0
+		for _, a := range m.detectedTools {
+			if ok, _ := a.Detect(); ok {
+				detected++
+			}
+		}
+		countStr = fmt.Sprintf("%d/%d tools detected", detected, len(m.detectedTools))
 	}
 	counts := HeaderSubtitleStyle.Render(countStr)
 
@@ -2103,6 +2214,145 @@ func (m *Model) renderHookRow(h *hook.Hook, selected bool) string {
 	leftPart := "  " + iconStyled + " " + name + matcherBadge + sourceBadge
 
 	// Calculate padding for right-aligned command
+	leftWidth := lipgloss.Width(leftPart)
+	descWidth := lipgloss.Width(desc)
+	padding := m.width - leftWidth - descWidth - 4
+	if padding < 2 {
+		padding = 2
+	}
+
+	row := leftPart + strings.Repeat(" ", padding) + desc
+
+	// Apply selection styling
+	if selected {
+		row = ListItemSelectedStyle.Width(m.width).Render(row)
+	} else {
+		row = ListItemNormalStyle.Width(m.width).Render(row)
+	}
+
+	return row
+}
+
+// renderToolsList renders the detected tools/adapters list
+func (m *Model) renderToolsList() string {
+	var rows []string
+
+	// Calculate available height for list
+	listHeight := m.height - 12
+	if m.logExpanded {
+		listHeight = m.height - 8 - m.height/3
+	}
+	if listHeight < 5 {
+		listHeight = 5
+	}
+
+	if len(m.detectedTools) == 0 {
+		emptyMsg := lipgloss.NewStyle().
+			Foreground(colorFgSubtle).
+			Italic(true).
+			Render("No tool adapters registered")
+		rows = append(rows, "  "+emptyMsg)
+	} else {
+		// Calculate visible range
+		startIdx := 0
+		if m.cursor >= listHeight {
+			startIdx = m.cursor - listHeight + 1
+		}
+		endIdx := min(startIdx+listHeight, len(m.detectedTools))
+
+		for i := startIdx; i < endIdx; i++ {
+			adapter := m.detectedTools[i]
+			row := m.renderToolRow(adapter, i == m.cursor)
+			rows = append(rows, row)
+		}
+	}
+
+	// Pad to fill height
+	for len(rows) < listHeight {
+		rows = append(rows, "")
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// renderToolRow renders a single tool adapter row
+func (m *Model) renderToolRow(adapter sync.Adapter, selected bool) string {
+	// Check if tool is detected (installed)
+	isDetected, _ := adapter.Detect()
+
+	// Status icon
+	var icon string
+	var iconStyle lipgloss.Style
+	if isDetected {
+		icon = StatusInstalled
+		iconStyle = StatusInstalledStyle
+	} else {
+		icon = StatusAvailable
+		iconStyle = StatusAvailableStyle
+	}
+	iconStyled := iconStyle.Render(icon)
+
+	// Tool name
+	nameStyle := ListItemNameStyle
+	if selected {
+		nameStyle = ListItemNameSelectedStyle
+	}
+	name := nameStyle.Render(adapter.Name())
+
+	// Supported resources badge
+	resources := adapter.SupportedResources()
+	var resourceBadges []string
+	for _, r := range resources {
+		resourceBadges = append(resourceBadges, string(r))
+	}
+	resourceStr := strings.Join(resourceBadges, ", ")
+	resourceBadge := lipgloss.NewStyle().Foreground(colorCyan).Render(fmt.Sprintf(" [%s]", resourceStr))
+
+	// Config path (truncated)
+	descStyle := ListItemDescStyle
+	if selected {
+		descStyle = ListItemDescSelectedStyle
+	}
+	configPath := adapter.ConfigPath()
+
+	// Check if config file exists
+	configExists := false
+	if configPath != "" {
+		expandedPath := configPath
+		if strings.HasPrefix(expandedPath, "~") {
+			if home, err := os.UserHomeDir(); err == nil {
+				expandedPath = filepath.Join(home, expandedPath[1:])
+			}
+		}
+		if _, err := os.Stat(expandedPath); err == nil {
+			configExists = true
+		}
+	}
+
+	configStatus := ""
+	if configExists {
+		configStatus = HealthHealthyStyle.Render(" " + HealthHealthy)
+	} else if configPath != "" {
+		configStatus = HealthUnknownStyle.Render(" (no config)")
+	}
+
+	configPathTrunc := ansi.Truncate(configPath, 40, "...")
+	desc := descStyle.Render(configPathTrunc) + configStatus
+
+	// Get server count if adapter is detected and supports servers
+	serverCount := ""
+	if isDetected {
+		if sa, ok := adapter.(sync.ServerAdapter); ok {
+			if servers, err := sa.ReadServers(); err == nil && len(servers) > 0 {
+				serverCount = lipgloss.NewStyle().Foreground(colorFgMuted).Render(fmt.Sprintf(" (%d servers)", len(servers)))
+			}
+		}
+	}
+
+	// Build the row
+	leftPart := "  " + iconStyled + " " + name + resourceBadge + serverCount
+
+	// Calculate padding for right-aligned config path
 	leftWidth := lipgloss.Width(leftPart)
 	descWidth := lipgloss.Width(desc)
 	padding := m.width - leftWidth - descWidth - 4
@@ -3255,7 +3505,7 @@ func (m *Model) cycleSkillEditorFocus(delta int) {
 		m.skillEditorAuthor.Focus()
 	case 3:
 		m.skillEditorVersion.Focus()
-	// case 4 is scope selector - no focus change needed (not a text input)
+		// case 4 is scope selector - no focus change needed (not a text input)
 	}
 }
 
@@ -4434,6 +4684,8 @@ func (m *Model) currentTabLength() int {
 		return len(m.prompts)
 	case TabHooks:
 		return len(m.hooks)
+	case TabTools:
+		return len(m.detectedTools)
 	}
 	return 0
 }
@@ -4517,6 +4769,14 @@ type resourceDeletedMsg struct {
 	err          error
 }
 
+type backupOperationMsg struct {
+	action  string // "list", "create", "restore"
+	tool    string
+	result  string
+	err     error
+	backups []backupInfo
+}
+
 // Commands
 
 func (m *Model) deleteServer(name string) tea.Cmd {
@@ -4591,8 +4851,8 @@ func (m *Model) syncAll() tea.Cmd {
 			}
 		}
 
-		// Sync to all detected tools
-		results := sync.SyncAll(servers, nil, nil)
+		// Sync to all detected tools (servers, commands, rules, skills)
+		results := sync.SyncAll(servers, m.commands, m.rules, m.skills)
 
 		errors := make(map[string]error)
 		for _, result := range results {
@@ -4795,4 +5055,770 @@ func (m *Model) renderAliasWizard() string {
 	content += KeyDescStyle.Render("Press Esc to close")
 	modal := ModalStyle.Width(50).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+// openImportWizard opens the import wizard modal
+func (m *Model) openImportWizard() {
+	m.showImportWizard = true
+	m.importWizardStep = 0
+	m.importWizardToolCursor = 0
+	m.importWizardResources = map[string]bool{
+		"servers":  true,
+		"commands": true,
+		"rules":    true,
+		"skills":   true,
+	}
+	m.importWizardPreview = nil
+	m.importWizardResult = nil
+	m.importWizardImporting = false
+
+	// Get detected tools
+	m.importWizardTools = sync.Detected()
+}
+
+// handleImportWizardInput handles keyboard input for the import wizard modal
+func (m *Model) handleImportWizardInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Don't accept input while importing
+	if m.importWizardImporting {
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "esc":
+		if m.importWizardStep > 0 && m.importWizardResult == nil {
+			// Go back a step
+			m.importWizardStep--
+			return m, nil
+		}
+		// Close the wizard
+		m.showImportWizard = false
+		return m, nil
+
+	case "q":
+		m.showImportWizard = false
+		return m, nil
+
+	case "j", "down":
+		switch m.importWizardStep {
+		case 0: // Tool selection
+			if m.importWizardToolCursor < len(m.importWizardTools)-1 {
+				m.importWizardToolCursor++
+			}
+		}
+		return m, nil
+
+	case "k", "up":
+		switch m.importWizardStep {
+		case 0: // Tool selection
+			if m.importWizardToolCursor > 0 {
+				m.importWizardToolCursor--
+			}
+		}
+		return m, nil
+
+	case "1":
+		if m.importWizardStep == 1 {
+			m.importWizardResources["servers"] = !m.importWizardResources["servers"]
+		}
+		return m, nil
+
+	case "2":
+		if m.importWizardStep == 1 {
+			m.importWizardResources["commands"] = !m.importWizardResources["commands"]
+		}
+		return m, nil
+
+	case "3":
+		if m.importWizardStep == 1 {
+			m.importWizardResources["rules"] = !m.importWizardResources["rules"]
+		}
+		return m, nil
+
+	case "4":
+		if m.importWizardStep == 1 {
+			m.importWizardResources["skills"] = !m.importWizardResources["skills"]
+		}
+		return m, nil
+
+	case "enter":
+		return m.handleImportWizardEnter()
+	}
+
+	return m, nil
+}
+
+// handleImportWizardEnter handles the enter key in the import wizard
+func (m *Model) handleImportWizardEnter() (tea.Model, tea.Cmd) {
+	switch m.importWizardStep {
+	case 0: // Tool selected, move to resource selection
+		if len(m.importWizardTools) == 0 {
+			return m, nil
+		}
+		m.importWizardStep = 1
+		return m, nil
+
+	case 1: // Resources selected, move to preview
+		m.generateImportPreview()
+		m.importWizardStep = 2
+		return m, nil
+
+	case 2: // Preview confirmed, perform import
+		return m, m.performImport()
+
+	case 3: // Import complete, close
+		m.showImportWizard = false
+		m.loadAllResources()
+		m.buildServerList()
+		m.applyFilter()
+		return m, nil
+	}
+	return m, nil
+}
+
+// generateImportPreview creates a preview of resources to be imported
+func (m *Model) generateImportPreview() {
+	if len(m.importWizardTools) == 0 || m.importWizardToolCursor >= len(m.importWizardTools) {
+		return
+	}
+
+	adapter := m.importWizardTools[m.importWizardToolCursor]
+	preview := &importPreview{}
+	supported := adapter.SupportedResources()
+
+	// Read servers
+	if m.importWizardResources["servers"] && containsResourceType(supported, sync.ResourceMCP) {
+		if sa, ok := sync.AsServerAdapter(adapter); ok {
+			if servers, err := sa.ReadServers(); err == nil {
+				for _, srv := range servers {
+					if srv.Name == "" {
+						continue
+					}
+					if _, exists := m.cfg.Servers[srv.Name]; !exists {
+						preview.servers = append(preview.servers, srv)
+					}
+				}
+			}
+		}
+	}
+
+	// Read commands
+	if m.importWizardResources["commands"] && containsResourceType(supported, sync.ResourceCommands) {
+		if ca, ok := sync.AsCommandsAdapter(adapter); ok {
+			if commands, err := ca.ReadCommands(); err == nil {
+				existingNames := make(map[string]bool)
+				for _, cmd := range m.commands {
+					existingNames[cmd.Name] = true
+				}
+				for _, cmd := range commands {
+					if !existingNames[cmd.Name] {
+						preview.commands = append(preview.commands, cmd)
+					}
+				}
+			}
+		}
+	}
+
+	// Read rules
+	if m.importWizardResources["rules"] && containsResourceType(supported, sync.ResourceRules) {
+		if ra, ok := sync.AsRulesAdapter(adapter); ok {
+			if rules, err := ra.ReadRules(); err == nil {
+				existingNames := make(map[string]bool)
+				for _, r := range m.rules {
+					existingNames[r.Name] = true
+				}
+				for _, r := range rules {
+					if !existingNames[r.Name] {
+						preview.rules = append(preview.rules, r)
+					}
+				}
+			}
+		}
+	}
+
+	// Read skills
+	if m.importWizardResources["skills"] && containsResourceType(supported, sync.ResourceSkills) {
+		if sa, ok := sync.AsSkillsAdapter(adapter); ok {
+			if skills, err := sa.ReadSkills(); err == nil {
+				existingNames := make(map[string]bool)
+				for _, s := range m.skills {
+					existingNames[s.Name] = true
+				}
+				for _, s := range skills {
+					if !existingNames[s.Name] {
+						preview.skills = append(preview.skills, s)
+					}
+				}
+			}
+		}
+	}
+
+	m.importWizardPreview = preview
+}
+
+// importCompletedMsg is sent when import is complete
+type importCompletedMsg struct {
+	result *importResult
+}
+
+// performImport imports the resources from the preview
+func (m *Model) performImport() tea.Cmd {
+	return func() tea.Msg {
+		if m.importWizardPreview == nil {
+			return importCompletedMsg{result: &importResult{}}
+		}
+
+		result := &importResult{}
+		preview := m.importWizardPreview
+
+		// Import servers
+		for _, srv := range preview.servers {
+			if m.cfg.Servers == nil {
+				m.cfg.Servers = make(map[string]*mcp.Server)
+			}
+			m.cfg.Servers[srv.Name] = srv
+			result.serverCount++
+		}
+
+		// Save config if servers were added
+		if result.serverCount > 0 {
+			if err := m.cfg.Save(); err != nil {
+				result.errors = append(result.errors, fmt.Sprintf("Failed to save config: %v", err))
+			}
+		}
+
+		// Import commands
+		commandsDir := filepath.Join(m.cfg.ConfigDir, "commands")
+		for _, cmd := range preview.commands {
+			if err := command.Save(cmd, commandsDir); err != nil {
+				result.errors = append(result.errors, fmt.Sprintf("Failed to save command %q: %v", cmd.Name, err))
+			} else {
+				result.commandCount++
+			}
+		}
+
+		// Import rules
+		rulesDir := filepath.Join(m.cfg.ConfigDir, "rules")
+		for _, r := range preview.rules {
+			if err := rule.Save(r, rulesDir); err != nil {
+				result.errors = append(result.errors, fmt.Sprintf("Failed to save rule %q: %v", r.Name, err))
+			} else {
+				result.ruleCount++
+			}
+		}
+
+		// Import skills
+		skillsDir := filepath.Join(m.cfg.ConfigDir, "skills")
+		for _, s := range preview.skills {
+			if err := s.Save(skillsDir); err != nil {
+				result.errors = append(result.errors, fmt.Sprintf("Failed to save skill %q: %v", s.Name, err))
+			} else {
+				result.skillCount++
+			}
+		}
+
+		return importCompletedMsg{result: result}
+	}
+}
+
+// containsResourceType checks if a resource type is in the list
+func containsResourceType(types []sync.ResourceType, target sync.ResourceType) bool {
+	for _, t := range types {
+		if t == target {
+			return true
+		}
+	}
+	return false
+}
+
+// renderImportWizard renders the import wizard modal
+func (m *Model) renderImportWizard() string {
+	var sections []string
+
+	// Title based on step
+	var title string
+	switch m.importWizardStep {
+	case 0:
+		title = "Import - Step 1: Select Tool"
+	case 1:
+		title = "Import - Step 2: Select Resources"
+	case 2:
+		title = "Import - Step 3: Preview"
+	case 3:
+		title = "Import Complete"
+	}
+	sections = append(sections, ModalTitleStyle.Render(title))
+	sections = append(sections, "")
+
+	focusedStyle := lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
+	normalStyle := lipgloss.NewStyle().Foreground(colorFg)
+	mutedStyle := lipgloss.NewStyle().Foreground(colorFgMuted)
+
+	switch m.importWizardStep {
+	case 0: // Tool selection
+		if len(m.importWizardTools) == 0 {
+			sections = append(sections, mutedStyle.Render("No tools detected."))
+			sections = append(sections, "")
+			sections = append(sections, mutedStyle.Render("Make sure you have tools like Claude Code, Cursor, etc. installed."))
+		} else {
+			sections = append(sections, normalStyle.Render("Select a tool to import from:"))
+			sections = append(sections, "")
+
+			for i, adapter := range m.importWizardTools {
+				cursor := "  "
+				style := normalStyle
+				if i == m.importWizardToolCursor {
+					cursor = "> "
+					style = focusedStyle
+				}
+
+				// Show supported resources for this adapter
+				supported := adapter.SupportedResources()
+				var resourceList []string
+				if containsResourceType(supported, sync.ResourceMCP) {
+					resourceList = append(resourceList, "servers")
+				}
+				if containsResourceType(supported, sync.ResourceCommands) {
+					resourceList = append(resourceList, "commands")
+				}
+				if containsResourceType(supported, sync.ResourceRules) {
+					resourceList = append(resourceList, "rules")
+				}
+				if containsResourceType(supported, sync.ResourceSkills) {
+					resourceList = append(resourceList, "skills")
+				}
+
+				resourceInfo := ""
+				if len(resourceList) > 0 {
+					resourceInfo = mutedStyle.Render(" (" + strings.Join(resourceList, ", ") + ")")
+				}
+
+				sections = append(sections, cursor+style.Render(adapter.Name())+resourceInfo)
+			}
+		}
+
+	case 1: // Resource selection
+		if m.importWizardToolCursor < len(m.importWizardTools) {
+			adapter := m.importWizardTools[m.importWizardToolCursor]
+			sections = append(sections, normalStyle.Render(fmt.Sprintf("Importing from: %s", focusedStyle.Render(adapter.Name()))))
+			sections = append(sections, "")
+			sections = append(sections, normalStyle.Render("Select resource types to import:"))
+			sections = append(sections, "")
+
+			supported := adapter.SupportedResources()
+
+			// Servers
+			checkbox := "[ ]"
+			if m.importWizardResources["servers"] {
+				checkbox = "[x]"
+			}
+			style := normalStyle
+			if !containsResourceType(supported, sync.ResourceMCP) {
+				style = mutedStyle
+				checkbox = "[-]"
+			}
+			sections = append(sections, style.Render(fmt.Sprintf("  1) %s Servers", checkbox)))
+
+			// Commands
+			checkbox = "[ ]"
+			if m.importWizardResources["commands"] {
+				checkbox = "[x]"
+			}
+			style = normalStyle
+			if !containsResourceType(supported, sync.ResourceCommands) {
+				style = mutedStyle
+				checkbox = "[-]"
+			}
+			sections = append(sections, style.Render(fmt.Sprintf("  2) %s Commands", checkbox)))
+
+			// Rules
+			checkbox = "[ ]"
+			if m.importWizardResources["rules"] {
+				checkbox = "[x]"
+			}
+			style = normalStyle
+			if !containsResourceType(supported, sync.ResourceRules) {
+				style = mutedStyle
+				checkbox = "[-]"
+			}
+			sections = append(sections, style.Render(fmt.Sprintf("  3) %s Rules", checkbox)))
+
+			// Skills
+			checkbox = "[ ]"
+			if m.importWizardResources["skills"] {
+				checkbox = "[x]"
+			}
+			style = normalStyle
+			if !containsResourceType(supported, sync.ResourceSkills) {
+				style = mutedStyle
+				checkbox = "[-]"
+			}
+			sections = append(sections, style.Render(fmt.Sprintf("  4) %s Skills", checkbox)))
+		}
+
+	case 2: // Preview
+		if m.importWizardPreview != nil {
+			preview := m.importWizardPreview
+			totalCount := len(preview.servers) + len(preview.commands) + len(preview.rules) + len(preview.skills)
+
+			if totalCount == 0 {
+				sections = append(sections, mutedStyle.Render("No new resources to import."))
+				sections = append(sections, "")
+				sections = append(sections, mutedStyle.Render("All resources from this tool already exist in agentctl."))
+			} else {
+				sections = append(sections, normalStyle.Render("The following resources will be imported:"))
+				sections = append(sections, "")
+
+				if len(preview.servers) > 0 {
+					sections = append(sections, focusedStyle.Render(fmt.Sprintf("  Servers (%d):", len(preview.servers))))
+					for _, srv := range preview.servers {
+						desc := srv.Command
+						if srv.URL != "" {
+							desc = srv.URL
+						}
+						sections = append(sections, mutedStyle.Render(fmt.Sprintf("    - %s (%s)", srv.Name, desc)))
+					}
+				}
+
+				if len(preview.commands) > 0 {
+					sections = append(sections, focusedStyle.Render(fmt.Sprintf("  Commands (%d):", len(preview.commands))))
+					for _, cmd := range preview.commands {
+						sections = append(sections, mutedStyle.Render(fmt.Sprintf("    - %s", cmd.Name)))
+					}
+				}
+
+				if len(preview.rules) > 0 {
+					sections = append(sections, focusedStyle.Render(fmt.Sprintf("  Rules (%d):", len(preview.rules))))
+					for _, r := range preview.rules {
+						sections = append(sections, mutedStyle.Render(fmt.Sprintf("    - %s", r.Name)))
+					}
+				}
+
+				if len(preview.skills) > 0 {
+					sections = append(sections, focusedStyle.Render(fmt.Sprintf("  Skills (%d):", len(preview.skills))))
+					for _, s := range preview.skills {
+						sections = append(sections, mutedStyle.Render(fmt.Sprintf("    - %s", s.Name)))
+					}
+				}
+			}
+		}
+
+	case 3: // Complete
+		if m.importWizardResult != nil {
+			result := m.importWizardResult
+			totalImported := result.serverCount + result.commandCount + result.ruleCount + result.skillCount
+
+			if totalImported == 0 && len(result.errors) == 0 {
+				sections = append(sections, mutedStyle.Render("No resources were imported."))
+			} else {
+				if result.serverCount > 0 {
+					sections = append(sections, SuccessStyle.Render(fmt.Sprintf("  Imported %d server(s)", result.serverCount)))
+				}
+				if result.commandCount > 0 {
+					sections = append(sections, SuccessStyle.Render(fmt.Sprintf("  Imported %d command(s)", result.commandCount)))
+				}
+				if result.ruleCount > 0 {
+					sections = append(sections, SuccessStyle.Render(fmt.Sprintf("  Imported %d rule(s)", result.ruleCount)))
+				}
+				if result.skillCount > 0 {
+					sections = append(sections, SuccessStyle.Render(fmt.Sprintf("  Imported %d skill(s)", result.skillCount)))
+				}
+
+				if len(result.errors) > 0 {
+					sections = append(sections, "")
+					sections = append(sections, ErrorStyle.Render("Errors:"))
+					for _, err := range result.errors {
+						sections = append(sections, ErrorStyle.Render(fmt.Sprintf("  - %s", err)))
+					}
+				}
+			}
+
+			sections = append(sections, "")
+			sections = append(sections, InfoStyle.Render("Run 'agentctl sync' to sync to all tools"))
+		}
+	}
+
+	sections = append(sections, "")
+
+	// Hints based on step
+	var hints string
+	switch m.importWizardStep {
+	case 0:
+		if len(m.importWizardTools) > 0 {
+			hints = "j/k:navigate  Enter:select  Esc:close"
+		} else {
+			hints = "Esc:close"
+		}
+	case 1:
+		hints = "1-4:toggle  Enter:preview  Esc:back"
+	case 2:
+		if m.importWizardPreview != nil {
+			totalCount := len(m.importWizardPreview.servers) + len(m.importWizardPreview.commands) +
+				len(m.importWizardPreview.rules) + len(m.importWizardPreview.skills)
+			if totalCount > 0 {
+				hints = "Enter:import  Esc:back"
+			} else {
+				hints = "Esc:back"
+			}
+		}
+	case 3:
+		hints = "Enter/Esc:close"
+	}
+	sections = append(sections, KeyDescStyle.Render(hints))
+
+	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
+
+	modal := ModalStyle.
+		Width(70).
+		Render(content)
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+// handleBackupModalInput handles input for the backup modal
+func (m *Model) handleBackupModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.showBackupModal = false
+		return m, nil
+	case "j", "down":
+		if m.backupCursor < len(m.backupAdapters)-1 {
+			m.backupCursor++
+			m.backupBackups = nil
+			m.backupResult = ""
+		}
+		return m, nil
+	case "k", "up":
+		if m.backupCursor > 0 {
+			m.backupCursor--
+			m.backupBackups = nil
+			m.backupResult = ""
+		}
+		return m, nil
+	case "tab", "left", "right", "h", "l":
+		// Cycle through actions: list (0) -> create (1) -> restore (2) -> list (0)
+		m.backupAction = (m.backupAction + 1) % 3
+		return m, nil
+	case "enter":
+		if len(m.backupAdapters) == 0 {
+			return m, nil
+		}
+		adapter := m.backupAdapters[m.backupCursor]
+		switch m.backupAction {
+		case 0: // List
+			return m, m.listBackups(adapter)
+		case 1: // Create
+			return m, m.createBackup(adapter)
+		case 2: // Restore
+			return m, m.restoreBackup(adapter)
+		}
+	}
+	return m, nil
+}
+
+// openBackupModal opens the backup management modal
+func (m *Model) openBackupModal() {
+	m.showBackupModal = true
+	m.backupAdapters = sync.Detected()
+	m.backupCursor = 0
+	m.backupAction = 0 // Start with "list" action
+	m.backupResult = ""
+	m.backupResultIsError = false
+	m.backupBackups = nil
+}
+
+// renderBackupModal renders the backup management modal
+func (m *Model) renderBackupModal() string {
+	var content strings.Builder
+	content.WriteString(ModalTitleStyle.Render("Backup Management"))
+	content.WriteString("\n\n")
+
+	if len(m.backupAdapters) == 0 {
+		content.WriteString(lipgloss.NewStyle().Foreground(colorFgMuted).Italic(true).Render("No tools detected"))
+		content.WriteString("\n\n")
+	} else {
+		// Tool list
+		content.WriteString(lipgloss.NewStyle().Foreground(colorBlue).Bold(true).Render("Detected Tools:"))
+		content.WriteString("\n")
+
+		for i, adapter := range m.backupAdapters {
+			cursor := "  "
+			style := lipgloss.NewStyle().Foreground(colorFg)
+			if i == m.backupCursor {
+				cursor = "> "
+				style = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
+			}
+			content.WriteString(cursor + style.Render(adapter.Name()) + "\n")
+		}
+
+		content.WriteString("\n")
+
+		// Action buttons
+		content.WriteString(lipgloss.NewStyle().Foreground(colorBlue).Bold(true).Render("Action:"))
+		content.WriteString(" ")
+
+		actions := []string{"List", "Create", "Restore"}
+		for i, action := range actions {
+			if i == m.backupAction {
+				content.WriteString(ModalButtonActiveStyle.Render("[" + action + "]"))
+			} else {
+				content.WriteString(ModalButtonStyle.Render(" " + action + " "))
+			}
+			content.WriteString(" ")
+		}
+		content.WriteString("\n\n")
+
+		// Result display
+		if m.backupResult != "" {
+			resultStyle := SuccessStyle
+			if m.backupResultIsError {
+				resultStyle = ErrorStyle
+			}
+			content.WriteString(resultStyle.Render(m.backupResult))
+			content.WriteString("\n\n")
+		}
+
+		// Show backup list if available
+		if len(m.backupBackups) > 0 {
+			content.WriteString(lipgloss.NewStyle().Foreground(colorBlue).Bold(true).Render("Backups:"))
+			content.WriteString("\n")
+			for _, b := range m.backupBackups {
+				timeStr := b.timestamp.Format("2006-01-02 15:04:05")
+				sizeStr := formatBytes(b.size)
+				line := fmt.Sprintf("  %s (%s)", timeStr, sizeStr)
+				content.WriteString(lipgloss.NewStyle().Foreground(colorFgMuted).Render(line) + "\n")
+			}
+			content.WriteString("\n")
+		}
+	}
+
+	// Key hints
+	content.WriteString(KeyDescStyle.Render("j/k select tool | Tab/arrow cycle action | Enter execute | Esc close"))
+
+	modal := ModalStyle.Width(60).Render(content.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+// listBackups lists backups for the selected adapter
+func (m *Model) listBackups(adapter sync.Adapter) tea.Cmd {
+	return func() tea.Msg {
+		configPath := adapter.ConfigPath()
+		backupPaths, err := sync.ListBackups(configPath)
+		if err != nil {
+			return backupOperationMsg{
+				action: "list",
+				tool:   adapter.Name(),
+				err:    err,
+			}
+		}
+
+		if len(backupPaths) == 0 {
+			return backupOperationMsg{
+				action:  "list",
+				tool:    adapter.Name(),
+				result:  "No backups found",
+				backups: nil,
+			}
+		}
+
+		// Convert to backupInfo
+		var backups []backupInfo
+		for _, path := range backupPaths {
+			info := backupInfo{path: path}
+			if stat, err := os.Stat(path); err == nil {
+				info.timestamp = stat.ModTime()
+				info.size = stat.Size()
+			}
+			backups = append(backups, info)
+		}
+
+		return backupOperationMsg{
+			action:  "list",
+			tool:    adapter.Name(),
+			result:  fmt.Sprintf("Found %d backup(s)", len(backups)),
+			backups: backups,
+		}
+	}
+}
+
+// createBackup creates a backup for the selected adapter
+func (m *Model) createBackup(adapter sync.Adapter) tea.Cmd {
+	return func() tea.Msg {
+		configPath := adapter.ConfigPath()
+
+		// Check if config exists
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			return backupOperationMsg{
+				action: "create",
+				tool:   adapter.Name(),
+				err:    fmt.Errorf("no config file found at %s", configPath),
+			}
+		}
+
+		backupPath, err := sync.CreateBackup(configPath)
+		if err != nil {
+			return backupOperationMsg{
+				action: "create",
+				tool:   adapter.Name(),
+				err:    err,
+			}
+		}
+
+		if backupPath == "" {
+			return backupOperationMsg{
+				action: "create",
+				tool:   adapter.Name(),
+				result: "No changes to backup",
+			}
+		}
+
+		return backupOperationMsg{
+			action: "create",
+			tool:   adapter.Name(),
+			result: fmt.Sprintf("Backup created: %s", filepath.Base(backupPath)),
+		}
+	}
+}
+
+// restoreBackup restores the most recent backup for the selected adapter
+func (m *Model) restoreBackup(adapter sync.Adapter) tea.Cmd {
+	return func() tea.Msg {
+		configPath := adapter.ConfigPath()
+
+		restoredFrom, err := sync.RestoreBackup(configPath)
+		if err != nil {
+			return backupOperationMsg{
+				action: "restore",
+				tool:   adapter.Name(),
+				err:    err,
+			}
+		}
+
+		if restoredFrom == "" {
+			return backupOperationMsg{
+				action: "restore",
+				tool:   adapter.Name(),
+				err:    fmt.Errorf("no backup found"),
+			}
+		}
+
+		return backupOperationMsg{
+			action: "restore",
+			tool:   adapter.Name(),
+			result: fmt.Sprintf("Restored from: %s", filepath.Base(restoredFrom)),
+		}
+	}
+}
+
+// formatBytes formats bytes into a human-readable string
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }

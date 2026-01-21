@@ -67,6 +67,11 @@ func TestAdapterGoldenFiles(t *testing.T) {
 			testCases:   []string{"basic"},
 			serverKey:   "mcpServers",
 		},
+		{
+			adapterName: "copilot",
+			testCases:   []string{"basic"},
+			serverKey:   "mcpServers",
+		},
 	}
 
 	// Load minimal test servers
@@ -145,6 +150,8 @@ func goldenConfigPath(tempDir, adapterName string) string {
 		return filepath.Join(tempDir, ".codex", "config.json")
 	case "gemini":
 		return filepath.Join(tempDir, ".gemini", "config.json")
+	case "copilot":
+		return filepath.Join(tempDir, ".config", "github-copilot", "config.json")
 	default:
 		return filepath.Join(tempDir, "config.json")
 	}
@@ -173,6 +180,8 @@ func createGoldenTestAdapter(adapterName, configPath string) writeServerAdapter 
 		return &goldenCodexAdapter{configPath: configPath}
 	case "gemini":
 		return &goldenGeminiAdapter{configPath: configPath}
+	case "copilot":
+		return &goldenCopilotAdapter{configPath: configPath}
 	default:
 		return nil
 	}
@@ -271,6 +280,15 @@ type goldenGeminiAdapter struct {
 
 func (a *goldenGeminiAdapter) WriteServers(servers []*mcp.Server) error {
 	adapter := &GeminiAdapter{}
+	return writeServersWithPath(adapter, a.configPath, servers)
+}
+
+type goldenCopilotAdapter struct {
+	configPath string
+}
+
+func (a *goldenCopilotAdapter) WriteServers(servers []*mcp.Server) error {
+	adapter := &CopilotAdapter{}
 	return writeServersWithPath(adapter, a.configPath, servers)
 }
 

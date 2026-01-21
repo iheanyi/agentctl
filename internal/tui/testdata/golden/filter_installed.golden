@@ -1,0 +1,20 @@
+ agentctl  [Servers]      Commands       Rules       Skills       Prompts                             
+ Hooks       Tools   ● 1  ○ 1  ◌ 0                                                                    
+────────────────────────────────────────────────────────────────────────────────                      
+  Filter: Installed                                                                                   
+   ● filesystem                                       stdio · stdio transport                         
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+────────────────────────────────────────────────────────────────────────────────                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+────────────────────────────────────────────────────────────────────────────────                      
+ j/k navigate │ Tab switch tab │ i install │ d delete │ t test │ x tools │ s sync │ / search │ ? help 

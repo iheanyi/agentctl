@@ -592,10 +592,15 @@ func performScopedSync(cfg *config.Config, server *mcp.Server, scope config.Scop
 		}
 
 		// Global sync: read existing servers and merge
-		existingServers, _ := adapter.ReadServers()
+		sa, ok := sync.AsServerAdapter(adapter)
+		if !ok {
+			out.Println("  x %s - doesn't support servers", toolName)
+			continue
+		}
+		existingServers, _ := sa.ReadServers()
 		mergedServers := mergeServers(existingServers, servers)
 
-		if err := adapter.WriteServers(mergedServers); err != nil {
+		if err := sa.WriteServers(mergedServers); err != nil {
 			out.Println("  x %s - %v", toolName, err)
 			continue
 		}

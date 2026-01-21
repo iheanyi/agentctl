@@ -1,0 +1,21 @@
+ agentctl   Servers      [Commands]      Rules       Skills       Prompts       
+ Hooks       Tools   3 commands                                                 
+────────────────────────────────────────────────────────────────────────────────
+   ⌘ [G] /review                              Code review with best practices   
+   ⌘ [G] /commit                                    Generate a commit message   
+   ⌘ [L] /test                                        Generate tests for code   
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+────────────────────────────────────────────────────────────────────────────────
+                                                                                
+                                                                                
+                                                                                
+────────────────────────────────────────────────────────────────────────────────
+ j/k navigate │ Tab switch tab │ a add │ e edit │ d delete │ / search │ ? help  

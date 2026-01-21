@@ -1,0 +1,21 @@
+ agentctl  [Servers]      Commands       Rules       Skills       Prompts                             
+ Hooks       Tools   ● 2  ○ 1  ◌ 1                                                                    
+────────────────────────────────────────────────────────────────────────────────                      
+   ● [G] filesystem ✓                              stdio · Access local files                         
+   ● [L] github                                    stdio · GitHub integration                         
+   ○ postgres                              stdio · PostgreSQL database access                         
+   ◌ old-server                                         stdio · Legacy server                         
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+────────────────────────────────────────────────────────────────────────────────                      
+                                                                                                      
+                                                                                                      
+                                                                                                      
+────────────────────────────────────────────────────────────────────────────────                      
+ j/k navigate │ Tab switch tab │ i install │ d delete │ t test │ x tools │ s sync │ / search │ ? help 

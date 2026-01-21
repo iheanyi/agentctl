@@ -1,14 +1,16 @@
 package sync
 
 import (
-	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/rule"
+	"github.com/iheanyi/agentctl/pkg/skill"
 )
 
 // OpenCodeAdapter syncs configuration to OpenCode (opencode.ai)
@@ -52,28 +54,45 @@ func (a *OpenCodeAdapter) Detect() (bool, error) {
 }
 
 func (a *OpenCodeAdapter) ConfigPath() string {
+	return filepath.Join(a.configDir(), "opencode.json")
+}
+
+func (a *OpenCodeAdapter) configDir() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
 
-	// OpenCode uses opencode.json, not config.json
 	switch runtime.GOOS {
 	case "darwin", "linux":
-		return filepath.Join(homeDir, ".config", "opencode", "opencode.json")
+		return filepath.Join(homeDir, ".config", "opencode")
 	case "windows":
-		return filepath.Join(homeDir, "AppData", "Roaming", "opencode", "opencode.json")
+		return filepath.Join(homeDir, "AppData", "Roaming", "opencode")
 	default:
 		return ""
 	}
 }
 
+func (a *OpenCodeAdapter) commandsDir() string {
+	return filepath.Join(a.configDir(), "command")
+}
+
+func (a *OpenCodeAdapter) skillsDir() string {
+	return filepath.Join(a.configDir(), "skill")
+}
+
+// agentsFilePath returns path to AGENTS.md (OpenCode prefers this over CLAUDE.md)
+func (a *OpenCodeAdapter) agentsFilePath() string {
+	return filepath.Join(a.configDir(), "AGENTS.md")
+}
+
 func (a *OpenCodeAdapter) SupportedResources() []ResourceType {
-	return []ResourceType{ResourceMCP, ResourceCommands}
+	return []ResourceType{ResourceMCP, ResourceCommands, ResourceRules, ResourceSkills}
 }
 
 func (a *OpenCodeAdapter) ReadServers() ([]*mcp.Server, error) {
-	raw, err := a.loadRawConfig()
+	helper := NewJSONConfigHelper(a.ConfigPath())
+	raw, err := helper.LoadRaw()
 	if err != nil {
 		return nil, err
 	}
@@ -139,8 +158,8 @@ func (a *OpenCodeAdapter) ReadServers() ([]*mcp.Server, error) {
 }
 
 func (a *OpenCodeAdapter) WriteServers(servers []*mcp.Server) error {
-	// Load the full raw config to preserve all fields
-	raw, err := a.loadRawConfig()
+	helper := NewJSONConfigHelper(a.ConfigPath())
+	raw, err := helper.LoadRaw()
 	if err != nil {
 		return err
 	}
@@ -206,7 +225,7 @@ func (a *OpenCodeAdapter) WriteServers(servers []*mcp.Server) error {
 	raw["mcp"] = mcpSection
 
 	// Save the config
-	if err := a.saveRawConfig(raw); err != nil {
+	if err := helper.SaveRaw(raw); err != nil {
 		return err
 	}
 
@@ -216,54 +235,141 @@ func (a *OpenCodeAdapter) WriteServers(servers []*mcp.Server) error {
 }
 
 func (a *OpenCodeAdapter) ReadCommands() ([]*command.Command, error) {
-	return nil, nil
+	return ReadCommandsFromDir(a.commandsDir(), parseOpenCodeCommand)
 }
 
 func (a *OpenCodeAdapter) WriteCommands(commands []*command.Command) error {
+	commandsDir := a.commandsDir()
+
+	// Ensure directory exists
+	if err := os.MkdirAll(commandsDir, 0755); err != nil {
+		return err
+	}
+
+	for _, cmd := range commands {
+		// Validate command name to prevent path traversal
+		if err := SanitizeName(cmd.Name); err != nil {
+			return fmt.Errorf("invalid command name: %w", err)
+		}
+
+		content := formatOpenCodeCommand(cmd)
+		filename := cmd.Name + ".md"
+		path := filepath.Join(commandsDir, filename)
+
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 func (a *OpenCodeAdapter) ReadRules() ([]*rule.Rule, error) {
-	return nil, nil
+	// OpenCode uses AGENTS.md (similar to CLAUDE.md)
+	agentsPath := a.agentsFilePath()
+
+	if _, err := os.Stat(agentsPath); os.IsNotExist(err) {
+		// Also check for CLAUDE.md as fallback
+		claudePath := filepath.Join(a.configDir(), "CLAUDE.md")
+		if _, err := os.Stat(claudePath); os.IsNotExist(err) {
+			return nil, nil
+		}
+		agentsPath = claudePath
+	}
+
+	r, err := rule.Load(agentsPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return []*rule.Rule{r}, nil
 }
 
 func (a *OpenCodeAdapter) WriteRules(rules []*rule.Rule) error {
-	return nil
-}
+	if len(rules) == 0 {
+		return nil
+	}
 
-// loadRawConfig loads the entire config as a raw map to preserve all fields
-func (a *OpenCodeAdapter) loadRawConfig() (map[string]interface{}, error) {
-	path := a.ConfigPath()
+	// OpenCode prefers AGENTS.md
+	agentsPath := a.agentsFilePath()
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]interface{}), nil
+	// Concatenate all rules
+	var content strings.Builder
+	for i, r := range rules {
+		if i > 0 {
+			content.WriteString("\n\n---\n\n")
 		}
-		return nil, err
+		content.WriteString(r.Content)
 	}
 
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, err
-	}
-
-	return raw, nil
-}
-
-// saveRawConfig saves the entire config, preserving all fields
-func (a *OpenCodeAdapter) saveRawConfig(raw map[string]interface{}) error {
-	path := a.ConfigPath()
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	// Ensure config directory exists
+	if err := os.MkdirAll(a.configDir(), 0755); err != nil {
 		return err
 	}
 
-	data, err := json.MarshalIndent(raw, "", "  ")
-	if err != nil {
-		return err
+	return os.WriteFile(agentsPath, []byte(content.String()), 0644)
+}
+
+// ReadSkills reads skills from OpenCode's skill directory
+func (a *OpenCodeAdapter) ReadSkills() ([]*skill.Skill, error) {
+	return ReadSkillsFromDir(a.skillsDir())
+}
+
+// WriteSkills writes skills to OpenCode's skill directory
+func (a *OpenCodeAdapter) WriteSkills(skills []*skill.Skill) error {
+	return WriteSkillsToDir(a.skillsDir(), skills)
+}
+
+// parseOpenCodeCommand parses an OpenCode command markdown file
+func parseOpenCodeCommand(filename string, content string) *command.Command {
+	name := strings.TrimSuffix(filename, ".md")
+	cmd := &command.Command{Name: name}
+
+	if strings.HasPrefix(content, "---") {
+		parts := strings.SplitN(content, "---", 3)
+		if len(parts) >= 3 {
+			frontmatter := parts[1]
+			for _, line := range strings.Split(frontmatter, "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "description:") {
+					cmd.Description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+				} else if strings.HasPrefix(line, "template:") {
+					// OpenCode uses "template" for the prompt template
+					cmd.Prompt = strings.TrimSpace(strings.TrimPrefix(line, "template:"))
+				} else if strings.HasPrefix(line, "model:") {
+					cmd.Model = strings.TrimSpace(strings.TrimPrefix(line, "model:"))
+				}
+			}
+			// If no template in frontmatter, use body as prompt
+			if cmd.Prompt == "" {
+				cmd.Prompt = strings.TrimSpace(parts[2])
+			}
+		}
+	} else {
+		cmd.Prompt = content
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return cmd
 }
+
+// formatOpenCodeCommand formats a command for OpenCode
+func formatOpenCodeCommand(cmd *command.Command) string {
+	var sb strings.Builder
+
+	sb.WriteString("---\n")
+	if cmd.Description != "" {
+		sb.WriteString("description: ")
+		sb.WriteString(cmd.Description)
+		sb.WriteString("\n")
+	}
+	if cmd.Model != "" {
+		sb.WriteString("model: ")
+		sb.WriteString(cmd.Model)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("---\n\n")
+	sb.WriteString(cmd.Prompt)
+
+	return sb.String()
+}
+

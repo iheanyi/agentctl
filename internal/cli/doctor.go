@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iheanyi/agentctl/pkg/config"
+	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/sync"
 	"github.com/spf13/cobra"
 )
@@ -49,26 +50,54 @@ func init() {
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
-	fmt.Println("Running health checks...")
-	fmt.Println()
+	// JSON output data
+	doctorOutput := output.DoctorOutput{
+		Runtimes: []output.DoctorRuntimeResult{},
+		Tools:    []output.DoctorToolResult{},
+		Servers:  []output.DoctorServerResult{},
+	}
+
+	if !JSONOutput {
+		fmt.Println("Running health checks...")
+		fmt.Println()
+	}
 
 	issues := 0
 
 	// Check agentctl config
-	fmt.Println("agentctl Configuration:")
+	if !JSONOutput {
+		fmt.Println("agentctl Configuration:")
+	}
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Printf("  ✗ Failed to load config: %v\n", err)
+		doctorOutput.Config = output.DoctorConfigResult{
+			Valid: false,
+			Error: err.Error(),
+		}
+		if !JSONOutput {
+			fmt.Printf("  ✗ Failed to load config: %v\n", err)
+		}
 		issues++
 	} else {
 		path := shortenPath(cfg.Path)
-		fmt.Printf("  ✓ Config: %s\n", path)
-		fmt.Printf("    %d server(s) configured\n", len(cfg.Servers))
+		doctorOutput.Config = output.DoctorConfigResult{
+			Path:        cfg.Path,
+			Valid:       true,
+			ServerCount: len(cfg.Servers),
+		}
+		if !JSONOutput {
+			fmt.Printf("  ✓ Config: %s\n", path)
+			fmt.Printf("    %d server(s) configured\n", len(cfg.Servers))
+		}
 	}
-	fmt.Println()
+	if !JSONOutput {
+		fmt.Println()
+	}
 
 	// Check runtimes
-	fmt.Println("Runtimes:")
+	if !JSONOutput {
+		fmt.Println("Runtimes:")
+	}
 	runtimes := []struct {
 		name     string
 		command  string
@@ -103,21 +132,40 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	for i, rt := range runtimes {
 		res := runtimeResults[i]
+		rtResult := output.DoctorRuntimeResult{
+			Name:     rt.name,
+			Command:  rt.command,
+			Required: rt.required,
+		}
 		if res.err != nil {
+			rtResult.Found = false
 			if rt.required {
-				fmt.Printf("  ✗ %s: not found (required)\n", rt.name)
+				if !JSONOutput {
+					fmt.Printf("  ✗ %s: not found (required)\n", rt.name)
+				}
 				issues++
 			} else {
-				fmt.Printf("  - %s: not found\n", rt.name)
+				if !JSONOutput {
+					fmt.Printf("  - %s: not found\n", rt.name)
+				}
 			}
 		} else {
-			fmt.Printf("  ✓ %s: %s\n", rt.name, res.version)
+			rtResult.Found = true
+			rtResult.Version = res.version
+			if !JSONOutput {
+				fmt.Printf("  ✓ %s: %s\n", rt.name, res.version)
+			}
 		}
+		doctorOutput.Runtimes = append(doctorOutput.Runtimes, rtResult)
 	}
-	fmt.Println()
+	if !JSONOutput {
+		fmt.Println()
+	}
 
 	// Check detected tools and their configs
-	fmt.Println("Tools:")
+	if !JSONOutput {
+		fmt.Println("Tools:")
+	}
 	adapters := sync.All()
 	detectedCount := 0
 
@@ -148,33 +196,55 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	for i, adapter := range adapters {
 		res := toolResults[i]
+		toolRes := output.DoctorToolResult{
+			Name:       adapter.Name(),
+			ConfigPath: adapter.ConfigPath(),
+			Detected:   res.detected,
+		}
+
 		if res.detected {
 			detectedCount++
 			path := shortenPath(adapter.ConfigPath())
 
 			if res.configErr != nil {
-				fmt.Printf("  ✗ %s: %s\n", adapter.Name(), path)
-				fmt.Printf("      Error: %v\n", res.configErr)
+				toolRes.Valid = false
+				toolRes.Error = res.configErr.Error()
+				if !JSONOutput {
+					fmt.Printf("  ✗ %s: %s\n", adapter.Name(), path)
+					fmt.Printf("      Error: %v\n", res.configErr)
+				}
 				issues++
 			} else if !res.valid {
-				fmt.Printf("  ⚠ %s: %s (config issues)\n", adapter.Name(), path)
+				toolRes.Valid = false
+				if !JSONOutput {
+					fmt.Printf("  ⚠ %s: %s (config issues)\n", adapter.Name(), path)
+				}
 			} else {
-				fmt.Printf("  ✓ %s: %s (%d servers)\n", adapter.Name(), path, res.serverCount)
+				toolRes.Valid = true
+				toolRes.ServerCount = res.serverCount
+				if !JSONOutput {
+					fmt.Printf("  ✓ %s: %s (%d servers)\n", adapter.Name(), path, res.serverCount)
+				}
 			}
-		} else if doctorVerbose {
+		} else if doctorVerbose && !JSONOutput {
 			fmt.Printf("  - %s: not installed\n", adapter.Name())
 		}
+		doctorOutput.Tools = append(doctorOutput.Tools, toolRes)
 	}
 
 	if detectedCount == 0 {
-		fmt.Println("  No supported tools detected!")
-		fmt.Println("  Supported: Claude Code, Cursor, Codex, OpenCode, Cline, Windsurf, Zed, Continue")
+		if !JSONOutput {
+			fmt.Println("  No supported tools detected!")
+			fmt.Println("  Supported: Claude Code, Cursor, Codex, OpenCode, Cline, Windsurf, Zed, Continue")
+		}
 		issues++
 	}
-	fmt.Println()
+	if !JSONOutput {
+		fmt.Println()
+	}
 
-	// Run tool-specific doctor commands if requested
-	if doctorRunTools {
+	// Run tool-specific doctor commands if requested (skip in JSON mode)
+	if doctorRunTools && !JSONOutput {
 		fmt.Println("Tool Doctors:")
 		toolDoctors := getToolDoctorCommands()
 		ranAny := false
@@ -202,7 +272,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			} else {
 				toolCmd = exec.CommandContext(ctx, td.command, td.args...)
 			}
-			output, err := toolCmd.CombinedOutput()
+			cmdOutput, err := toolCmd.CombinedOutput()
 			cancel()
 
 			if ctx.Err() == context.DeadlineExceeded {
@@ -214,13 +284,13 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 				// Don't count timeout as issue, just informational
 			} else if err != nil {
 				// Check if it's a TTY-related error
-				outputStr := string(output)
+				outputStr := string(cmdOutput)
 				if strings.Contains(outputStr, "Raw mode") || strings.Contains(outputStr, "stdin") {
 					fmt.Printf("    ⚠ %s doctor requires interactive terminal\n", td.name)
 					fmt.Printf("      Run '%s %s' directly for full diagnostics.\n", td.command, strings.Join(td.args, " "))
 				} else {
 					fmt.Printf("    ✗ %s doctor failed\n", td.name)
-					if doctorVerbose && len(output) > 0 {
+					if doctorVerbose && len(cmdOutput) > 0 {
 						// Indent output
 						lines := strings.Split(strings.TrimSpace(outputStr), "\n")
 						for _, line := range lines {
@@ -231,8 +301,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 				}
 			} else {
 				fmt.Printf("    ✓ %s doctor passed\n", td.name)
-				if doctorVerbose && len(output) > 0 {
-					lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+				if doctorVerbose && len(cmdOutput) > 0 {
+					lines := strings.Split(strings.TrimSpace(string(cmdOutput)), "\n")
 					for _, line := range lines {
 						fmt.Printf("      %s\n", line)
 					}
@@ -248,35 +318,67 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Check MCP server commands
 	if cfg != nil && len(cfg.Servers) > 0 {
-		fmt.Println("MCP Servers:")
+		if !JSONOutput {
+			fmt.Println("MCP Servers:")
+		}
 		for _, server := range cfg.Servers {
+			serverRes := output.DoctorServerResult{
+				Name:     server.Name,
+				Disabled: server.Disabled,
+			}
+
 			if server.Disabled {
-				if doctorVerbose {
+				serverRes.Available = false
+				if doctorVerbose && !JSONOutput {
 					fmt.Printf("  - %s: disabled\n", server.Name)
 				}
+				doctorOutput.Servers = append(doctorOutput.Servers, serverRes)
 				continue
 			}
 
 			if server.URL != "" {
-				fmt.Printf("  ✓ %s (http)\n", server.Name)
+				serverRes.Type = "http"
+				serverRes.Available = true
+				if !JSONOutput {
+					fmt.Printf("  ✓ %s (http)\n", server.Name)
+				}
 			} else if server.Command != "" {
+				serverRes.Type = "stdio"
 				_, err := exec.LookPath(server.Command)
 				if err != nil {
-					fmt.Printf("  ✗ %s: command not found: %s\n", server.Name, server.Command)
+					serverRes.Available = false
+					serverRes.Error = fmt.Sprintf("command not found: %s", server.Command)
+					if !JSONOutput {
+						fmt.Printf("  ✗ %s: command not found: %s\n", server.Name, server.Command)
+					}
 					issues++
 				} else {
-					fmt.Printf("  ✓ %s (stdio)\n", server.Name)
+					serverRes.Available = true
+					if !JSONOutput {
+						fmt.Printf("  ✓ %s (stdio)\n", server.Name)
+					}
 				}
 			}
+			doctorOutput.Servers = append(doctorOutput.Servers, serverRes)
 		}
-		fmt.Println()
+		if !JSONOutput {
+			fmt.Println()
+		}
 	}
 
 	// Check sync state
-	fmt.Println("Sync State:")
+	if !JSONOutput {
+		fmt.Println("Sync State:")
+	}
 	state, err := sync.LoadState()
 	if err != nil {
-		fmt.Printf("  ✗ Cannot load state: %v\n", err)
+		doctorOutput.SyncState = output.DoctorSyncState{
+			Valid: false,
+			Error: err.Error(),
+		}
+		if !JSONOutput {
+			fmt.Printf("  ✗ Cannot load state: %v\n", err)
+		}
 		issues++
 	} else {
 		totalManaged := 0
@@ -285,28 +387,65 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			if len(servers) > 0 {
 				adapterCount++
 				totalManaged += len(servers)
-				if doctorVerbose {
+				if doctorVerbose && !JSONOutput {
 					fmt.Printf("    %s: %d managed server(s)\n", adapterName, len(servers))
 				}
 			}
 		}
 
-		statePath := shortenPath(filepath.Join(config.DefaultConfigDir(), "sync-state.json"))
-		if totalManaged > 0 {
-			fmt.Printf("  ✓ State: %s\n", statePath)
-			fmt.Printf("    Tracking %d server(s) across %d adapter(s)\n", totalManaged, adapterCount)
-		} else {
-			fmt.Printf("  - State: %s (empty)\n", statePath)
+		statePath := filepath.Join(config.DefaultConfigDir(), "sync-state.json")
+		doctorOutput.SyncState = output.DoctorSyncState{
+			Path:           statePath,
+			Valid:          true,
+			ManagedServers: totalManaged,
+			AdapterCount:   adapterCount,
+		}
+
+		if !JSONOutput {
+			shortStatePath := shortenPath(statePath)
+			if totalManaged > 0 {
+				fmt.Printf("  ✓ State: %s\n", shortStatePath)
+				fmt.Printf("    Tracking %d server(s) across %d adapter(s)\n", totalManaged, adapterCount)
+			} else {
+				fmt.Printf("  - State: %s (empty)\n", shortStatePath)
+			}
 		}
 	}
-	fmt.Println()
+	if !JSONOutput {
+		fmt.Println()
+	}
 
 	// System info
-	fmt.Println("System:")
-	fmt.Printf("  OS: %s\n", runtime.GOOS)
-	fmt.Printf("  Arch: %s\n", runtime.GOARCH)
-	fmt.Printf("  agentctl: %s (%s)\n", Version, Commit)
-	fmt.Println()
+	doctorOutput.System = output.DoctorSystemInfo{
+		OS:              runtime.GOOS,
+		Arch:            runtime.GOARCH,
+		AgentctlVersion: Version,
+		AgentctlCommit:  Commit,
+	}
+	if !JSONOutput {
+		fmt.Println("System:")
+		fmt.Printf("  OS: %s\n", runtime.GOOS)
+		fmt.Printf("  Arch: %s\n", runtime.GOARCH)
+		fmt.Printf("  agentctl: %s (%s)\n", Version, Commit)
+		fmt.Println()
+	}
+
+	doctorOutput.IssueCount = issues
+
+	// JSON output
+	if JSONOutput {
+		jw := output.NewJSONWriter()
+		return jw.Write(output.CLIOutput{
+			Success: issues == 0,
+			Data:    doctorOutput,
+			Error: func() string {
+				if issues > 0 {
+					return fmt.Sprintf("health check found %d issue(s)", issues)
+				}
+				return ""
+			}(),
+		})
+	}
 
 	if issues > 0 {
 		fmt.Printf("Issues found: %d\n", issues)
