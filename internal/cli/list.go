@@ -11,8 +11,10 @@ import (
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/discovery"
+	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/skill"
+	"github.com/iheanyi/agentctl/pkg/sync"
 )
 
 var listCmd = &cobra.Command{
@@ -107,10 +109,56 @@ func runList(cmd *cobra.Command, args []string) error {
 	if listType == "" || listType == "servers" {
 		// Get servers filtered by scope
 		servers := cfg.ServersForScope(scope)
-		if len(servers) > 0 {
+
+		// Collect servers from detected tools if --native flag is set
+		type toolServer struct {
+			server *mcp.Server
+			tool   string
+		}
+		var toolServers []toolServer
+		if listNative {
+			// Get servers from each detected tool
+			for _, adapter := range sync.Detected() {
+				// Check if this adapter supports reading servers
+				serverAdapter, ok := adapter.(sync.ServerAdapter)
+				if !ok {
+					continue // Skip adapters that don't support servers
+				}
+				toolServerList, err := serverAdapter.ReadServers()
+				if err != nil {
+					continue // Skip tools that can't be read
+				}
+				for _, s := range toolServerList {
+					// Skip if we already have this server from agentctl config
+					found := false
+					for _, as := range servers {
+						if as.Name == s.Name {
+							found = true
+							break
+						}
+					}
+					// Also skip if we already added it from another tool
+					for _, ts := range toolServers {
+						if ts.server.Name == s.Name {
+							found = true
+							break
+						}
+					}
+					if !found {
+						toolServers = append(toolServers, toolServer{server: s, tool: adapter.Name()})
+					}
+				}
+			}
+		}
+
+		if len(servers) > 0 || len(toolServers) > 0 {
 			fmt.Println("MCP Servers:")
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "  NAME\tSCOPE\tSOURCE\tSTATUS")
+			if listNative {
+				fmt.Fprintln(w, "  NAME\tSCOPE\tSOURCE\tTOOL\tSTATUS")
+			} else {
+				fmt.Fprintln(w, "  NAME\tSCOPE\tSOURCE\tSTATUS")
+			}
 			for _, server := range servers {
 				status := "enabled"
 				if server.Disabled {
@@ -123,7 +171,25 @@ func runList(cmd *cobra.Command, args []string) error {
 					sourceInfo = "alias:" + server.Source.Alias
 				}
 				scopeIndicator := scopeToIndicator(server.Scope)
-				fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", server.Name, scopeIndicator, sourceInfo, status)
+				if listNative {
+					fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n", server.Name, scopeIndicator, sourceInfo, "[agentctl]", status)
+				} else {
+					fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", server.Name, scopeIndicator, sourceInfo, status)
+				}
+			}
+			// Print servers from tools (not managed by agentctl)
+			for _, ts := range toolServers {
+				status := "enabled"
+				if ts.server.Disabled {
+					status = "disabled"
+				}
+				sourceInfo := "stdio"
+				if ts.server.URL != "" {
+					sourceInfo = ts.server.URL
+				} else if ts.server.Command != "" {
+					sourceInfo = ts.server.Command
+				}
+				fmt.Fprintf(w, "  %s\t%s\t%s\t[%s]\t%s\n", ts.server.Name, "[G]", sourceInfo, ts.tool, status)
 			}
 			w.Flush()
 			hasOutput = true
