@@ -18,10 +18,10 @@ type Lockfile struct {
 
 // LockedEntry represents a locked server entry
 type LockedEntry struct {
-	Source     string    `json:"source"`              // Git URL or alias
-	Version    string    `json:"version,omitempty"`   // Semver version if available
-	Commit     string    `json:"commit,omitempty"`    // Git commit hash
-	Integrity  string    `json:"integrity,omitempty"` // SHA256 hash of installed files
+	Source      string    `json:"source"`              // Git URL or alias
+	Version     string    `json:"version,omitempty"`   // Semver version if available
+	Commit      string    `json:"commit,omitempty"`    // Git commit hash
+	Integrity   string    `json:"integrity,omitempty"` // SHA256 hash of installed files
 	InstalledAt time.Time `json:"installedAt"`
 	UpdatedAt   time.Time `json:"updatedAt,omitempty"`
 }

@@ -8,10 +8,11 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/sync"
-	"github.com/spf13/cobra"
 )
 
 var initCmd = &cobra.Command{

@@ -3,10 +3,11 @@ package cli
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/pkg/builder"
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/output"
-	"github.com/spf13/cobra"
 )
 
 var updateCmd = &cobra.Command{

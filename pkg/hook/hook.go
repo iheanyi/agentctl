@@ -8,10 +8,10 @@ import (
 
 // Hook represents a configured hook
 type Hook struct {
-	Type    string   `json:"type"`    // PreToolUse, PostToolUse, Notification, Stop, UserPromptSubmit
-	Matcher string   `json:"matcher"` // Tool matcher (e.g., "Bash", "Edit", "*")
-	Command string   `json:"command"` // Shell command to run
-	Source  string   `json:"-"`       // Which tool this hook came from (e.g., "claude")
+	Type    string `json:"type"`    // PreToolUse, PostToolUse, Notification, Stop, UserPromptSubmit
+	Matcher string `json:"matcher"` // Tool matcher (e.g., "Bash", "Edit", "*")
+	Command string `json:"command"` // Shell command to run
+	Source  string `json:"-"`       // Which tool this hook came from (e.g., "claude")
 }
 
 // ClaudeHookEntry represents a single hook entry in Claude Code's settings

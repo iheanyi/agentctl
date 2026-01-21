@@ -5,9 +5,10 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/output"
-	"github.com/spf13/cobra"
 )
 
 var listCmd = &cobra.Command{
@@ -82,10 +83,8 @@ func runList(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Project config: %s\n\n", cfg.ProjectPath)
 	}
 
-	// Apply profile filter if specified
-	if listProfile != "" {
-		// TODO: Apply profile filtering
-	}
+	// TODO: Apply profile filtering when listProfile != ""
+	_ = listProfile // Suppress unused warning until implemented
 
 	hasOutput := false
 

@@ -28,10 +28,10 @@ type BuildConfig struct {
 type Server struct {
 	Name      string            `json:"name"`
 	Source    Source            `json:"source"`
-	Command   string            `json:"command,omitempty"`   // For local servers (stdio)
-	Args      []string          `json:"args,omitempty"`      // For local servers
-	URL       string            `json:"url,omitempty"`       // For remote servers (http/sse)
-	Headers   map[string]string `json:"headers,omitempty"`   // For remote servers (http/sse)
+	Command   string            `json:"command,omitempty"` // For local servers (stdio)
+	Args      []string          `json:"args,omitempty"`    // For local servers
+	URL       string            `json:"url,omitempty"`     // For remote servers (http/sse)
+	Headers   map[string]string `json:"headers,omitempty"` // For remote servers (http/sse)
 	Env       map[string]string `json:"env,omitempty"`
 	Transport Transport         `json:"transport,omitempty"`
 	Namespace string            `json:"namespace,omitempty"` // For conflict resolution

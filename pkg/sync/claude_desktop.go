@@ -144,10 +144,6 @@ func (a *ClaudeDesktopAdapter) WriteServers(servers []*mcp.Server) error {
 	return a.saveConfig(config)
 }
 
-
-
-
-
 func (a *ClaudeDesktopAdapter) loadConfig() (*ClaudeConfig, error) {
 	path := a.ConfigPath()
 

@@ -11,13 +11,13 @@ import (
 type Profile struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
-	Servers     []string `json:"servers,omitempty"`   // Server names to include
-	Commands    []string `json:"commands,omitempty"`  // Command names to include
-	Rules       []string `json:"rules,omitempty"`     // Rule names to include
-	Prompts     []string `json:"prompts,omitempty"`   // Prompt names to include
-	Skills      []string `json:"skills,omitempty"`    // Skill names to include
-	Disabled    []string `json:"disabled,omitempty"`  // Resources to disable
-	Path        string   `json:"-"`                   // Path to profile file (not serialized)
+	Servers     []string `json:"servers,omitempty"`  // Server names to include
+	Commands    []string `json:"commands,omitempty"` // Command names to include
+	Rules       []string `json:"rules,omitempty"`    // Rule names to include
+	Prompts     []string `json:"prompts,omitempty"`  // Prompt names to include
+	Skills      []string `json:"skills,omitempty"`   // Skill names to include
+	Disabled    []string `json:"disabled,omitempty"` // Resources to disable
+	Path        string   `json:"-"`                  // Path to profile file (not serialized)
 }
 
 // Load loads a profile from a JSON file

@@ -5,13 +5,14 @@ import (
 	"os"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/rule"
 	"github.com/iheanyi/agentctl/pkg/sync"
-	"github.com/spf13/cobra"
 )
 
 var syncCmd = &cobra.Command{
@@ -538,10 +539,10 @@ func printVerboseServers(servers []*mcp.Server, indent string) {
 
 // serverDiff represents the diff between existing and new servers
 type serverDiff struct {
-	toAdd      []*mcp.Server // New servers to add
-	toUpdate   []*mcp.Server // Existing managed servers to update
-	unmanaged  []*mcp.Server // Existing unmanaged servers (won't touch)
-	toRemove   []string      // Managed server names that would be removed
+	toAdd     []*mcp.Server // New servers to add
+	toUpdate  []*mcp.Server // Existing managed servers to update
+	unmanaged []*mcp.Server // Existing unmanaged servers (won't touch)
+	toRemove  []string      // Managed server names that would be removed
 }
 
 // computeServerDiff computes what would change when syncing servers

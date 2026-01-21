@@ -1,0 +1,56 @@
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  # Start with defaults and add a few extras
+  # Avoid being too strict on existing codebase
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - gofmt
+    - goimports
+  disable:
+    - unused        # Too many false positives for WIP code
+    - gosimple      # Stylistic, not critical
+    - ineffassign   # Pre-existing issues
+    - misspell      # British vs American spelling debates
+    - unconvert     # Minor optimization
+
+linters-settings:
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+  govet:
+    shadow: false
+  goimports:
+    local-prefixes: github.com/iheanyi/agentctl
+  misspell:
+    locale: US
+
+issues:
+  exclude-rules:
+    # Ignore unchecked errors in test files (common pattern)
+    - path: _test\.go
+      linters:
+        - errcheck
+        - lll
+    # Ignore certain issues in generated files
+    - path: ".*\\.generated\\.go"
+      linters:
+        - all
+    # Ignore unchecked errors in daemon (fire-and-forget writes)
+    - path: pkg/daemon/
+      linters:
+        - errcheck
+    # Ignore unchecked errors in secrets (cleanup operations)
+    - path: pkg/secrets/
+      linters:
+        - errcheck
+    # Ignore unchecked errors in CLI (MarkFlagRequired is safe to ignore)
+    - path: internal/cli/
+      linters:
+        - errcheck
+  max-issues-per-linter: 50
+  max-same-issues: 10

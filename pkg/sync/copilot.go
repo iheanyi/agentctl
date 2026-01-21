@@ -231,4 +231,3 @@ func formatCopilotCommand(cmd *command.Command) string {
 
 	return sb.String()
 }
-

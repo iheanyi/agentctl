@@ -14,7 +14,7 @@ var embeddedAliases embed.FS
 
 // Alias maps a short name to an MCP server configuration
 type Alias struct {
-	URL            string             `json:"url"`                      // Git URL for local servers
+	URL            string             `json:"url"` // Git URL for local servers
 	Description    string             `json:"description,omitempty"`
 	Runtime        string             `json:"runtime,omitempty"`        // node, python, go, docker
 	Transport      string             `json:"transport,omitempty"`      // stdio (default), http, sse
@@ -35,10 +35,10 @@ type Variant struct {
 
 // OAuth represents OAuth configuration for remote MCP servers
 type OAuth struct {
-	AuthURL     string   `json:"authUrl"`              // OAuth authorization endpoint
-	TokenURL    string   `json:"tokenUrl"`             // OAuth token endpoint
-	Scopes      []string `json:"scopes,omitempty"`     // Required OAuth scopes
-	ClientID    string   `json:"clientId,omitempty"`   // Public client ID (if applicable)
+	AuthURL     string   `json:"authUrl"`               // OAuth authorization endpoint
+	TokenURL    string   `json:"tokenUrl"`              // OAuth token endpoint
+	Scopes      []string `json:"scopes,omitempty"`      // Required OAuth scopes
+	ClientID    string   `json:"clientId,omitempty"`    // Public client ID (if applicable)
 	PKCEEnabled bool     `json:"pkceEnabled,omitempty"` // Use PKCE for security
 }
 

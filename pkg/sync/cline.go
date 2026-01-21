@@ -95,8 +95,3 @@ func (a *ClineAdapter) WriteServers(servers []*mcp.Server) error {
 	raw["mcpServers"] = mcpServers
 	return helper.SaveRaw(raw)
 }
-
-
-
-
-

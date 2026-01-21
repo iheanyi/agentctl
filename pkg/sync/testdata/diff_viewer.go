@@ -20,12 +20,12 @@ type DiffStyle struct {
 // DefaultDiffStyle returns the default diff styling
 func DefaultDiffStyle() DiffStyle {
 	return DiffStyle{
-		Added:     lipgloss.NewStyle().Foreground(lipgloss.Color("2")),  // Green
-		Removed:   lipgloss.NewStyle().Foreground(lipgloss.Color("1")),  // Red
-		Context:   lipgloss.NewStyle().Foreground(lipgloss.Color("8")),  // Gray
+		Added:     lipgloss.NewStyle().Foreground(lipgloss.Color("2")),            // Green
+		Removed:   lipgloss.NewStyle().Foreground(lipgloss.Color("1")),            // Red
+		Context:   lipgloss.NewStyle().Foreground(lipgloss.Color("8")),            // Gray
 		Header:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")), // Cyan
-		LineNum:   lipgloss.NewStyle().Foreground(lipgloss.Color("8")),  // Gray
-		Separator: lipgloss.NewStyle().Foreground(lipgloss.Color("8")),  // Gray
+		LineNum:   lipgloss.NewStyle().Foreground(lipgloss.Color("8")),            // Gray
+		Separator: lipgloss.NewStyle().Foreground(lipgloss.Color("8")),            // Gray
 	}
 }
 

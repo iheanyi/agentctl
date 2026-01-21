@@ -7,12 +7,13 @@ import (
 	stdsync "sync"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/mcpclient"
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/secrets"
-	"github.com/spf13/cobra"
 )
 
 var testCmd = &cobra.Command{
@@ -99,7 +100,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		wg.Add(1)
 		go func(i int, s *mcp.Server) {
 			defer wg.Done()
-			
+
 			// Resolve environment variables
 			serverCopy := *s
 			if s.Env != nil {
@@ -148,7 +149,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	if failCount > 0 {
 		return fmt.Errorf("tests failed: %d passed, %d failed", passCount, failCount)
 	}
-	
+
 	out.Success("All %d server(s) passed deep validation", passCount)
 	return nil
 }

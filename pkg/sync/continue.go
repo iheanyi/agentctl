@@ -153,8 +153,6 @@ func (a *ContinueAdapter) WriteServers(servers []*mcp.Server) error {
 	return helper.SaveRaw(raw)
 }
 
-
-
 func (a *ContinueAdapter) ReadRules() ([]*rule.Rule, error) {
 	// Continue uses .continuerules or INSTRUCTIONS.md
 	homeDir, err := os.UserHomeDir()
@@ -202,4 +200,3 @@ func (a *ContinueAdapter) WriteRules(rules []*rule.Rule) error {
 
 	return os.WriteFile(rulesPath, []byte(content), 0644)
 }
-

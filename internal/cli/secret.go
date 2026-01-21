@@ -8,10 +8,11 @@ import (
 	"syscall"
 
 	"github.com/charmbracelet/huh"
-	"github.com/iheanyi/agentctl/pkg/output"
-	"github.com/iheanyi/agentctl/pkg/secrets"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"github.com/iheanyi/agentctl/pkg/output"
+	"github.com/iheanyi/agentctl/pkg/secrets"
 )
 
 var secretCmd = &cobra.Command{

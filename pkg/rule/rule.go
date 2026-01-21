@@ -6,8 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/iheanyi/agentctl/pkg/pathutil"
 	"gopkg.in/yaml.v3"
+
+	"github.com/iheanyi/agentctl/pkg/pathutil"
 )
 
 // Frontmatter represents the optional YAML frontmatter in a rule file
