@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/iheanyi/agentctl/pkg/agent"
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 )
@@ -309,6 +310,9 @@ func TestResourceTypeConstants(t *testing.T) {
 	}
 	if ResourceSkills != "skills" {
 		t.Errorf("ResourceSkills should be 'skills', got %q", ResourceSkills)
+	}
+	if ResourceAgents != "agents" {
+		t.Errorf("ResourceAgents should be 'agents', got %q", ResourceAgents)
 	}
 }
 
@@ -658,6 +662,209 @@ func TestSkillsAdapterInterface(t *testing.T) {
 				t.Errorf("AsSkillsAdapter should return non-nil for %q", name)
 			}
 		})
+	}
+}
+
+// ============================================
+// AgentsAdapter Interface Tests
+// ============================================
+
+func TestAgentsAdapterInterface(t *testing.T) {
+	// Test that adapters that claim to support agents implement AgentsAdapter
+	agentAdapters := []string{"claude", "cursor", "copilot", "opencode"}
+
+	for _, name := range agentAdapters {
+		t.Run(name, func(t *testing.T) {
+			adapter, ok := Get(name)
+			if !ok {
+				t.Fatalf("Adapter %q should be registered", name)
+			}
+
+			// Check if it supports agents resource
+			supported := adapter.SupportedResources()
+			hasAgents := false
+			for _, r := range supported {
+				if r == ResourceAgents {
+					hasAgents = true
+					break
+				}
+			}
+			if !hasAgents {
+				t.Errorf("Adapter %q should support ResourceAgents", name)
+				return
+			}
+
+			// Check if it implements AgentsAdapter
+			if !SupportsAgents(adapter) {
+				t.Errorf("Adapter %q claims to support agents but doesn't implement AgentsAdapter", name)
+			}
+
+			// Test AsAgentsAdapter
+			aa, ok := AsAgentsAdapter(adapter)
+			if !ok {
+				t.Errorf("AsAgentsAdapter should return true for %q", name)
+			}
+			if aa == nil {
+				t.Errorf("AsAgentsAdapter should return non-nil for %q", name)
+			}
+		})
+	}
+}
+
+func TestAgentsAdapterReadWrite(t *testing.T) {
+	// Test agent package directly (adapters depend on home directory)
+	tmpDir, err := os.MkdirTemp("", "agents-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create test agents
+	agents := []*agent.Agent{
+		{
+			Name:        "researcher",
+			Description: "Research agent",
+			Content:     "You are a research assistant.",
+			Model:       "sonnet",
+		},
+		{
+			Name:        "coder",
+			Description: "Coding agent",
+			Content:     "You are a coding assistant.",
+			Tools:       []string{"Read", "Write", "Edit"},
+		},
+	}
+
+	// Write agents
+	for _, ag := range agents {
+		if err := ag.Save(tmpDir); err != nil {
+			t.Fatalf("Failed to save agent %q: %v", ag.Name, err)
+		}
+	}
+
+	// Verify files were created
+	for _, ag := range agents {
+		path := filepath.Join(tmpDir, ag.Name+".md")
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Errorf("Agent file %q should exist", path)
+		}
+	}
+
+	// Read agents back
+	loadedAgents, err := agent.LoadAll(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to load agents: %v", err)
+	}
+
+	if len(loadedAgents) != len(agents) {
+		t.Errorf("Expected %d agents, got %d", len(agents), len(loadedAgents))
+	}
+
+	// Verify agent content
+	for _, loaded := range loadedAgents {
+		var original *agent.Agent
+		for _, ag := range agents {
+			if ag.Name == loaded.Name {
+				original = ag
+				break
+			}
+		}
+		if original == nil {
+			t.Errorf("Unexpected agent %q loaded", loaded.Name)
+			continue
+		}
+		if loaded.Description != original.Description {
+			t.Errorf("Agent %q description mismatch: got %q, want %q", loaded.Name, loaded.Description, original.Description)
+		}
+		if loaded.Content != original.Content {
+			t.Errorf("Agent %q content mismatch: got %q, want %q", loaded.Name, loaded.Content, original.Content)
+		}
+	}
+}
+
+func TestAgentSaveToFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-saveto-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	ag := &agent.Agent{
+		Name:            "full-agent",
+		Description:     "A full featured agent",
+		Content:         "You are a helpful assistant.",
+		Model:           "opus",
+		Tools:           []string{"Read", "Write"},
+		DisallowedTools: []string{"Bash"},
+		PermissionMode:  "acceptEdits",
+	}
+
+	path := filepath.Join(tmpDir, "custom-name.agent.md")
+	if err := ag.SaveToFile(path); err != nil {
+		t.Fatalf("Failed to save agent to file: %v", err)
+	}
+
+	// Verify file exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Error("Agent file should exist at custom path")
+	}
+
+	// Read content and verify YAML frontmatter
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("Failed to read agent file: %v", err)
+	}
+	content := string(data)
+
+	expectedParts := []string{
+		"name: full-agent",
+		"description: A full featured agent",
+		"model: opus",
+		"permissionMode: acceptEdits",
+		"You are a helpful assistant.",
+	}
+
+	for _, part := range expectedParts {
+		if !contains(content, part) {
+			t.Errorf("Agent file should contain %q, got:\n%s", part, content)
+		}
+	}
+}
+
+func TestCopilotAgentExtension(t *testing.T) {
+	// Test that Copilot uses .agent.md extension
+	tmpDir, err := os.MkdirTemp("", "copilot-agent-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	ag := &agent.Agent{
+		Name:        "test-agent",
+		Description: "Test agent for Copilot",
+		Content:     "You are a test assistant.",
+	}
+
+	// Test Copilot-style extension
+	path := filepath.Join(tmpDir, ag.Name+".agent.md")
+	if err := ag.SaveToFile(path); err != nil {
+		t.Fatalf("Failed to save agent: %v", err)
+	}
+
+	// Verify the file exists with .agent.md extension
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Error("Agent file should exist with .agent.md extension")
+	}
+
+	// Load it back and verify
+	loaded, err := agent.LoadFromFile(path)
+	if err != nil {
+		t.Fatalf("Failed to load agent: %v", err)
+	}
+
+	// Name should be derived from filename (removing .agent.md)
+	if loaded.Name != "test-agent" {
+		t.Errorf("Loaded agent name should be 'test-agent', got %q", loaded.Name)
 	}
 }
 
