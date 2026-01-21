@@ -11,13 +11,13 @@ func TestParseClaudeSettings(t *testing.T) {
 		expected int // number of hooks
 	}{
 		{
-			name: "empty settings",
-			json: `{}`,
+			name:     "empty settings",
+			json:     `{}`,
 			expected: 0,
 		},
 		{
-			name: "no hooks key",
-			json: `{"allowedTools": ["Bash"]}`,
+			name:     "no hooks key",
+			json:     `{"allowedTools": ["Bash"]}`,
 			expected: 0,
 		},
 		{

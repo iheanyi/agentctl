@@ -1,6 +1,8 @@
                                                                                 
                                                                                 
                                                                                 
+                                                                                
+                                                                                
     ╭──────────────────────────────────────────────────────────────────────╮    
     │                                                                      │    
     │  Import - Step 1: Select Tool                                        │    
@@ -9,16 +11,14 @@
     │  Select a tool to import from:                                       │    
     │                                                                      │    
     │  > claude (servers, commands, rules, skills)                         │    
-    │    claude-desktop (servers)                                          │    
-    │    codex (servers, commands, rules, skills)                          │    
-    │    copilot (servers, commands, rules, skills)                        │    
     │    cursor (servers, commands, rules)                                 │    
-    │    gemini (servers)                                                  │    
-    │    opencode (servers, commands, rules, skills)                       │    
     │                                                                      │    
     │  j/k:navigate  Enter:select  Esc:close                               │    
     │                                                                      │    
     ╰──────────────────────────────────────────────────────────────────────╯    
+                                                                                
+                                                                                
+                                                                                
                                                                                 
                                                                                 
                                                                                 

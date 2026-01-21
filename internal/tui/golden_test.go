@@ -18,6 +18,54 @@ import (
 	"github.com/iheanyi/agentctl/pkg/sync"
 )
 
+// stubAdapter is a mock adapter for deterministic testing
+type stubAdapter struct {
+	name       string
+	detected   bool
+	configPath string
+	resources  []sync.ResourceType
+}
+
+func (s *stubAdapter) Name() string                        { return s.name }
+func (s *stubAdapter) Detect() (bool, error)               { return s.detected, nil }
+func (s *stubAdapter) ConfigPath() string                  { return s.configPath }
+func (s *stubAdapter) SupportedResources() []sync.ResourceType { return s.resources }
+
+// testAdapters returns a deterministic set of mock adapters for testing
+func testAdapters() []sync.Adapter {
+	return []sync.Adapter{
+		&stubAdapter{
+			name:       "claude",
+			detected:   true,
+			configPath: "~/.claude/settings.json",
+			resources:  []sync.ResourceType{sync.ResourceMCP, sync.ResourceCommands, sync.ResourceRules, sync.ResourceSkills},
+		},
+		&stubAdapter{
+			name:       "cursor",
+			detected:   true,
+			configPath: "~/.cursor/mcp.json",
+			resources:  []sync.ResourceType{sync.ResourceMCP, sync.ResourceRules, sync.ResourceCommands},
+		},
+		&stubAdapter{
+			name:       "codex",
+			detected:   false,
+			configPath: "~/.codex/config.json",
+			resources:  []sync.ResourceType{sync.ResourceMCP},
+		},
+	}
+}
+
+// testDetectedAdapters returns only the adapters marked as detected
+func testDetectedAdapters() []sync.Adapter {
+	var detected []sync.Adapter
+	for _, a := range testAdapters() {
+		if ok, _ := a.Detect(); ok {
+			detected = append(detected, a)
+		}
+	}
+	return detected
+}
+
 // newTestModel creates a Model for testing without loading from disk
 func newTestModel() *Model {
 	// Create minimal config
@@ -613,7 +661,7 @@ func TestGoldenImportWizardStepTool(t *testing.T) {
 	m := newTestModel()
 	m.showImportWizard = true
 	m.importWizardStep = 0 // Select tool
-	tools := sync.Detected()
+	tools := testDetectedAdapters() // Use mock adapters for deterministic testing
 	sort.Slice(tools, func(i, j int) bool {
 		return tools[i].Name() < tools[j].Name()
 	})
@@ -636,7 +684,7 @@ func TestGoldenImportWizardStepResources(t *testing.T) {
 	m := newTestModel()
 	m.showImportWizard = true
 	m.importWizardStep = 1 // Select resources
-	tools := sync.Detected()
+	tools := testDetectedAdapters() // Use mock adapters for deterministic testing
 	sort.Slice(tools, func(i, j int) bool {
 		return tools[i].Name() < tools[j].Name()
 	})
@@ -682,7 +730,7 @@ func TestGoldenToolsTabEmpty(t *testing.T) {
 func TestGoldenToolsTabPopulated(t *testing.T) {
 	m := newTestModel()
 	m.activeTab = TabTools
-	m.detectedTools = sync.All()
+	m.detectedTools = testAdapters() // Use mock adapters for deterministic testing
 	// Sort by name for consistent ordering (matches real TUI behavior)
 	sort.Slice(m.detectedTools, func(i, j int) bool {
 		return m.detectedTools[i].Name() < m.detectedTools[j].Name()

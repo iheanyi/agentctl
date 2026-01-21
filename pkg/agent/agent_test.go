@@ -28,8 +28,8 @@ You are an expert code reviewer.
 			wantDesc: "Reviews code for best practices",
 		},
 		{
-			name: "no frontmatter",
-			content: `You are a helpful assistant.`,
+			name:     "no frontmatter",
+			content:  `You are a helpful assistant.`,
 			wantName: "",
 			wantDesc: "",
 		},

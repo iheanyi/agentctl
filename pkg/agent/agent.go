@@ -35,7 +35,7 @@ type Agent struct {
 	Skills         []string `yaml:"skills,omitempty" json:"skills,omitempty"`                 // Preloaded skills
 
 	// Cursor-specific
-	ReadOnly     bool `yaml:"readonly,omitempty" json:"readonly,omitempty"`         // Restrict write operations
+	ReadOnly     bool `yaml:"readonly,omitempty" json:"readonly,omitempty"`           // Restrict write operations
 	IsBackground bool `yaml:"is_background,omitempty" json:"is_background,omitempty"` // Run asynchronously
 
 	// OpenCode-specific
@@ -46,8 +46,8 @@ type Agent struct {
 	Disabled    bool    `yaml:"disable,omitempty" json:"disabled,omitempty"`        // Agent disabled
 
 	// Copilot-specific
-	Target  string   `yaml:"target,omitempty" json:"target,omitempty"` // vscode, github-copilot
-	Infer   bool     `yaml:"infer,omitempty" json:"infer,omitempty"`   // Auto-selection based on context
+	Target   string            `yaml:"target,omitempty" json:"target,omitempty"`     // vscode, github-copilot
+	Infer    bool              `yaml:"infer,omitempty" json:"infer,omitempty"`       // Auto-selection based on context
 	Metadata map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"` // Custom annotations
 }
 

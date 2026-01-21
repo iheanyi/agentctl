@@ -89,10 +89,10 @@ type CommandInfo struct {
 
 // RuleInfo represents rule information in JSON output
 type RuleInfo struct {
-	Name   string `json:"name"`
-	Scope  string `json:"scope"`
-	Tool   string `json:"tool,omitempty"`
-	Path   string `json:"path,omitempty"`
+	Name  string `json:"name"`
+	Scope string `json:"scope"`
+	Tool  string `json:"tool,omitempty"`
+	Path  string `json:"path,omitempty"`
 }
 
 // SkillInfo represents skill information in JSON output
@@ -264,7 +264,7 @@ func MustPrintJSON(data interface{}) {
 
 // NewResourceResult represents the JSON output for resource creation commands (new)
 type NewResourceResult struct {
-	Type  string `json:"type"`  // "command", "rule", "skill", "prompt", "agent"
+	Type  string `json:"type"` // "command", "rule", "skill", "prompt", "agent"
 	Name  string `json:"name"`
 	Scope string `json:"scope"` // "local" or "global"
 	Path  string `json:"path"`

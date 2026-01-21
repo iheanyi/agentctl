@@ -24,9 +24,9 @@ type keyMap struct {
 	Delete   key.Binding
 	Edit     key.Binding
 	Toggle   key.Binding
-	View    key.Binding
-	Inspect key.Binding
-	Update  key.Binding
+	View     key.Binding
+	Inspect  key.Binding
+	Update   key.Binding
 	Sync     key.Binding
 	SyncAll  key.Binding
 	Test     key.Binding
@@ -35,12 +35,12 @@ type keyMap struct {
 	ExecTool key.Binding
 
 	// Filters
-	CycleFilter     key.Binding
+	CycleFilter      key.Binding
 	CycleScopeFilter key.Binding
-	FilterAll       key.Binding
-	FilterInstalled key.Binding
-	FilterAvailable key.Binding
-	FilterDisabled  key.Binding
+	FilterAll        key.Binding
+	FilterInstalled  key.Binding
+	FilterAvailable  key.Binding
+	FilterDisabled   key.Binding
 
 	// Profiles
 	ProfileSwitch key.Binding

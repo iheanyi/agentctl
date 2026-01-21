@@ -15,10 +15,10 @@ func TestDirectoryScannerDetect(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	tests := []struct {
-		name    string
-		cfg     ScannerConfig
-		setup   func(dir string) error
-		want    bool
+		name  string
+		cfg   ScannerConfig
+		setup func(dir string) error
+		want  bool
 	}{
 		{
 			name: "detects tool directory",

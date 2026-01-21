@@ -60,8 +60,8 @@ type ClaudeHookCommand struct {
 
 // GeminiHookEntry represents a single hook entry in Gemini CLI's settings
 type GeminiHookEntry struct {
-	Matcher string            `json:"matcher"`
-	Hooks   []GeminiHookItem  `json:"hooks"`
+	Matcher string           `json:"matcher"`
+	Hooks   []GeminiHookItem `json:"hooks"`
 }
 
 // GeminiHookItem represents a hook command in Gemini CLI format

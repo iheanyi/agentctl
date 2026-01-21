@@ -1,23 +1,17 @@
  agentctl   Servers       Commands       Rules       Skills       Hooks         
- [Tools]      Agents   7/11 tools detected                                      
+ [Tools]      Agents   2/3 tools detected                                       
 ────────────────────────────────────────────────────────────────────────────────
-   ● claude [mcp, commands, rules, skills, agents] (9 servers)                  
- /Users/iheanyi/.claude/settings.json ✓                                         
-   ● claude-desktop [mcp] (3 servers)  /Users/iheanyi/Library/Application Su... 
- ✓                                                                              
-   ○ cline [mcp]         /Users/iheanyi/.cline/cline_mcp_setti... (no config)   
-   ● codex [mcp, commands, rules, skills] (1 servers)                           
- /Users/iheanyi/.codex/config.toml ✓                                            
-   ○ continue [mcp, rules]   /Users/iheanyi/.continue/config.json (no config)   
-   ● copilot [mcp, commands, rules, skills, agents]                             
- /Users/iheanyi/.config/github-copilot... (no config)                           
-   ● cursor [mcp, rules, commands, agents] (8 servers)                          
- /Users/iheanyi/.cursor/mcp.json ✓                                              
-   ● gemini [mcp] (8 servers)            /Users/iheanyi/.gemini/config.json ✓   
-   ● opencode [mcp, commands, rules, skills, agents] (13 servers)               
- /Users/iheanyi/.config/opencode/openc... ✓                                     
-   ○ windsurf [mcp, rules]      /Users/iheanyi/.windsurf/mcp.json (no config)   
-   ○ zed [mcp]           /Users/iheanyi/.config/zed/settings.json (no config)   
+   ● claude [mcp, commands, rules, skills]          ~/.claude/settings.json ✓   
+   ○ codex [mcp]                                       ~/.codex/config.json ✓   
+   ● cursor [mcp, rules, commands]                       ~/.cursor/mcp.json ✓   
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
                                                                                 
 ────────────────────────────────────────────────────────────────────────────────
                                                                                 
