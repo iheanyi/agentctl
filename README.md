@@ -1,13 +1,13 @@
 # agentctl
 
-Universal agent configuration manager for MCP servers across multiple agentic tools.
+Universal agent configuration manager for MCP servers, commands, rules, skills, agents, and hooks across multiple agentic tools.
 
 [![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## Overview
 
-`agentctl` manages MCP servers, commands, rules, prompts, and skills across 10 agentic frameworks:
+`agentctl` manages configuration across 10 agentic frameworks:
 
 - **Claude Code** - Anthropic's CLI assistant
 - **Claude Desktop** - Anthropic's desktop app
@@ -21,6 +21,17 @@ Universal agent configuration manager for MCP servers across multiple agentic to
 - **Gemini** - Google's Gemini CLI
 
 One config, all tools. Install once, sync everywhere.
+
+## Features
+
+- **MCP Server Management** - Add, remove, and sync MCP servers across all tools
+- **Native Discovery** - Discover and import resources from existing tool directories (`.claude/`, `.cursor/`, etc.)
+- **Commands, Rules & Skills** - Manage slash commands, coding rules, and skills
+- **Agents** - Create and manage custom agents/subagents
+- **Hooks** - Configure lifecycle hooks for automation
+- **Profiles** - Switch between different server configurations
+- **Project-Local Config** - Override global settings per-project
+- **Interactive TUI** - Visual interface for managing everything
 
 ## Installation
 
@@ -47,12 +58,11 @@ agentctl init
 # Add an MCP server (auto-syncs to all detected tools)
 agentctl add figma
 
-# Add with explicit config
-agentctl add playwright --command npx --args "playwriter@latest"
-agentctl add my-api --url https://api.example.com/mcp
+# Import existing config from another tool
+agentctl import claude
 
-# List installed servers
-agentctl list
+# List all resources (including native discoveries)
+agentctl list --native
 
 # Launch interactive TUI
 agentctl ui
@@ -89,6 +99,41 @@ agentctl update [server]
 agentctl list
 ```
 
+### Import from Existing Tools
+
+Import MCP servers, commands, rules, and skills from existing tool configurations:
+
+```bash
+# Import all from a specific tool
+agentctl import claude              # Import from Claude Code
+agentctl import cursor              # Import from Cursor
+agentctl import codex               # Import from Codex
+
+# Import specific resource types
+agentctl import claude --servers    # Import only MCP servers
+agentctl import claude --commands   # Import only commands
+agentctl import claude --rules      # Import only rules
+agentctl import claude --skills     # Import only skills
+
+# Import from all discovered native resources
+agentctl import --all               # Import from .claude/, .cursor/, etc.
+agentctl import --all --rules       # Import only rules from all tools
+agentctl import --all --dry-run     # Preview what would be imported
+
+# Import workspace config to local project
+agentctl import claude --local      # Import .mcp.json to .agentctl.json
+```
+
+### Copy Between Scopes
+
+Copy resources between global and project-local configurations:
+
+```bash
+agentctl copy command my-cmd --to local    # Copy global command to project
+agentctl copy rule my-rule --to global     # Promote local rule to global
+agentctl copy skill my-skill --to local    # Copy global skill to project
+```
+
 ### Syncing
 
 ```bash
@@ -96,6 +141,30 @@ agentctl sync                  # Sync to all detected tools
 agentctl sync --tool claude    # Sync to specific tool
 agentctl sync --dry-run        # Preview changes with diff output
 agentctl sync --verbose        # Show detailed sync output
+```
+
+### List Resources
+
+```bash
+agentctl list                      # List all agentctl-managed resources
+agentctl list --native             # Include tool-native discoveries
+agentctl list --type servers       # List only MCP servers
+agentctl list --type commands      # List only commands
+agentctl list --type rules         # List only rules
+agentctl list --type skills        # List only skills
+agentctl list --type agents        # List only agents
+agentctl list --scope local        # List only project-local resources
+agentctl list --scope global       # List only global resources
+```
+
+### Resource Creation
+
+```bash
+agentctl new command <name>    # Create new slash command
+agentctl new rule <name>       # Create new rule
+agentctl new skill <name>      # Create new skill
+agentctl new agent <name>      # Create new custom agent
+agentctl new prompt <name>     # Create new prompt template
 ```
 
 ### Diagnostics
@@ -107,6 +176,14 @@ agentctl doctor                # Run comprehensive health checks
 agentctl doctor -v             # Verbose health check output
 agentctl test [server]         # Health check MCP servers
 agentctl status                # Show resource status
+```
+
+### Backups
+
+```bash
+agentctl backup list           # List available backups
+agentctl backup create         # Create manual backup
+agentctl backup restore <id>   # Restore from backup
 ```
 
 ### Search & Discovery
@@ -142,15 +219,6 @@ agentctl list                  # Shows merged global + project config
 agentctl sync                  # Syncs merged configuration
 ```
 
-### Resource Creation
-
-```bash
-agentctl new command <name>    # Create new slash command
-agentctl new rule <name>       # Create new rule
-agentctl new prompt <name>     # Create new prompt
-agentctl new skill <name>      # Create new skill
-```
-
 ### Configuration
 
 ```bash
@@ -170,22 +238,62 @@ agentctl secret list           # List stored secrets
 agentctl secret delete <name>  # Remove secret
 ```
 
-### Interactive TUI
+## Interactive TUI
+
+Launch with `agentctl ui` or just `agentctl`:
 
 ```bash
 agentctl ui
 ```
 
-Keyboard shortcuts:
-- `Tab` - Switch between Installed/Browse views
-- `j/k` or `Up/Down` - Navigate
-- `/` - Filter list
-- `Enter` - Install/view details
-- `d` - Delete server
-- `s` - Sync all servers
-- `t` - Test selected server
-- `?` - Show help
-- `q` - Quit
+### Tabs
+
+- **Servers** - Manage MCP servers
+- **Commands** - Manage slash commands
+- **Rules** - Manage coding rules
+- **Skills** - Manage skills
+- **Hooks** - Manage lifecycle hooks
+- **Agents** - Manage custom agents
+- **Tools** - View detected tools and their capabilities
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Switch between tabs |
+| `j/k` or `Up/Down` | Navigate list |
+| `/` | Filter/search list |
+| `Enter` | View details / select |
+| `a` | Add new item |
+| `d` | Delete selected item |
+| `e` | Edit selected item |
+| `s` | Sync all servers |
+| `t` | Test selected server |
+| `i` | Import wizard |
+| `b` | Backup modal |
+| `?` | Show help |
+| `q` | Quit |
+
+### Import Wizard
+
+Press `i` in the TUI to launch the import wizard:
+
+1. **Select Tool** - Choose which tool to import from (Claude, Cursor, etc.)
+2. **Select Resources** - Choose which resource types to import
+3. **Review & Import** - Preview and confirm the import
+
+## Native Discovery
+
+agentctl can discover resources from tool-native directories:
+
+| Tool | Directory | Discovered Resources |
+|------|-----------|---------------------|
+| Claude Code | `.claude/` | commands, rules, skills, agents |
+| Cursor | `.cursor/rules/`, `.cursorrules` | rules |
+| Codex | `.codex/` | commands, rules |
+| Gemini | `.gemini/` | rules |
+
+Use `agentctl list --native` to see discovered resources, or `agentctl import --all` to import them into agentctl management.
 
 ## Configuration
 
