@@ -4,6 +4,7 @@
 package discovery
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -95,104 +96,118 @@ func DiscoverAll(dir string) []*NativeResource {
 		tool := scanner.Name()
 
 		// Scan rules
-		if rules, err := scanner.ScanRules(dir); err == nil {
-			for _, r := range rules {
-				resources = append(resources, &NativeResource{
-					Type:     "rule",
-					Name:     r.Name,
-					Path:     r.Path,
-					Tool:     tool,
-					Scope:    "local",
-					Resource: r,
-				})
-			}
+		rules, err := scanner.ScanRules(dir)
+		if err != nil {
+			logScanWarning(tool, "rules", err)
+		}
+		for _, r := range rules {
+			resources = append(resources, &NativeResource{
+				Type:     "rule",
+				Name:     r.Name,
+				Path:     r.Path,
+				Tool:     tool,
+				Scope:    "local",
+				Resource: r,
+			})
 		}
 
 		// Scan skills
-		if skills, err := scanner.ScanSkills(dir); err == nil {
-			for _, s := range skills {
-				resources = append(resources, &NativeResource{
-					Type:     "skill",
-					Name:     s.Name,
-					Path:     s.Path,
-					Tool:     tool,
-					Scope:    "local",
-					Resource: s,
-				})
-			}
+		skills, err := scanner.ScanSkills(dir)
+		if err != nil {
+			logScanWarning(tool, "skills", err)
+		}
+		for _, s := range skills {
+			resources = append(resources, &NativeResource{
+				Type:     "skill",
+				Name:     s.Name,
+				Path:     s.Path,
+				Tool:     tool,
+				Scope:    "local",
+				Resource: s,
+			})
 		}
 
 		// Scan hooks
-		if hooks, err := scanner.ScanHooks(dir); err == nil {
-			for _, h := range hooks {
-				resources = append(resources, &NativeResource{
-					Type:     "hook",
-					Name:     h.Name,
-					Path:     "",
-					Tool:     tool,
-					Scope:    "local",
-					Resource: h,
-				})
-			}
+		hooks, err := scanner.ScanHooks(dir)
+		if err != nil {
+			logScanWarning(tool, "hooks", err)
+		}
+		for _, h := range hooks {
+			resources = append(resources, &NativeResource{
+				Type:     "hook",
+				Name:     h.Name,
+				Path:     "",
+				Tool:     tool,
+				Scope:    "local",
+				Resource: h,
+			})
 		}
 
 		// Scan commands
-		if commands, err := scanner.ScanCommands(dir); err == nil {
-			for _, c := range commands {
-				resources = append(resources, &NativeResource{
-					Type:     "command",
-					Name:     c.Name,
-					Path:     c.Path,
-					Tool:     tool,
-					Scope:    "local",
-					Resource: c,
-				})
-			}
+		commands, err := scanner.ScanCommands(dir)
+		if err != nil {
+			logScanWarning(tool, "commands", err)
+		}
+		for _, c := range commands {
+			resources = append(resources, &NativeResource{
+				Type:     "command",
+				Name:     c.Name,
+				Path:     c.Path,
+				Tool:     tool,
+				Scope:    "local",
+				Resource: c,
+			})
 		}
 
 		// Scan servers
-		if servers, err := scanner.ScanServers(dir); err == nil {
-			for _, s := range servers {
-				resources = append(resources, &NativeResource{
-					Type:     "server",
-					Name:     s.Name,
-					Path:     "",
-					Tool:     tool,
-					Scope:    "local",
-					Resource: s,
-				})
-			}
+		servers, err := scanner.ScanServers(dir)
+		if err != nil {
+			logScanWarning(tool, "servers", err)
+		}
+		for _, s := range servers {
+			resources = append(resources, &NativeResource{
+				Type:     "server",
+				Name:     s.Name,
+				Path:     "",
+				Tool:     tool,
+				Scope:    "local",
+				Resource: s,
+			})
 		}
 
 		// Scan plugins (if scanner supports it)
 		if ps, ok := scanner.(PluginScanner); ok {
-			if plugins, err := ps.ScanPlugins(dir); err == nil {
-				for _, p := range plugins {
-					resources = append(resources, &NativeResource{
-						Type:     "plugin",
-						Name:     p.Name,
-						Path:     p.Path,
-						Tool:     tool,
-						Scope:    "local",
-						Resource: p,
-					})
-				}
+			plugins, err := ps.ScanPlugins(dir)
+			if err != nil {
+				logScanWarning(tool, "plugins", err)
+			}
+			for _, p := range plugins {
+				resources = append(resources, &NativeResource{
+					Type:     "plugin",
+					Name:     p.Name,
+					Path:     p.Path,
+					Tool:     tool,
+					Scope:    "local",
+					Resource: p,
+				})
 			}
 		}
 
 		// Scan agents (if scanner supports it)
 		if as, ok := scanner.(AgentScanner); ok {
-			if agents, err := as.ScanAgents(dir); err == nil {
-				for _, a := range agents {
-					resources = append(resources, &NativeResource{
-						Type:     "agent",
-						Name:     a.Name,
-						Path:     a.Path,
-						Tool:     tool,
-						Scope:    "local",
-						Resource: a,
-					})
-				}
+			agents, err := as.ScanAgents(dir)
+			if err != nil {
+				logScanWarning(tool, "agents", err)
+			}
+			for _, a := range agents {
+				resources = append(resources, &NativeResource{
+					Type:     "agent",
+					Name:     a.Name,
+					Path:     a.Path,
+					Tool:     tool,
+					Scope:    "local",
+					Resource: a,
+				})
 			}
 		}
 	}
@@ -207,9 +222,11 @@ func DiscoverRules(dir string) []*rule.Rule {
 		if !scanner.Detect(dir) {
 			continue
 		}
-		if r, err := scanner.ScanRules(dir); err == nil {
-			rules = append(rules, r...)
+		r, err := scanner.ScanRules(dir)
+		if err != nil {
+			logScanWarning(scanner.Name(), "rules", err)
 		}
+		rules = append(rules, r...)
 	}
 	return rules
 }
@@ -221,9 +238,11 @@ func DiscoverSkills(dir string) []*skill.Skill {
 		if !scanner.Detect(dir) {
 			continue
 		}
-		if s, err := scanner.ScanSkills(dir); err == nil {
-			skills = append(skills, s...)
+		s, err := scanner.ScanSkills(dir)
+		if err != nil {
+			logScanWarning(scanner.Name(), "skills", err)
 		}
+		skills = append(skills, s...)
 	}
 	return skills
 }
@@ -235,9 +254,11 @@ func DiscoverHooks(dir string) []*hook.Hook {
 		if !scanner.Detect(dir) {
 			continue
 		}
-		if h, err := scanner.ScanHooks(dir); err == nil {
-			hooks = append(hooks, h...)
+		h, err := scanner.ScanHooks(dir)
+		if err != nil {
+			logScanWarning(scanner.Name(), "hooks", err)
 		}
+		hooks = append(hooks, h...)
 	}
 	return hooks
 }
@@ -312,59 +333,67 @@ func DiscoverGlobal() []*NativeResource {
 		tool := scanner.Name()
 
 		// Scan global rules
-		if rules, err := gs.ScanGlobalRules(); err == nil {
-			for _, r := range rules {
-				resources = append(resources, &NativeResource{
-					Type:     "rule",
-					Name:     r.Name,
-					Path:     r.Path,
-					Tool:     tool,
-					Scope:    "global",
-					Resource: r,
-				})
-			}
+		rules, err := gs.ScanGlobalRules()
+		if err != nil {
+			logScanWarning(tool, "global rules", err)
+		}
+		for _, r := range rules {
+			resources = append(resources, &NativeResource{
+				Type:     "rule",
+				Name:     r.Name,
+				Path:     r.Path,
+				Tool:     tool,
+				Scope:    "global",
+				Resource: r,
+			})
 		}
 
 		// Scan global skills
-		if skills, err := gs.ScanGlobalSkills(); err == nil {
-			for _, s := range skills {
-				resources = append(resources, &NativeResource{
-					Type:     "skill",
-					Name:     s.Name,
-					Path:     s.Path,
-					Tool:     tool,
-					Scope:    "global",
-					Resource: s,
-				})
-			}
+		skills, err := gs.ScanGlobalSkills()
+		if err != nil {
+			logScanWarning(tool, "global skills", err)
+		}
+		for _, s := range skills {
+			resources = append(resources, &NativeResource{
+				Type:     "skill",
+				Name:     s.Name,
+				Path:     s.Path,
+				Tool:     tool,
+				Scope:    "global",
+				Resource: s,
+			})
 		}
 
 		// Scan global commands
-		if commands, err := gs.ScanGlobalCommands(); err == nil {
-			for _, c := range commands {
-				resources = append(resources, &NativeResource{
-					Type:     "command",
-					Name:     c.Name,
-					Path:     c.Path,
-					Tool:     tool,
-					Scope:    "global",
-					Resource: c,
-				})
-			}
+		commands, err := gs.ScanGlobalCommands()
+		if err != nil {
+			logScanWarning(tool, "global commands", err)
+		}
+		for _, c := range commands {
+			resources = append(resources, &NativeResource{
+				Type:     "command",
+				Name:     c.Name,
+				Path:     c.Path,
+				Tool:     tool,
+				Scope:    "global",
+				Resource: c,
+			})
 		}
 
 		// Scan global hooks
-		if hooks, err := gs.ScanGlobalHooks(); err == nil {
-			for _, h := range hooks {
-				resources = append(resources, &NativeResource{
-					Type:     "hook",
-					Name:     h.Name,
-					Path:     "",
-					Tool:     tool,
-					Scope:    "global",
-					Resource: h,
-				})
-			}
+		hooks, err := gs.ScanGlobalHooks()
+		if err != nil {
+			logScanWarning(tool, "global hooks", err)
+		}
+		for _, h := range hooks {
+			resources = append(resources, &NativeResource{
+				Type:     "hook",
+				Name:     h.Name,
+				Path:     "",
+				Tool:     tool,
+				Scope:    "global",
+				Resource: h,
+			})
 		}
 	}
 
@@ -377,17 +406,19 @@ func DiscoverGlobal() []*NativeResource {
 
 		tool := scanner.Name()
 
-		if plugins, err := ps.ScanGlobalPlugins(); err == nil {
-			for _, p := range plugins {
-				resources = append(resources, &NativeResource{
-					Type:     "plugin",
-					Name:     p.Name,
-					Path:     p.Path,
-					Tool:     tool,
-					Scope:    "global",
-					Resource: p,
-				})
-			}
+		plugins, err := ps.ScanGlobalPlugins()
+		if err != nil {
+			logScanWarning(tool, "global plugins", err)
+		}
+		for _, p := range plugins {
+			resources = append(resources, &NativeResource{
+				Type:     "plugin",
+				Name:     p.Name,
+				Path:     p.Path,
+				Tool:     tool,
+				Scope:    "global",
+				Resource: p,
+			})
 		}
 	}
 
@@ -400,17 +431,19 @@ func DiscoverGlobal() []*NativeResource {
 
 		tool := scanner.Name()
 
-		if agents, err := as.ScanGlobalAgents(); err == nil {
-			for _, a := range agents {
-				resources = append(resources, &NativeResource{
-					Type:     "agent",
-					Name:     a.Name,
-					Path:     a.Path,
-					Tool:     tool,
-					Scope:    "global",
-					Resource: a,
-				})
-			}
+		agents, err := as.ScanGlobalAgents()
+		if err != nil {
+			logScanWarning(tool, "global agents", err)
+		}
+		for _, a := range agents {
+			resources = append(resources, &NativeResource{
+				Type:     "agent",
+				Name:     a.Name,
+				Path:     a.Path,
+				Tool:     tool,
+				Scope:    "global",
+				Resource: a,
+			})
 		}
 	}
 
@@ -435,9 +468,11 @@ func DiscoverAgents(dir string) []*agent.Agent {
 		if !ok {
 			continue
 		}
-		if a, err := as.ScanAgents(dir); err == nil {
-			agents = append(agents, a...)
+		a, err := as.ScanAgents(dir)
+		if err != nil {
+			logScanWarning(scanner.Name(), "agents", err)
 		}
+		agents = append(agents, a...)
 	}
 	return agents
 }
@@ -450,9 +485,15 @@ func DiscoverGlobalAgents() []*agent.Agent {
 		if !ok {
 			continue
 		}
-		if a, err := as.ScanGlobalAgents(); err == nil {
-			agents = append(agents, a...)
+		a, err := as.ScanGlobalAgents()
+		if err != nil {
+			logScanWarning(scanner.Name(), "global agents", err)
 		}
+		agents = append(agents, a...)
 	}
 	return agents
+}
+
+func logScanWarning(tool, resource string, err error) {
+	_, _ = fmt.Fprintf(os.Stderr, "warning: discovery %s for %s: %v\n", resource, tool, err)
 }

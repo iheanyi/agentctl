@@ -12,10 +12,12 @@ import (
 	stdsync "sync"
 	"time"
 
+	toml "github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/iheanyi/agentctl/pkg/config"
 	"github.com/iheanyi/agentctl/pkg/output"
+	"github.com/iheanyi/agentctl/pkg/skill"
 	"github.com/iheanyi/agentctl/pkg/sync"
 )
 
@@ -69,7 +71,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	if !JSONOutput {
 		fmt.Println("agentctl Configuration:")
 	}
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithProject()
 	if err != nil {
 		doctorOutput.Config = output.DoctorConfigResult{
 			Valid: false,
@@ -416,6 +418,38 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
+	// Check skills integrity
+	skillIssues := checkSkillIntegrity(cfg)
+	doctorOutput.SkillIssues = skillIssues
+	if !JSONOutput {
+		fmt.Println("Skills:")
+		if len(skillIssues) == 0 {
+			fmt.Println("  ✓ Skill integrity checks passed")
+		} else {
+			for _, issue := range skillIssues {
+				fmt.Printf("  ✗ %s\n", issue)
+			}
+		}
+		fmt.Println()
+	}
+	issues += len(skillIssues)
+
+	// Check sync drift between state and tool configs
+	driftIssues := checkSyncDrift(state)
+	doctorOutput.SyncDriftIssues = driftIssues
+	if !JSONOutput {
+		fmt.Println("Sync Drift:")
+		if len(driftIssues) == 0 {
+			fmt.Println("  ✓ No drift detected")
+		} else {
+			for _, issue := range driftIssues {
+				fmt.Printf("  ⚠ %s\n", issue)
+			}
+		}
+		fmt.Println()
+	}
+	issues += len(driftIssues)
+
 	// System info
 	doctorOutput.System = output.DoctorSystemInfo{
 		OS:              runtime.GOOS,
@@ -469,27 +503,114 @@ func validateToolConfig(adapter sync.Adapter) (valid bool, serverCount int, err 
 		return false, 0, err
 	}
 
+	if adapter.Name() == "codex" && strings.HasSuffix(configPath, ".toml") {
+		var raw map[string]interface{}
+		if err := toml.Unmarshal(data, &raw); err != nil {
+			return false, 0, fmt.Errorf("invalid TOML")
+		}
+		if servers, ok := raw["mcp_servers"].(map[string]interface{}); ok {
+			serverCount = len(servers)
+		}
+		return true, serverCount, nil
+	}
+
 	var raw map[string]interface{}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return false, 0, fmt.Errorf("invalid JSON")
 	}
 
 	// Get server section
-	var serverKey string
-	switch adapter.Name() {
-	case "zed":
-		serverKey = "context_servers"
-	case "opencode":
-		serverKey = "mcp"
-	default:
-		serverKey = "mcpServers"
-	}
-
+	serverKey := getServerKey(adapter.Name())
 	if servers, ok := raw[serverKey].(map[string]interface{}); ok {
 		serverCount = len(servers)
 	}
 
 	return true, serverCount, nil
+}
+
+func checkSkillIntegrity(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+
+	var issues []string
+	for _, s := range cfg.SkillsForScope(config.ScopeAll) {
+		skillMdPath := filepath.Join(s.Path, skill.SkillFileName)
+		if _, err := os.Stat(skillMdPath); err != nil {
+			if os.IsNotExist(err) {
+				issues = append(issues, fmt.Sprintf("skill %q missing %s in %s", s.Name, skill.SkillFileName, s.Path))
+				continue
+			}
+			issues = append(issues, fmt.Sprintf("skill %q stat error: %v", s.Name, err))
+			continue
+		}
+
+		if _, err := skill.Load(s.Path); err != nil {
+			issues = append(issues, fmt.Sprintf("skill %q invalid frontmatter/content: %v", s.Name, err))
+		}
+	}
+
+	return issues
+}
+
+func checkSyncDrift(state *sync.SyncState) []string {
+	if state == nil {
+		return nil
+	}
+
+	var issues []string
+	for adapterName, managedServers := range state.ManagedServers {
+		if len(managedServers) == 0 {
+			continue
+		}
+
+		adapter, ok := sync.Get(adapterName)
+		if !ok {
+			issues = append(issues, fmt.Sprintf("sync state references unknown adapter %q", adapterName))
+			continue
+		}
+
+		detected, err := adapter.Detect()
+		if err != nil {
+			issues = append(issues, fmt.Sprintf("%s detection failed: %v", adapterName, err))
+			continue
+		}
+		if !detected {
+			issues = append(issues, fmt.Sprintf("%s has %d managed server(s) in state but tool is not detected", adapterName, len(managedServers)))
+			continue
+		}
+
+		sa, ok := sync.AsServerAdapter(adapter)
+		if !ok {
+			issues = append(issues, fmt.Sprintf("%s has managed state but is not a server adapter", adapterName))
+			continue
+		}
+
+		servers, err := sa.ReadServers()
+		if err != nil {
+			issues = append(issues, fmt.Sprintf("%s config read failed: %v", adapterName, err))
+			continue
+		}
+
+		existing := make(map[string]bool, len(servers))
+		for _, server := range servers {
+			if server == nil {
+				continue
+			}
+			name := sync.GetServerName(server)
+			if name != "" {
+				existing[name] = true
+			}
+		}
+
+		for _, managedName := range managedServers {
+			if !existing[managedName] {
+				issues = append(issues, fmt.Sprintf("%s missing managed server %q from config", adapterName, managedName))
+			}
+		}
+	}
+
+	return issues
 }
 
 // shortenPath replaces home directory with ~

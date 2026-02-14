@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/iheanyi/agentctl/pkg/pathutil"
+	"github.com/iheanyi/agentctl/pkg/safeio"
 )
 
 // InspectTitle returns the display name for the inspector modal header
@@ -73,7 +75,7 @@ type Rule struct {
 
 // Load loads a rule from a markdown file, parsing optional frontmatter
 func Load(path string) (*Rule, error) {
-	data, err := os.ReadFile(path)
+	data, err := safeio.SafeReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -84,9 +86,9 @@ func Load(path string) (*Rule, error) {
 	}
 
 	// Extract name from filename
-	base := strings.TrimSuffix(path, ".md")
-	parts := strings.Split(base, "/")
-	rule.Name = parts[len(parts)-1]
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	rule.Name = strings.TrimSuffix(base, ext)
 
 	// Check for frontmatter (starts with ---)
 	if strings.HasPrefix(content, "---") {
@@ -239,5 +241,5 @@ func Save(r *Rule, dir string) error {
 	}
 
 	path := dir + "/" + name
-	return os.WriteFile(path, []byte(content.String()), 0644)
+	return safeio.SafeWriteFileWithLock(path, []byte(content.String()), 0644, safeio.DefaultBackupCount)
 }

@@ -261,7 +261,7 @@ func (a *OpenCodeAdapter) WriteCommands(commands []*command.Command) error {
 		filename := cmd.Name + ".md"
 		path := filepath.Join(commandsDir, filename)
 
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		if err := SafeWriteFileWithLock(path, []byte(content), 0644, DefaultBackupCount); err != nil {
 			return err
 		}
 	}
@@ -312,7 +312,7 @@ func (a *OpenCodeAdapter) WriteRules(rules []*rule.Rule) error {
 		return err
 	}
 
-	return os.WriteFile(agentsPath, []byte(content.String()), 0644)
+	return SafeWriteFileWithLock(agentsPath, []byte(content.String()), 0644, DefaultBackupCount)
 }
 
 // ReadSkills reads skills from OpenCode's skill directory

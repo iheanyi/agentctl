@@ -10,6 +10,7 @@ import (
 
 	"github.com/iheanyi/agentctl/pkg/output"
 	"github.com/iheanyi/agentctl/pkg/sync"
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 var validateCmd = &cobra.Command{
@@ -173,6 +174,40 @@ func validateAdapter(adapter sync.Adapter) ValidationResult {
 		}
 		result.Valid = false
 		result.Errors = append(result.Errors, fmt.Sprintf("Cannot read config: %v", err))
+		return result
+	}
+
+	// Codex primary config is TOML; validate it if that's the config path.
+	if adapter.Name() == "codex" && strings.HasSuffix(result.ConfigPath, ".toml") {
+		var raw map[string]interface{}
+		if err := toml.Unmarshal(data, &raw); err != nil {
+			result.Valid = false
+			result.Errors = append(result.Errors, fmt.Sprintf("Invalid TOML: %v", err))
+			return result
+		}
+
+		servers, hasServers := raw["mcp_servers"]
+		if !hasServers {
+			result.Warnings = append(result.Warnings, "No mcp_servers section found")
+			return result
+		}
+
+		serversMap, ok := servers.(map[string]interface{})
+		if !ok {
+			result.Valid = false
+			result.Errors = append(result.Errors, "mcp_servers should be a table")
+			return result
+		}
+
+		result.ServerCount = len(serversMap)
+		for name, serverData := range serversMap {
+			serverErrors := validateServer(adapter.Name(), name, serverData)
+			result.Errors = append(result.Errors, serverErrors...)
+			if len(serverErrors) > 0 {
+				result.Valid = false
+			}
+		}
+
 		return result
 	}
 

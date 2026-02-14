@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/iheanyi/agentctl/pkg/config"
+	"github.com/iheanyi/agentctl/pkg/safeio"
 )
 
 // SyncState tracks which servers are managed by agentctl per adapter
@@ -25,7 +26,7 @@ func stateFilePath() string {
 func LoadState() (*SyncState, error) {
 	path := stateFilePath()
 
-	data, err := os.ReadFile(path)
+	data, err := safeio.SafeReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &SyncState{
@@ -62,7 +63,7 @@ func (s *SyncState) Save() error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return safeio.SafeWriteFileWithLock(path, data, 0644, safeio.DefaultBackupCount)
 }
 
 // GetManagedServers returns the list of server names managed for an adapter

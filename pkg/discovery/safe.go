@@ -1,12 +1,9 @@
 package discovery
 
-import (
-	"fmt"
-	"os"
-)
+import "github.com/iheanyi/agentctl/pkg/safeio"
 
-// MaxFileSize is the default maximum file size to read (1MB)
-const MaxFileSize = 1 << 20 // 1MB
+// MaxFileSize is the default maximum file size to read (1MB).
+const MaxFileSize = safeio.DefaultMaxReadSize
 
 // SafeReader provides safe file reading with size limits to prevent memory exhaustion
 type SafeReader struct {
@@ -20,14 +17,7 @@ func NewSafeReader() *SafeReader {
 
 // ReadFile reads a file with size checking to prevent memory exhaustion
 func (r *SafeReader) ReadFile(path string) ([]byte, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if info.Size() > r.MaxSize {
-		return nil, fmt.Errorf("file too large: %d bytes (max %d)", info.Size(), r.MaxSize)
-	}
-	return os.ReadFile(path)
+	return safeio.NewReader(r.MaxSize).ReadFile(path)
 }
 
 // DefaultReader is a package-level SafeReader for convenience

@@ -135,5 +135,5 @@ func (a *WindsurfAdapter) WriteRules(rules []*rule.Rule) error {
 		content += r.Content
 	}
 
-	return os.WriteFile(rulesPath, []byte(content), 0644)
+	return SafeWriteFileWithLock(rulesPath, []byte(content), 0644, DefaultBackupCount)
 }

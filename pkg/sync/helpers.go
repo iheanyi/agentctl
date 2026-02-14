@@ -57,7 +57,7 @@ func (h *JSONConfigHelper) SaveRaw(raw map[string]interface{}) error {
 		return err
 	}
 
-	return os.WriteFile(h.ConfigPath, data, 0644)
+	return SafeWriteFileWithLock(h.ConfigPath, data, 0644, DefaultBackupCount)
 }
 
 // GetMCPServersSection gets or creates the mcpServers section from a raw config.
@@ -321,7 +321,7 @@ func WriteCommandsToDir(dir string, commands []*command.Command, formatFunc func
 		filename := cmd.Name + ".md"
 		path := filepath.Join(dir, filename)
 
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		if err := SafeWriteFileWithLock(path, []byte(content), 0644, DefaultBackupCount); err != nil {
 			return err
 		}
 	}

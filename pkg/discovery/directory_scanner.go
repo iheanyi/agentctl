@@ -1,6 +1,8 @@
 package discovery
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,6 +72,7 @@ func (s *DirectoryScanner) Detect(dir string) bool {
 
 func (s *DirectoryScanner) ScanRules(dir string) ([]*rule.Rule, error) {
 	var rules []*rule.Rule
+	var warnings []error
 
 	// Scan rules from each configured directory
 	for _, localDir := range s.cfg.LocalDirs {
@@ -79,10 +82,8 @@ func (s *DirectoryScanner) ScanRules(dir string) ([]*rule.Rule, error) {
 				continue
 			}
 
-			loadedRules, err := rule.LoadAll(fullPath)
-			if err != nil {
-				continue // Log warning, continue
-			}
+			loadedRules, ruleWarnings := loadRulesWithWarnings(fullPath)
+			warnings = append(warnings, ruleWarnings...)
 
 			for _, r := range loadedRules {
 				r.Scope = "local"
@@ -96,24 +97,79 @@ func (s *DirectoryScanner) ScanRules(dir string) ([]*rule.Rule, error) {
 	for _, detectFile := range s.cfg.DetectFiles {
 		filePath := filepath.Join(dir, detectFile)
 		if _, err := os.Stat(filePath); err == nil {
-			// Only load if it's a markdown-like file
-			if s.hasAllowedExtension(detectFile) || !strings.Contains(detectFile, ".") {
+			// Load markdown-like files and extensionless dotfiles (e.g. ".cursorrules").
+			if s.hasAllowedExtension(detectFile) || isExtensionlessDotfile(detectFile) {
 				// For files like .cursorrules (no extension), try to load as rule
 				r, err := rule.Load(filePath)
 				if err == nil {
+					if r.Name == "" {
+						r.Name = fallbackResourceName(filePath)
+					}
 					r.Scope = "local"
 					r.Tool = s.cfg.Name
 					rules = append(rules, r)
+				} else {
+					warnings = append(warnings, fmt.Errorf("%s: %w", filePath, err))
 				}
 			}
 		}
 	}
 
-	return rules, nil
+	return rules, joinScanWarnings("rules", s.cfg.Name, warnings)
+}
+
+// ScanGlobalRules discovers rules from the tool's global config directories
+func (s *DirectoryScanner) ScanGlobalRules() ([]*rule.Rule, error) {
+	var rules []*rule.Rule
+	var warnings []error
+
+	for _, globalDir := range s.cfg.GlobalDirs {
+		expandedDir := expandHomeDir(globalDir)
+
+		// Scan rules from each configured directory
+		for _, rulesDir := range s.cfg.RulesDirs {
+			fullPath := filepath.Join(expandedDir, rulesDir)
+			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+				continue
+			}
+
+			loadedRules, ruleWarnings := loadRulesWithWarnings(fullPath)
+			warnings = append(warnings, ruleWarnings...)
+
+			for _, r := range loadedRules {
+				r.Scope = "global"
+				r.Tool = s.cfg.Name
+			}
+			rules = append(rules, loadedRules...)
+		}
+
+		// Also check for standalone detect files as rules
+		for _, detectFile := range s.cfg.DetectFiles {
+			filePath := filepath.Join(expandedDir, detectFile)
+			if _, err := os.Stat(filePath); err == nil {
+				if s.hasAllowedExtension(detectFile) || isExtensionlessDotfile(detectFile) {
+					r, err := rule.Load(filePath)
+					if err == nil {
+						if r.Name == "" {
+							r.Name = fallbackResourceName(filePath)
+						}
+						r.Scope = "global"
+						r.Tool = s.cfg.Name
+						rules = append(rules, r)
+					} else {
+						warnings = append(warnings, fmt.Errorf("%s: %w", filePath, err))
+					}
+				}
+			}
+		}
+	}
+
+	return rules, joinScanWarnings("global rules", s.cfg.Name, warnings)
 }
 
 func (s *DirectoryScanner) ScanSkills(dir string) ([]*skill.Skill, error) {
 	var skills []*skill.Skill
+	var warnings []error
 
 	for _, localDir := range s.cfg.LocalDirs {
 		for _, skillsDir := range s.cfg.SkillsDirs {
@@ -124,6 +180,7 @@ func (s *DirectoryScanner) ScanSkills(dir string) ([]*skill.Skill, error) {
 
 			loadedSkills, err := skill.LoadAll(fullPath)
 			if err != nil {
+				warnings = append(warnings, fmt.Errorf("%s: %w", fullPath, err))
 				continue
 			}
 
@@ -135,7 +192,37 @@ func (s *DirectoryScanner) ScanSkills(dir string) ([]*skill.Skill, error) {
 		}
 	}
 
-	return skills, nil
+	return skills, joinScanWarnings("skills", s.cfg.Name, warnings)
+}
+
+// ScanGlobalSkills discovers skills from the tool's global config directories
+func (s *DirectoryScanner) ScanGlobalSkills() ([]*skill.Skill, error) {
+	var skills []*skill.Skill
+	var warnings []error
+
+	for _, globalDir := range s.cfg.GlobalDirs {
+		expandedDir := expandHomeDir(globalDir)
+		for _, skillsDir := range s.cfg.SkillsDirs {
+			fullPath := filepath.Join(expandedDir, skillsDir)
+			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+				continue
+			}
+
+			loadedSkills, err := skill.LoadAll(fullPath)
+			if err != nil {
+				warnings = append(warnings, fmt.Errorf("%s: %w", fullPath, err))
+				continue
+			}
+
+			for _, sk := range loadedSkills {
+				sk.Scope = "global"
+				sk.Tool = s.cfg.Name
+			}
+			skills = append(skills, loadedSkills...)
+		}
+	}
+
+	return skills, joinScanWarnings("global skills", s.cfg.Name, warnings)
 }
 
 func (s *DirectoryScanner) ScanHooks(dir string) ([]*hook.Hook, error) {
@@ -144,8 +231,14 @@ func (s *DirectoryScanner) ScanHooks(dir string) ([]*hook.Hook, error) {
 	return nil, nil
 }
 
+// ScanGlobalHooks discovers hooks from global settings (not supported for DirectoryScanner)
+func (s *DirectoryScanner) ScanGlobalHooks() ([]*hook.Hook, error) {
+	return nil, nil
+}
+
 func (s *DirectoryScanner) ScanCommands(dir string) ([]*command.Command, error) {
 	var commands []*command.Command
+	var warnings []error
 
 	for _, localDir := range s.cfg.LocalDirs {
 		for _, commandsDir := range s.cfg.CommandsDirs {
@@ -156,6 +249,7 @@ func (s *DirectoryScanner) ScanCommands(dir string) ([]*command.Command, error) 
 
 			loadedCommands, err := command.LoadAll(fullPath)
 			if err != nil {
+				warnings = append(warnings, fmt.Errorf("%s: %w", fullPath, err))
 				continue
 			}
 
@@ -167,7 +261,37 @@ func (s *DirectoryScanner) ScanCommands(dir string) ([]*command.Command, error) 
 		}
 	}
 
-	return commands, nil
+	return commands, joinScanWarnings("commands", s.cfg.Name, warnings)
+}
+
+// ScanGlobalCommands discovers commands from the tool's global config directories
+func (s *DirectoryScanner) ScanGlobalCommands() ([]*command.Command, error) {
+	var commands []*command.Command
+	var warnings []error
+
+	for _, globalDir := range s.cfg.GlobalDirs {
+		expandedDir := expandHomeDir(globalDir)
+		for _, commandsDir := range s.cfg.CommandsDirs {
+			fullPath := filepath.Join(expandedDir, commandsDir)
+			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+				continue
+			}
+
+			loadedCommands, err := command.LoadAll(fullPath)
+			if err != nil {
+				warnings = append(warnings, fmt.Errorf("%s: %w", fullPath, err))
+				continue
+			}
+
+			for _, c := range loadedCommands {
+				c.Scope = "global"
+				c.Tool = s.cfg.Name
+			}
+			commands = append(commands, loadedCommands...)
+		}
+	}
+
+	return commands, joinScanWarnings("global commands", s.cfg.Name, warnings)
 }
 
 func (s *DirectoryScanner) ScanServers(dir string) ([]*mcp.Server, error) {
@@ -179,6 +303,7 @@ func (s *DirectoryScanner) ScanServers(dir string) ([]*mcp.Server, error) {
 // ScanAgents discovers agents from the tool's local agents directory
 func (s *DirectoryScanner) ScanAgents(dir string) ([]*agent.Agent, error) {
 	var agents []*agent.Agent
+	var warnings []error
 
 	for _, localDir := range s.cfg.LocalDirs {
 		for _, agentsDir := range s.cfg.AgentsDirs {
@@ -189,6 +314,7 @@ func (s *DirectoryScanner) ScanAgents(dir string) ([]*agent.Agent, error) {
 
 			loadedAgents, err := agent.LoadFromDirectory(fullPath, "local", s.cfg.Name)
 			if err != nil {
+				warnings = append(warnings, fmt.Errorf("%s: %w", fullPath, err))
 				continue
 			}
 
@@ -196,12 +322,13 @@ func (s *DirectoryScanner) ScanAgents(dir string) ([]*agent.Agent, error) {
 		}
 	}
 
-	return agents, nil
+	return agents, joinScanWarnings("agents", s.cfg.Name, warnings)
 }
 
 // ScanGlobalAgents discovers agents from the tool's global agents directory
 func (s *DirectoryScanner) ScanGlobalAgents() ([]*agent.Agent, error) {
 	var agents []*agent.Agent
+	var warnings []error
 
 	for _, globalDir := range s.cfg.GlobalDirs {
 		expandedDir := expandHomeDir(globalDir)
@@ -213,6 +340,7 @@ func (s *DirectoryScanner) ScanGlobalAgents() ([]*agent.Agent, error) {
 
 			loadedAgents, err := agent.LoadFromDirectory(fullPath, "global", s.cfg.Name)
 			if err != nil {
+				warnings = append(warnings, fmt.Errorf("%s: %w", fullPath, err))
 				continue
 			}
 
@@ -220,7 +348,7 @@ func (s *DirectoryScanner) ScanGlobalAgents() ([]*agent.Agent, error) {
 		}
 	}
 
-	return agents, nil
+	return agents, joinScanWarnings("global agents", s.cfg.Name, warnings)
 }
 
 // hasAllowedExtension checks if the filename has an allowed extension
@@ -243,4 +371,71 @@ func expandHomeDir(path string) string {
 		return filepath.Join(homeDir, path[2:])
 	}
 	return path
+}
+
+func isExtensionlessDotfile(path string) bool {
+	base := filepath.Base(path)
+	return strings.HasPrefix(base, ".") && !strings.Contains(base[1:], ".")
+}
+
+func loadRulesWithWarnings(dir string) ([]*rule.Rule, []error) {
+	var (
+		rules    []*rule.Rule
+		warnings []error
+	)
+
+	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			warnings = append(warnings, fmt.Errorf("%s: %w", path, err))
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		name := d.Name()
+		lowerName := strings.ToLower(name)
+		if !strings.HasSuffix(lowerName, ".md") && !strings.HasSuffix(lowerName, ".mdc") {
+			return nil
+		}
+
+		r, err := rule.Load(path)
+		if err != nil {
+			warnings = append(warnings, fmt.Errorf("%s: %w", path, err))
+			return nil
+		}
+		if r.Name == "" {
+			r.Name = fallbackResourceName(path)
+		}
+		rules = append(rules, r)
+		return nil
+	})
+	if walkErr != nil {
+		warnings = append(warnings, fmt.Errorf("%s: %w", dir, walkErr))
+	}
+
+	return rules, warnings
+}
+
+func fallbackResourceName(path string) string {
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	trimmed := strings.TrimSuffix(base, ext)
+	if trimmed == "" {
+		return base
+	}
+	return trimmed
+}
+
+func joinScanWarnings(resourceType, scannerName string, warnings []error) error {
+	if len(warnings) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s scanner %q had %d %s warning(s): %w",
+		"discovery",
+		scannerName,
+		len(warnings),
+		resourceType,
+		errors.Join(warnings...),
+	)
 }

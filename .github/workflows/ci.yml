@@ -74,6 +74,24 @@ jobs:
       - name: Run staticcheck
         run: staticcheck ./...
 
+  reliability:
+    name: Reliability KPIs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Check reliability KPIs
+        env:
+          MIN_RELIABILITY_COVERAGE: "15"
+        run: ./scripts/check_reliability_kpis.sh
+
   golden:
     name: Golden Tests
     runs-on: ubuntu-latest

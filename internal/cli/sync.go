@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -168,6 +169,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 	} else {
 		adapters = sync.Detected()
 	}
+	sort.Slice(adapters, func(i, j int) bool {
+		return adapters[i].Name() < adapters[j].Name()
+	})
 
 	if len(adapters) == 0 {
 		if JSONOutput {
@@ -245,7 +249,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 				}
 
 				if readErr == nil {
-					diff := computeServerDiff(existingServers, servers, managedNames)
+					diff := computeServerDiff(existingServers, servers, managedNames, syncClean)
 
 					// Track changes for JSON
 					toolResult.ServersAdded = len(diff.toAdd)
@@ -281,6 +285,13 @@ func runSync(cmd *cobra.Command, args []string) error {
 							Name:     name,
 						})
 					}
+					for _, name := range diff.preservedManaged {
+						toolResult.Changes = append(toolResult.Changes, output.SyncChange{
+							Type:     "preserve",
+							Resource: "server",
+							Name:     name,
+						})
+					}
 					for _, s := range diff.unmanaged {
 						name := s.Name
 						if s.Namespace != "" {
@@ -305,8 +316,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 							if len(diff.toUpdate) > 0 {
 								fmt.Printf(" (~%d update)", len(diff.toUpdate))
 							}
-							if len(diff.unmanaged) > 0 {
-								fmt.Printf(" (=%d preserved)", len(diff.unmanaged))
+							preservedCount := len(diff.unmanaged) + len(diff.preservedManaged)
+							if preservedCount > 0 {
+								fmt.Printf(" (=%d preserved)", preservedCount)
 							}
 							fmt.Println()
 						}
@@ -345,6 +357,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 		}
 
 		var syncedAny bool
+		var toolErrors []string
+		toolLocalServers := append([]*mcp.Server(nil), localServers...)
+		toolGlobalServers := append([]*mcp.Server(nil), globalServers...)
 
 		// Sync servers if supported
 		if containsResourceType(supported, sync.ResourceMCP) && len(servers) > 0 {
@@ -360,60 +375,80 @@ func runSync(cmd *cobra.Command, args []string) error {
 			wa, hasWorkspace := sync.AsWorkspaceAdapter(adapter)
 
 			// Sync local servers to workspace config if supported
-			if len(localServers) > 0 && hasWorkspace && projectDir != "" {
+			if len(toolLocalServers) > 0 && hasWorkspace && projectDir != "" {
 				workspacePath := wa.WorkspaceConfigPath(projectDir)
-				if err := wa.WriteWorkspaceServers(projectDir, localServers); err != nil {
+				workspaceServersToWrite := toolLocalServers
+				if !syncClean {
+					if existingWorkspaceServers, readErr := wa.ReadWorkspaceServers(projectDir); readErr == nil {
+						workspaceServersToWrite = mergeServerSets(existingWorkspaceServers, toolLocalServers)
+					}
+				}
+
+				if err := wa.WriteWorkspaceServers(projectDir, workspaceServersToWrite); err != nil {
 					if !JSONOutput {
 						fmt.Printf("  Error syncing local servers to workspace: %v\n", err)
 					}
-					toolResult.Success = false
-					toolResult.Error = fmt.Sprintf("Error syncing local servers: %v", err)
-					errorCount++
+					toolErrors = append(toolErrors, fmt.Sprintf("local servers: %v", err))
 				} else {
 					if !JSONOutput {
-						fmt.Printf("  Synced %d local server(s) to %s\n", len(localServers), workspacePath)
+						fmt.Printf("  Synced %d local server(s) to %s\n", len(toolLocalServers), workspacePath)
 						if syncVerbose {
-							printVerboseServers(localServers, "    ")
+							printVerboseServers(toolLocalServers, "    ")
 						}
 					}
-					toolResult.ServersAdded += len(localServers)
+					toolResult.ServersAdded += len(toolLocalServers)
 					syncedAny = true
 				}
-			} else if len(localServers) > 0 {
+			} else if len(toolLocalServers) > 0 {
 				// Tool doesn't support workspace configs - warn and sync to global
 				if !JSONOutput {
 					fmt.Printf("  Warning: %s doesn't support workspace configs\n", adapter.Name())
-					fmt.Printf("  Syncing %d local server(s) to global config\n", len(localServers))
+					fmt.Printf("  Syncing %d local server(s) to global config\n", len(toolLocalServers))
 				}
-				globalServers = append(globalServers, localServers...)
+				toolGlobalServers = append(toolGlobalServers, toolLocalServers...)
 			}
 
 			// Sync global servers to global config
-			if len(globalServers) > 0 {
+			if len(toolGlobalServers) > 0 {
 				sa, ok := sync.AsServerAdapter(adapter)
 				if !ok {
 					if !JSONOutput {
 						fmt.Printf("  Error: adapter doesn't support servers\n")
 					}
-					toolResult.Success = false
-					toolResult.Error = "Adapter doesn't support servers"
-					errorCount++
-				} else if err := sa.WriteServers(globalServers); err != nil {
-					if !JSONOutput {
-						fmt.Printf("  Error syncing global servers: %v\n", err)
-					}
-					toolResult.Success = false
-					toolResult.Error = fmt.Sprintf("Error syncing global servers: %v", err)
-					errorCount++
+					toolErrors = append(toolErrors, "adapter doesn't support servers")
 				} else {
-					if !JSONOutput {
-						fmt.Printf("  Synced %d global server(s)\n", len(globalServers))
-						if syncVerbose {
-							printVerboseServers(globalServers, "    ")
+					serversToWrite := toolGlobalServers
+					if !syncClean {
+						existingServers, readErr := sa.ReadServers()
+						if readErr != nil {
+							toolErrors = append(toolErrors, fmt.Sprintf("read existing servers: %v", readErr))
+						} else {
+							if state != nil {
+								serversToWrite = preserveManagedServers(
+									existingServers,
+									toolGlobalServers,
+									state.GetManagedServers(adapter.Name()),
+								)
+							} else {
+								serversToWrite = mergeServerSets(existingServers, toolGlobalServers)
+							}
 						}
 					}
-					toolResult.ServersAdded += len(globalServers)
-					syncedAny = true
+					if err := sa.WriteServers(serversToWrite); err != nil {
+						if !JSONOutput {
+							fmt.Printf("  Error syncing global servers: %v\n", err)
+						}
+						toolErrors = append(toolErrors, fmt.Sprintf("global servers: %v", err))
+					} else {
+						if !JSONOutput {
+							fmt.Printf("  Synced %d global server(s)\n", len(toolGlobalServers))
+							if syncVerbose {
+								printVerboseServers(toolGlobalServers, "    ")
+							}
+						}
+						toolResult.ServersAdded += len(toolGlobalServers)
+						syncedAny = true
+					}
 				}
 			}
 		}
@@ -425,12 +460,12 @@ func runSync(cmd *cobra.Command, args []string) error {
 				if !JSONOutput {
 					fmt.Printf("  Error: adapter doesn't support commands\n")
 				}
-				toolResult.Error = "Adapter doesn't support commands"
+				toolErrors = append(toolErrors, "adapter doesn't support commands")
 			} else if err := ca.WriteCommands(commands); err != nil {
 				if !JSONOutput {
 					fmt.Printf("  Error syncing commands: %v\n", err)
 				}
-				toolResult.Error = fmt.Sprintf("Error syncing commands: %v", err)
+				toolErrors = append(toolErrors, fmt.Sprintf("commands: %v", err))
 			} else {
 				if !JSONOutput {
 					fmt.Printf("  Synced %d command(s)\n", len(commands))
@@ -450,12 +485,12 @@ func runSync(cmd *cobra.Command, args []string) error {
 				if !JSONOutput {
 					fmt.Printf("  Error: adapter doesn't support rules\n")
 				}
-				toolResult.Error = "Adapter doesn't support rules"
+				toolErrors = append(toolErrors, "adapter doesn't support rules")
 			} else if err := ra.WriteRules(rules); err != nil {
 				if !JSONOutput {
 					fmt.Printf("  Error syncing rules: %v\n", err)
 				}
-				toolResult.Error = fmt.Sprintf("Error syncing rules: %v", err)
+				toolErrors = append(toolErrors, fmt.Sprintf("rules: %v", err))
 			} else {
 				if !JSONOutput {
 					fmt.Printf("  Synced %d rule(s)\n", len(rules))
@@ -468,10 +503,14 @@ func runSync(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		toolResults = append(toolResults, toolResult)
-		if syncedAny {
+		if len(toolErrors) > 0 {
+			toolResult.Success = false
+			toolResult.Error = strings.Join(toolErrors, "; ")
+			errorCount++
+		} else if syncedAny {
 			successCount++
 		}
+		toolResults = append(toolResults, toolResult)
 	}
 
 	// JSON output
@@ -539,14 +578,15 @@ func printVerboseServers(servers []*mcp.Server, indent string) {
 
 // serverDiff represents the diff between existing and new servers
 type serverDiff struct {
-	toAdd     []*mcp.Server // New servers to add
-	toUpdate  []*mcp.Server // Existing managed servers to update
-	unmanaged []*mcp.Server // Existing unmanaged servers (won't touch)
-	toRemove  []string      // Managed server names that would be removed
+	toAdd            []*mcp.Server // New servers to add
+	toUpdate         []*mcp.Server // Existing managed servers to update
+	unmanaged        []*mcp.Server // Existing unmanaged servers (won't touch)
+	preservedManaged []string      // Stale managed server names preserved when --clean=false
+	toRemove         []string      // Managed server names that would be removed
 }
 
 // computeServerDiff computes what would change when syncing servers
-func computeServerDiff(existing []*mcp.Server, incoming []*mcp.Server, managedNames []string) serverDiff {
+func computeServerDiff(existing []*mcp.Server, incoming []*mcp.Server, managedNames []string, clean bool) serverDiff {
 	diff := serverDiff{}
 
 	// Build lookup maps
@@ -586,11 +626,15 @@ func computeServerDiff(existing []*mcp.Server, incoming []*mcp.Server, managedNa
 		}
 	}
 
-	// Find unmanaged and to-be-removed servers
+	// Find unmanaged and managed servers outside incoming set.
 	for name, s := range existingByName {
 		if _, inIncoming := incomingByName[name]; !inIncoming {
 			if managedSet[name] {
-				diff.toRemove = append(diff.toRemove, name)
+				if clean {
+					diff.toRemove = append(diff.toRemove, name)
+				} else {
+					diff.preservedManaged = append(diff.preservedManaged, name)
+				}
 			} else {
 				diff.unmanaged = append(diff.unmanaged, s)
 			}
@@ -631,6 +675,13 @@ func printServerDiff(diff serverDiff, indent string) {
 		}
 	}
 
+	if len(diff.preservedManaged) > 0 {
+		fmt.Printf("%s[=] Preserving %d stale managed server(s) (use --clean to remove):\n", indent, len(diff.preservedManaged))
+		for _, name := range diff.preservedManaged {
+			fmt.Printf("%s    = %s\n", indent, name)
+		}
+	}
+
 	if len(diff.unmanaged) > 0 {
 		fmt.Printf("%s[=] Preserving %d unmanaged server(s):\n", indent, len(diff.unmanaged))
 		for _, s := range diff.unmanaged {
@@ -641,6 +692,69 @@ func printServerDiff(diff serverDiff, indent string) {
 			fmt.Printf("%s    = %s\n", indent, name)
 		}
 	}
+}
+
+// mergeServerSets merges existing and incoming by effective name,
+// with incoming entries overriding existing ones.
+func mergeServerSets(existing, incoming []*mcp.Server) []*mcp.Server {
+	merged := make(map[string]*mcp.Server)
+	order := make([]string, 0, len(existing)+len(incoming))
+
+	for _, server := range existing {
+		name := sync.GetServerName(server)
+		if name == "" {
+			continue
+		}
+		if _, seen := merged[name]; !seen {
+			order = append(order, name)
+		}
+		merged[name] = server
+	}
+
+	for _, server := range incoming {
+		name := sync.GetServerName(server)
+		if name == "" {
+			continue
+		}
+		if _, seen := merged[name]; !seen {
+			order = append(order, name)
+		}
+		merged[name] = server
+	}
+
+	out := make([]*mcp.Server, 0, len(merged))
+	for _, name := range order {
+		if server, ok := merged[name]; ok {
+			out = append(out, server)
+		}
+	}
+	return out
+}
+
+// preserveManagedServers keeps stale managed servers when --clean=false.
+func preserveManagedServers(existing, incoming []*mcp.Server, managedNames []string) []*mcp.Server {
+	managedSet := make(map[string]bool, len(managedNames))
+	for _, name := range managedNames {
+		managedSet[name] = true
+	}
+
+	merged := mergeServerSets(nil, incoming)
+	incomingSet := make(map[string]bool, len(merged))
+	for _, server := range merged {
+		incomingSet[sync.GetServerName(server)] = true
+	}
+
+	for _, server := range existing {
+		name := sync.GetServerName(server)
+		if name == "" {
+			continue
+		}
+		if managedSet[name] && !incomingSet[name] {
+			merged = append(merged, server)
+		}
+	}
+
+	return merged
 }
 
 // printVerboseCommands prints detailed command information

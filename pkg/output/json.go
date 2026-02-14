@@ -163,13 +163,15 @@ type SyncSummary struct {
 
 // DoctorOutput represents the JSON output for the doctor command
 type DoctorOutput struct {
-	Config     DoctorConfigResult    `json:"config"`
-	Runtimes   []DoctorRuntimeResult `json:"runtimes"`
-	Tools      []DoctorToolResult    `json:"tools"`
-	Servers    []DoctorServerResult  `json:"servers,omitempty"`
-	SyncState  DoctorSyncState       `json:"syncState"`
-	System     DoctorSystemInfo      `json:"system"`
-	IssueCount int                   `json:"issueCount"`
+	Config          DoctorConfigResult    `json:"config"`
+	Runtimes        []DoctorRuntimeResult `json:"runtimes"`
+	Tools           []DoctorToolResult    `json:"tools"`
+	Servers         []DoctorServerResult  `json:"servers,omitempty"`
+	SkillIssues     []string              `json:"skillIssues,omitempty"`
+	SyncDriftIssues []string              `json:"syncDriftIssues,omitempty"`
+	SyncState       DoctorSyncState       `json:"syncState"`
+	System          DoctorSystemInfo      `json:"system"`
+	IssueCount      int                   `json:"issueCount"`
 }
 
 // DoctorConfigResult represents the config check result

@@ -34,7 +34,7 @@ func init() {
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithProject()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
