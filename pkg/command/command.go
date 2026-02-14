@@ -10,6 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/iheanyi/agentctl/pkg/jsonutil"
+	"github.com/iheanyi/agentctl/pkg/safeio"
 )
 
 // InspectTitle returns the display name for the inspector modal header
@@ -105,7 +106,7 @@ type Command struct {
 
 // Load loads a command from a JSON file
 func Load(path string) (*Command, error) {
-	data, err := os.ReadFile(path)
+	data, err := safeio.SafeReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +129,7 @@ type MarkdownFrontmatter struct {
 // LoadMarkdown loads a command from a markdown file with YAML frontmatter
 // This is the Claude Code command format
 func LoadMarkdown(path string) (*Command, error) {
-	data, err := os.ReadFile(path)
+	data, err := safeio.SafeReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -258,5 +259,5 @@ func Save(cmd *Command, dir string) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return safeio.SafeWriteFileWithLock(path, data, 0644, safeio.DefaultBackupCount)
 }

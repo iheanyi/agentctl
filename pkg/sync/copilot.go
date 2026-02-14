@@ -178,7 +178,7 @@ func (a *CopilotAdapter) WriteRules(rules []*rule.Rule) error {
 		return err
 	}
 
-	return os.WriteFile(agentsPath, []byte(content.String()), 0644)
+	return SafeWriteFileWithLock(agentsPath, []byte(content.String()), 0644, DefaultBackupCount)
 }
 
 // ReadSkills reads skills from Copilot's skills directory

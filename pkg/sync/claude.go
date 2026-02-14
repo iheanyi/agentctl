@@ -218,7 +218,7 @@ func (a *ClaudeAdapter) WriteCommands(commands []*command.Command) error {
 		filename := cmd.Name + ".md"
 		path := filepath.Join(commandsDir, filename)
 
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		if err := SafeWriteFileWithLock(path, []byte(content), 0644, DefaultBackupCount); err != nil {
 			return err
 		}
 	}
@@ -367,7 +367,7 @@ func (a *ClaudeAdapter) saveSettings(settings *ClaudeCodeSettings) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return SafeWriteFileWithLock(path, data, 0644, DefaultBackupCount)
 }
 
 // parseClaudeCommand parses a Claude Code command markdown file
@@ -598,7 +598,7 @@ func (a *ClaudeAdapter) WriteWorkspaceServers(projectDir string, servers []*mcp.
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return SafeWriteFileWithLock(path, data, 0644, DefaultBackupCount)
 }
 
 // AgentsAdapter implementation for Claude Code

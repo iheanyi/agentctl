@@ -73,12 +73,16 @@ func (a *CodexAdapter) Detect() (bool, error) {
 }
 
 func (a *CodexAdapter) ConfigPath() string {
-	// Prefer TOML, fall back to JSON
+	// Prefer TOML, fall back to JSON. If neither exists, default to TOML.
 	tomlPath := a.tomlConfigPath()
 	if _, err := os.Stat(tomlPath); err == nil {
 		return tomlPath
 	}
-	return a.jsonConfigPath()
+	jsonPath := a.jsonConfigPath()
+	if _, err := os.Stat(jsonPath); err == nil {
+		return jsonPath
+	}
+	return tomlPath
 }
 
 func (a *CodexAdapter) configDir() string {
@@ -120,12 +124,12 @@ func (a *CodexAdapter) SupportedResources() []ResourceType {
 }
 
 func (a *CodexAdapter) ReadServers() ([]*mcp.Server, error) {
-	// Try TOML first
-	if servers, err := a.readServersFromTOML(); err == nil && len(servers) > 0 {
-		return servers, nil
+	// Prefer TOML when it exists.
+	if _, err := os.Stat(a.tomlConfigPath()); err == nil {
+		return a.readServersFromTOML()
 	}
 
-	// Fall back to JSON
+	// Fall back to JSON (legacy)
 	return a.readServersFromJSON()
 }
 
@@ -222,14 +226,15 @@ func (a *CodexAdapter) readServersFromJSON() ([]*mcp.Server, error) {
 }
 
 func (a *CodexAdapter) WriteServers(servers []*mcp.Server) error {
-	// Check if TOML config exists - if so, write to TOML
+	// Prefer TOML unless only legacy JSON exists.
 	tomlPath := a.tomlConfigPath()
 	if _, err := os.Stat(tomlPath); err == nil {
 		return a.writeServersToTOML(servers)
 	}
-
-	// Otherwise write to JSON (legacy)
-	return a.writeServersToJSON(servers)
+	if _, err := os.Stat(a.jsonConfigPath()); err == nil {
+		return a.writeServersToJSON(servers)
+	}
+	return a.writeServersToTOML(servers)
 }
 
 func (a *CodexAdapter) writeServersToTOML(servers []*mcp.Server) error {
@@ -303,7 +308,7 @@ func (a *CodexAdapter) writeServersToTOML(servers []*mcp.Server) error {
 		return err
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := SafeWriteFileWithLock(path, data, 0644, DefaultBackupCount); err != nil {
 		return err
 	}
 
@@ -360,7 +365,7 @@ func (a *CodexAdapter) writeServersToJSON(servers []*mcp.Server) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return SafeWriteFileWithLock(path, data, 0644, DefaultBackupCount)
 }
 
 func (a *CodexAdapter) ReadCommands() ([]*command.Command, error) {
@@ -385,7 +390,7 @@ func (a *CodexAdapter) WriteCommands(commands []*command.Command) error {
 		filename := cmd.Name + ".md"
 		path := filepath.Join(promptsDir, filename)
 
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		if err := SafeWriteFileWithLock(path, []byte(content), 0644, DefaultBackupCount); err != nil {
 			return err
 		}
 	}
@@ -428,7 +433,7 @@ func (a *CodexAdapter) WriteRules(rules []*rule.Rule) error {
 		return err
 	}
 
-	return os.WriteFile(agentsPath, []byte(content.String()), 0644)
+	return SafeWriteFileWithLock(agentsPath, []byte(content.String()), 0644, DefaultBackupCount)
 }
 
 // ReadSkills reads skills from Codex's skills directory

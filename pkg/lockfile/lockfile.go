@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/iheanyi/agentctl/pkg/safeio"
 )
 
 // Lockfile represents the agentctl.lock file that tracks exact versions
@@ -42,7 +44,7 @@ func Load(configDir string) (*Lockfile, error) {
 
 // LoadFrom loads a lockfile from a specific path
 func LoadFrom(path string) (*Lockfile, error) {
-	data, err := os.ReadFile(path)
+	data, err := safeio.SafeReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Return empty lockfile if file doesn't exist
@@ -84,7 +86,7 @@ func (lf *Lockfile) SaveTo(path string) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return safeio.SafeWriteFileWithLock(path, data, 0644, safeio.DefaultBackupCount)
 }
 
 // Lock adds or updates a locked entry

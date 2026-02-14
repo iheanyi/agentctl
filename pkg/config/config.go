@@ -9,6 +9,7 @@ import (
 	"github.com/iheanyi/agentctl/pkg/command"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/rule"
+	"github.com/iheanyi/agentctl/pkg/safeio"
 	"github.com/iheanyi/agentctl/pkg/skill"
 )
 
@@ -97,7 +98,7 @@ func Load() (*Config, error) {
 
 // LoadFrom loads configuration from a specific path
 func LoadFrom(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := safeio.SafeReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Return default config if file doesn't exist
@@ -292,7 +293,7 @@ func (c *Config) SaveTo(path string) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return safeio.SafeWriteFileWithLock(path, data, 0644, safeio.DefaultBackupCount)
 }
 
 // loadResources loads all resources from the config directory

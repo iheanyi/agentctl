@@ -249,7 +249,7 @@ func saveCursorRule(r *rule.Rule, dir string) error {
 	}
 
 	path := filepath.Join(dir, name)
-	return os.WriteFile(path, []byte(content.String()), 0644)
+	return SafeWriteFileWithLock(path, []byte(content.String()), 0644, DefaultBackupCount)
 }
 
 // parseCursorCommand parses a Cursor command markdown file

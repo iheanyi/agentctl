@@ -3,6 +3,7 @@ package discovery
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -128,6 +129,45 @@ This is a test rule.
 	}
 }
 
+func TestDirectoryScannerScanRulesDetectFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "scanner-rules-detect-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Setup: Create .cursorrules in project root
+	ruleContent := "# Cursor Rules\n\n- Always do X."
+	if err := os.WriteFile(filepath.Join(tmpDir, ".cursorrules"), []byte(ruleContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	scanner := NewDirectoryScanner(ScannerConfig{
+		Name:        "cursor",
+		DetectFiles: []string{".cursorrules"},
+	})
+
+	rules, err := scanner.ScanRules(tmpDir)
+	if err != nil {
+		t.Fatalf("ScanRules() error = %v", err)
+	}
+
+	if len(rules) != 1 {
+		t.Fatalf("ScanRules() got %d rules, want 1", len(rules))
+	}
+
+	rule := rules[0]
+	if rule.Name != ".cursorrules" {
+		t.Errorf("rule.Name = %q, want %q", rule.Name, ".cursorrules")
+	}
+	if rule.Tool != "cursor" {
+		t.Errorf("rule.Tool = %q, want %q", rule.Tool, "cursor")
+	}
+	if rule.Scope != "local" {
+		t.Errorf("rule.Scope = %q, want %q", rule.Scope, "local")
+	}
+}
+
 func TestDirectoryScannerScanSkills(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "scanner-skills-test-*")
 	if err != nil {
@@ -229,6 +269,87 @@ Do something test-like.
 	}
 	if cmd.Scope != "local" {
 		t.Errorf("cmd.Scope = %q, want %q", cmd.Scope, "local")
+	}
+}
+
+func TestDirectoryScannerScanGlobalRules(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "scanner-global-rules-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Setup: Create AGENTS.md in the global dir
+	ruleContent := "# Global Instructions\n\nUse safe defaults."
+	if err := os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte(ruleContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	scanner := NewDirectoryScanner(ScannerConfig{
+		Name:        "codex",
+		GlobalDirs:  []string{tmpDir},
+		DetectFiles: []string{"AGENTS.md"},
+	})
+
+	rules, err := scanner.ScanGlobalRules()
+	if err != nil {
+		t.Fatalf("ScanGlobalRules() error = %v", err)
+	}
+
+	if len(rules) != 1 {
+		t.Fatalf("ScanGlobalRules() got %d rules, want 1", len(rules))
+	}
+
+	rule := rules[0]
+	if rule.Name != "AGENTS" {
+		t.Errorf("rule.Name = %q, want %q", rule.Name, "AGENTS")
+	}
+	if rule.Tool != "codex" {
+		t.Errorf("rule.Tool = %q, want %q", rule.Tool, "codex")
+	}
+	if rule.Scope != "global" {
+		t.Errorf("rule.Scope = %q, want %q", rule.Scope, "global")
+	}
+}
+
+func TestDirectoryScannerScanRulesReturnsPartialResultsWithWarnings(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior is inconsistent on Windows CI environments")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "scanner-rules-warning-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	rulesDir := filepath.Join(tmpDir, ".cursor", "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	validRule := filepath.Join(rulesDir, "valid.md")
+	if err := os.WriteFile(validRule, []byte("# valid"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	brokenLink := filepath.Join(rulesDir, "broken.md")
+	if err := os.Symlink(filepath.Join(tmpDir, "does-not-exist.md"), brokenLink); err != nil {
+		t.Fatal(err)
+	}
+
+	scanner := NewDirectoryScanner(ScannerConfig{
+		Name:      "cursor",
+		LocalDirs: []string{".cursor"},
+		RulesDirs: []string{"rules"},
+	})
+
+	rules, scanErr := scanner.ScanRules(tmpDir)
+	if len(rules) != 1 {
+		t.Fatalf("ScanRules() got %d rules, want 1 partial result", len(rules))
+	}
+	if scanErr == nil {
+		t.Fatal("ScanRules() expected warning error, got nil")
 	}
 }
 

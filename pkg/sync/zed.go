@@ -222,5 +222,5 @@ func (a *ZedAdapter) saveRawConfig(raw map[string]interface{}) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return SafeWriteFileWithLock(path, data, 0644, DefaultBackupCount)
 }

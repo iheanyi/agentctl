@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/iheanyi/agentctl/pkg/lockfile"
 	"github.com/iheanyi/agentctl/pkg/mcp"
 	"github.com/iheanyi/agentctl/pkg/output"
+	"github.com/iheanyi/agentctl/pkg/pathutil"
 	"github.com/iheanyi/agentctl/pkg/sync"
 )
 
@@ -145,6 +147,9 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		// Get name from args
 		if len(args) > 0 {
 			name = args[0]
+			if err := pathutil.SanitizeName(name); err != nil {
+				return fmt.Errorf("invalid server name %q: %w", name, err)
+			}
 		} else {
 			return fmt.Errorf("server name is required")
 		}
@@ -380,6 +385,9 @@ func runInteractiveAdd(cfg *config.Config) (*mcp.Server, error) {
 				Validate(func(s string) error {
 					if s == "" {
 						return fmt.Errorf("name is required")
+					}
+					if err := pathutil.SanitizeName(s); err != nil {
+						return fmt.Errorf("invalid name: %w", err)
 					}
 					if _, exists := cfg.Servers[s]; exists {
 						return fmt.Errorf("server %q already exists", s)
@@ -728,8 +736,7 @@ func parseAddTarget(target string) (*mcp.Server, error) {
 
 func pathToName(path string) string {
 	// Extract name from path
-	parts := strings.Split(path, "/")
-	name := parts[len(parts)-1]
+	name := filepath.Base(path)
 
 	// Remove common suffixes
 	name = strings.TrimSuffix(name, "-mcp")

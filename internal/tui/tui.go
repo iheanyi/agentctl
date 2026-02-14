@@ -3,10 +3,12 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -106,6 +108,7 @@ type importResult struct {
 	commandCount int
 	ruleCount    int
 	skillCount   int
+	cancelled    bool
 	errors       []string
 }
 
@@ -164,6 +167,8 @@ type Model struct {
 	toolArgInput    textinput.Model
 	toolResult      *mcpclient.ToolCallResult
 	toolExecuting   bool
+	toolCancel      context.CancelFunc
+	testCancels     map[string]context.CancelFunc
 
 	// Rule editor modal
 	showRuleEditor     bool
@@ -255,13 +260,15 @@ type Model struct {
 
 	// Import wizard modal (multi-step)
 	showImportWizard       bool
-	importWizardStep       int             // 0=select tool, 1=select resources, 2=preview, 3=importing
+	importWizardStep       int             // 0=select tool, 1=select resources, 2=preview/importing, 3=complete
 	importWizardTools      []sync.Adapter  // Detected tools
 	importWizardToolCursor int             // Selected tool index
 	importWizardResources  map[string]bool // Selected resource types (servers, commands, rules, skills)
 	importWizardPreview    *importPreview  // Resources to be imported
 	importWizardImporting  bool            // Currently importing
-	importWizardResult     *importResult   // Result of import operation
+	importWizardProgress   string
+	importWizardCancel     context.CancelFunc
+	importWizardResult     *importResult // Result of import operation
 
 	// Inspector modal (read-only view of resource details)
 	showInspector bool
@@ -441,6 +448,7 @@ func New() (*Model, error) {
 	m := &Model{
 		cfg:          cfg,
 		selected:     make(map[string]bool),
+		testCancels:  make(map[string]context.CancelFunc),
 		filterMode:   FilterAll,
 		profile:      "default",
 		logs:         []LogEntry{},
@@ -898,10 +906,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyFilter()
 
 	case serverTestedMsg:
+		delete(m.testCancels, msg.name)
 		if msg.healthy {
 			toolCount := len(msg.tools)
 			latencyStr := msg.latency.Round(time.Millisecond).String()
 			m.addLog("success", fmt.Sprintf("%s is healthy (%d tools, %s)", msg.name, toolCount, latencyStr))
+		} else if errors.Is(msg.err, context.Canceled) {
+			m.addLog("warn", fmt.Sprintf("Cancelled server test for %s", msg.name))
 		} else {
 			m.addLog("error", fmt.Sprintf("%s: %v", msg.name, msg.err))
 		}
@@ -912,6 +923,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.allServers[i].Health = HealthStatusHealthy
 					m.allServers[i].Tools = msg.tools
 					m.allServers[i].HealthLatency = msg.latency.Round(time.Millisecond).String()
+				} else if errors.Is(msg.err, context.Canceled) {
+					m.allServers[i].Health = HealthStatusUnknown
+					m.allServers[i].HealthError = nil
 				} else {
 					m.allServers[i].Health = HealthStatusUnhealthy
 					m.allServers[i].HealthError = msg.err
@@ -925,7 +939,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(msg.errors) == 0 {
 			m.addLog("success", "Synced to all tools")
 		} else {
-			m.addLog("warn", fmt.Sprintf("Sync completed with %d errors", len(msg.errors)))
+			m.addLog("warn", fmt.Sprintf("Sync completed with %d error(s)", len(msg.errors)))
+			toolNames := make([]string, 0, len(msg.errors))
+			for tool := range msg.errors {
+				toolNames = append(toolNames, tool)
+			}
+			sort.Strings(toolNames)
+			for _, tool := range toolNames {
+				m.addLog("error", fmt.Sprintf("%s sync failed: %v", tool, msg.errors[tool]))
+			}
 		}
 
 	case serverAddedMsg:
@@ -969,9 +991,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case toolExecutedMsg:
+		m.toolCancel = nil
 		m.toolExecuting = false
 		m.toolResult = &msg.result
-		if msg.result.Error != nil {
+		if errors.Is(msg.result.Error, context.Canceled) {
+			m.addLog("warn", fmt.Sprintf("Cancelled tool execution: %s", msg.toolName))
+		} else if msg.result.Error != nil {
 			m.addLog("error", fmt.Sprintf("Tool %s failed: %v", msg.toolName, msg.result.Error))
 		} else if msg.result.IsError {
 			m.addLog("warn", fmt.Sprintf("Tool %s returned error", msg.toolName))
@@ -1059,12 +1084,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.openSkillDetail(msg.skill)
 
 	case importCompletedMsg:
+		m.importWizardCancel = nil
 		m.importWizardImporting = false
+		if msg.result == nil {
+			msg.result = &importResult{}
+		}
 		m.importWizardResult = msg.result
 		m.importWizardStep = 3 // Move to completion step
+		m.importWizardProgress = ""
 		totalImported := msg.result.serverCount + msg.result.commandCount + msg.result.ruleCount + msg.result.skillCount
+		if msg.result.cancelled {
+			m.addLog("warn", "Import cancelled")
+		}
 		if totalImported > 0 {
 			m.addLog("success", fmt.Sprintf("Imported %d resource(s)", totalImported))
+		}
+		if len(msg.result.errors) > 0 {
+			m.addLog("warn", fmt.Sprintf("Import finished with %d error(s)", len(msg.result.errors)))
+		}
+
+	case asyncPanicMsg:
+		m.toolExecuting = false
+		m.toolCancel = nil
+		m.importWizardImporting = false
+		m.importWizardCancel = nil
+		m.importWizardProgress = ""
+		m.addLog("error", fmt.Sprintf("Recovered panic during %s: %v", msg.operation, msg.err))
+		if m.showImportWizard {
+			m.importWizardStep = 3
+			m.importWizardResult = &importResult{
+				errors: []string{fmt.Sprintf("Recovered panic during %s: %v", msg.operation, msg.err)},
+			}
 		}
 
 	case tea.KeyMsg:
@@ -1128,7 +1178,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle tool modal
 		if m.showToolModal {
 			if m.toolExecuting {
-				// Don't accept input while executing
+				if msg.String() == "esc" || msg.String() == "q" {
+					if m.toolCancel != nil {
+						m.toolCancel()
+						m.toolCancel = nil
+						m.addLog("warn", "Cancelled running tool call")
+					}
+					m.toolExecuting = false
+				}
+				// Don't accept other input while executing.
 				return m, nil
 			}
 
@@ -1176,7 +1234,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						args = make(map[string]any)
 					}
-					return m, m.executeTool(m.toolModalServer.Name, tool.Name, args)
+					ctx, cancel := context.WithCancel(context.Background())
+					m.toolCancel = cancel
+					return m, m.executeTool(ctx, m.toolModalServer.Name, tool.Name, args)
 				}
 			default:
 				// If arg input is focused, delegate to textinput
@@ -1246,6 +1306,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.keys.Quit):
+			cancelled := m.cancelActiveOperations()
+			if len(cancelled) > 0 {
+				m.addLog("warn", fmt.Sprintf("Cancelling active operations: %s", strings.Join(cancelled, ", ")))
+			}
 			m.quitting = true
 			return m, tea.Quit
 
@@ -1280,6 +1344,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchInput.Focus()
 
 		case key.Matches(msg, m.keys.Escape):
+			cancelled := m.cancelActiveOperations()
+			if len(cancelled) > 0 {
+				m.addLog("warn", fmt.Sprintf("Cancelled: %s", strings.Join(cancelled, ", ")))
+				return m, nil
+			}
 			m.searchInput.SetValue("")
 			m.selected = make(map[string]bool)
 			m.applyFilter()
@@ -1462,7 +1531,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				m.applyFilter()
-				return m, m.testServer(s.Name)
+				ctx, cancel := context.WithCancel(context.Background())
+				m.testCancels[s.Name] = cancel
+				return m, m.testServer(s.Name, ctx)
 			}
 
 		case key.Matches(msg, m.keys.TestAll):
@@ -4930,10 +5001,31 @@ type backupOperationMsg struct {
 	backups []backupInfo
 }
 
+type asyncPanicMsg struct {
+	operation string
+	err       error
+	stack     string
+}
+
 // Commands
 
-func (m *Model) testServer(name string) tea.Cmd {
-	return func() tea.Msg {
+func safeAsyncCmd(operation string, fn func() tea.Msg) tea.Cmd {
+	return func() (msg tea.Msg) {
+		defer func() {
+			if r := recover(); r != nil {
+				msg = asyncPanicMsg{
+					operation: operation,
+					err:       fmt.Errorf("%v", r),
+					stack:     string(debug.Stack()),
+				}
+			}
+		}()
+		return fn()
+	}
+}
+
+func (m *Model) testServer(name string, ctx context.Context) tea.Cmd {
+	return safeAsyncCmd("test server "+name, func() tea.Msg {
 		server, ok := m.cfg.Servers[name]
 		if !ok {
 			return serverTestedMsg{name: name, healthy: false, err: fmt.Errorf("server not found")}
@@ -4955,7 +5047,7 @@ func (m *Model) testServer(name string) tea.Cmd {
 
 		// Use real MCP client for health check
 		client := mcpclient.NewClient().WithTimeout(10 * time.Second)
-		result := client.CheckHealth(context.Background(), &serverCopy)
+		result := client.CheckHealth(ctx, &serverCopy)
 
 		return serverTestedMsg{
 			name:    name,
@@ -4964,7 +5056,7 @@ func (m *Model) testServer(name string) tea.Cmd {
 			tools:   result.Tools,
 			latency: result.Latency,
 		}
-	}
+	})
 }
 
 func (m *Model) testAllServers() tea.Cmd {
@@ -4974,7 +5066,9 @@ func (m *Model) testAllServers() tea.Cmd {
 		if m.allServers[i].Status == ServerStatusInstalled {
 			m.allServers[i].Health = HealthStatusChecking
 			name := m.allServers[i].Name
-			cmds = append(cmds, m.testServer(name))
+			ctx, cancel := context.WithCancel(context.Background())
+			m.testCancels[name] = cancel
+			cmds = append(cmds, m.testServer(name, ctx))
 		}
 	}
 	m.applyFilter()
@@ -4984,8 +5078,37 @@ func (m *Model) testAllServers() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+func (m *Model) cancelActiveOperations() []string {
+	var cancelled []string
+
+	if m.toolCancel != nil {
+		m.toolCancel()
+		m.toolCancel = nil
+		m.toolExecuting = false
+		cancelled = append(cancelled, "tool execution")
+	}
+
+	if m.importWizardCancel != nil {
+		m.importWizardCancel()
+		m.importWizardCancel = nil
+		if m.importWizardImporting {
+			m.importWizardProgress = "Cancelling import..."
+		}
+		cancelled = append(cancelled, "import workflow")
+	}
+
+	for name, cancel := range m.testCancels {
+		cancel()
+		delete(m.testCancels, name)
+		cancelled = append(cancelled, fmt.Sprintf("server test (%s)", name))
+	}
+
+	sort.Strings(cancelled)
+	return cancelled
+}
+
 func (m *Model) syncAll() tea.Cmd {
-	return func() tea.Msg {
+	return safeAsyncCmd("sync all", func() tea.Msg {
 		// Build server list from config
 		var servers []*mcp.Server
 		for _, server := range m.cfg.Servers {
@@ -5005,7 +5128,7 @@ func (m *Model) syncAll() tea.Cmd {
 		}
 
 		return syncCompletedMsg{errors: errors}
-	}
+	})
 }
 
 func (m *Model) toggleServer(name string) tea.Cmd {
@@ -5083,8 +5206,8 @@ func (m *Model) addServer(name string) tea.Cmd {
 	}
 }
 
-func (m *Model) executeTool(serverName, toolName string, args map[string]any) tea.Cmd {
-	return func() tea.Msg {
+func (m *Model) executeTool(ctx context.Context, serverName, toolName string, args map[string]any) tea.Cmd {
+	return safeAsyncCmd("execute tool "+toolName, func() tea.Msg {
 		server, ok := m.cfg.Servers[serverName]
 		if !ok {
 			return toolExecutedMsg{
@@ -5111,13 +5234,13 @@ func (m *Model) executeTool(serverName, toolName string, args map[string]any) te
 		}
 
 		client := mcpclient.NewClient().WithTimeout(30 * time.Second)
-		result := client.CallTool(context.Background(), &serverCopy, toolName, args)
+		result := client.CallTool(ctx, &serverCopy, toolName, args)
 
 		return toolExecutedMsg{
 			toolName: toolName,
 			result:   result,
 		}
-	}
+	})
 }
 
 // Resource CRUD helpers
@@ -5146,7 +5269,13 @@ func getEditor() string {
 }
 
 // Run starts the TUI application
-func Run() error {
+func Run() (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("tui recovered from panic: %v\n%s", r, string(debug.Stack()))
+		}
+	}()
+
 	m, err := New()
 	if err != nil {
 		return err
@@ -5157,22 +5286,23 @@ func Run() error {
 	return err
 }
 
-// handleAliasWizardInput handles input for the alias wizard modal
-// TODO: Implement alias wizard functionality
+// handleAliasWizardInput handles input for the alias wizard modal.
+// The alias wizard is intentionally disabled until implemented.
 func (m *Model) handleAliasWizardInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc":
+	case "esc", "q", "enter":
 		m.showAliasWizard = false
+		m.addLog("info", "Alias wizard is not available yet; use server add/edit instead")
 	}
 	return m, nil
 }
 
-// renderAliasWizard renders the alias wizard modal
-// TODO: Implement alias wizard UI
+// renderAliasWizard renders the alias wizard modal.
 func (m *Model) renderAliasWizard() string {
-	content := ModalTitleStyle.Render("Alias Wizard (Coming Soon)") + "\n\n"
-	content += "This feature is not yet implemented.\n\n"
-	content += KeyDescStyle.Render("Press Esc to close")
+	content := ModalTitleStyle.Render("Alias Wizard Unavailable") + "\n\n"
+	content += "Alias wizard is currently disabled.\n"
+	content += "Use the server editor (a/e) to add or modify servers.\n\n"
+	content += KeyDescStyle.Render("Press Enter or Esc to close")
 	modal := ModalStyle.Width(50).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 }
@@ -5191,6 +5321,8 @@ func (m *Model) openImportWizard() {
 	m.importWizardPreview = nil
 	m.importWizardResult = nil
 	m.importWizardImporting = false
+	m.importWizardProgress = ""
+	m.importWizardCancel = nil
 
 	// Get detected tools
 	m.importWizardTools = sync.Detected()
@@ -5198,8 +5330,15 @@ func (m *Model) openImportWizard() {
 
 // handleImportWizardInput handles keyboard input for the import wizard modal
 func (m *Model) handleImportWizardInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Don't accept input while importing
 	if m.importWizardImporting {
+		switch msg.String() {
+		case "esc", "q":
+			if m.importWizardCancel != nil {
+				m.importWizardCancel()
+				m.importWizardProgress = "Cancelling import..."
+				m.addLog("warn", "Cancelling import...")
+			}
+		}
 		return m, nil
 	}
 
@@ -5283,7 +5422,14 @@ func (m *Model) handleImportWizardEnter() (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case 2: // Preview confirmed, perform import
-		return m, m.performImport()
+		if m.importWizardPreview == nil {
+			return m, nil
+		}
+		m.importWizardImporting = true
+		m.importWizardProgress = "Importing selected resources..."
+		ctx, cancel := context.WithCancel(context.Background())
+		m.importWizardCancel = cancel
+		return m, m.performImport(ctx)
 
 	case 3: // Import complete, close
 		m.showImportWizard = false
@@ -5380,18 +5526,35 @@ type importCompletedMsg struct {
 	result *importResult
 }
 
-// performImport imports the resources from the preview
-func (m *Model) performImport() tea.Cmd {
-	return func() tea.Msg {
+// performImport imports the resources from the preview.
+func (m *Model) performImport(ctx context.Context) tea.Cmd {
+	return safeAsyncCmd("import workflow", func() tea.Msg {
 		if m.importWizardPreview == nil {
 			return importCompletedMsg{result: &importResult{}}
 		}
 
 		result := &importResult{}
 		preview := m.importWizardPreview
+		checkCancelled := func() bool {
+			if err := ctx.Err(); err != nil {
+				result.cancelled = true
+				if !errors.Is(err, context.Canceled) {
+					result.errors = append(result.errors, fmt.Sprintf("Import interrupted: %v", err))
+				}
+				return true
+			}
+			return false
+		}
+
+		if checkCancelled() {
+			return importCompletedMsg{result: result}
+		}
 
 		// Import servers
 		for _, srv := range preview.servers {
+			if checkCancelled() {
+				return importCompletedMsg{result: result}
+			}
 			if m.cfg.Servers == nil {
 				m.cfg.Servers = make(map[string]*mcp.Server)
 			}
@@ -5401,6 +5564,9 @@ func (m *Model) performImport() tea.Cmd {
 
 		// Save config if servers were added
 		if result.serverCount > 0 {
+			if checkCancelled() {
+				return importCompletedMsg{result: result}
+			}
 			if err := m.cfg.Save(); err != nil {
 				result.errors = append(result.errors, fmt.Sprintf("Failed to save config: %v", err))
 			}
@@ -5409,6 +5575,9 @@ func (m *Model) performImport() tea.Cmd {
 		// Import commands
 		commandsDir := filepath.Join(m.cfg.ConfigDir, "commands")
 		for _, cmd := range preview.commands {
+			if checkCancelled() {
+				return importCompletedMsg{result: result}
+			}
 			if err := command.Save(cmd, commandsDir); err != nil {
 				result.errors = append(result.errors, fmt.Sprintf("Failed to save command %q: %v", cmd.Name, err))
 			} else {
@@ -5419,6 +5588,9 @@ func (m *Model) performImport() tea.Cmd {
 		// Import rules
 		rulesDir := filepath.Join(m.cfg.ConfigDir, "rules")
 		for _, r := range preview.rules {
+			if checkCancelled() {
+				return importCompletedMsg{result: result}
+			}
 			if err := rule.Save(r, rulesDir); err != nil {
 				result.errors = append(result.errors, fmt.Sprintf("Failed to save rule %q: %v", r.Name, err))
 			} else {
@@ -5429,6 +5601,9 @@ func (m *Model) performImport() tea.Cmd {
 		// Import skills
 		skillsDir := filepath.Join(m.cfg.ConfigDir, "skills")
 		for _, s := range preview.skills {
+			if checkCancelled() {
+				return importCompletedMsg{result: result}
+			}
 			if err := s.Save(skillsDir); err != nil {
 				result.errors = append(result.errors, fmt.Sprintf("Failed to save skill %q: %v", s.Name, err))
 			} else {
@@ -5437,7 +5612,7 @@ func (m *Model) performImport() tea.Cmd {
 		}
 
 		return importCompletedMsg{result: result}
-	}
+	})
 }
 
 // containsResourceType checks if a resource type is in the list
@@ -5462,7 +5637,11 @@ func (m *Model) renderImportWizard() string {
 	case 1:
 		title = "Import - Step 2: Select Resources"
 	case 2:
-		title = "Import - Step 3: Preview"
+		if m.importWizardImporting {
+			title = "Import - Step 3: Importing"
+		} else {
+			title = "Import - Step 3: Preview"
+		}
 	case 3:
 		title = "Import Complete"
 	}
@@ -5580,6 +5759,15 @@ func (m *Model) renderImportWizard() string {
 			preview := m.importWizardPreview
 			totalCount := len(preview.servers) + len(preview.commands) + len(preview.rules) + len(preview.skills)
 
+			if m.importWizardImporting {
+				progress := m.importWizardProgress
+				if strings.TrimSpace(progress) == "" {
+					progress = "Importing selected resources..."
+				}
+				sections = append(sections, fmt.Sprintf("%s %s", m.spinner.View(), InfoStyle.Render(progress)))
+				sections = append(sections, "")
+			}
+
 			if totalCount == 0 {
 				sections = append(sections, mutedStyle.Render("No new resources to import."))
 				sections = append(sections, "")
@@ -5627,7 +5815,9 @@ func (m *Model) renderImportWizard() string {
 			result := m.importWizardResult
 			totalImported := result.serverCount + result.commandCount + result.ruleCount + result.skillCount
 
-			if totalImported == 0 && len(result.errors) == 0 {
+			if result.cancelled {
+				sections = append(sections, WarningStyle.Render("Import was cancelled."))
+			} else if totalImported == 0 && len(result.errors) == 0 {
 				sections = append(sections, mutedStyle.Render("No resources were imported."))
 			} else {
 				if result.serverCount > 0 {
@@ -5671,7 +5861,9 @@ func (m *Model) renderImportWizard() string {
 	case 1:
 		hints = "1-4:toggle  Enter:preview  Esc:back"
 	case 2:
-		if m.importWizardPreview != nil {
+		if m.importWizardImporting {
+			hints = "Esc:cancel import"
+		} else if m.importWizardPreview != nil {
 			totalCount := len(m.importWizardPreview.servers) + len(m.importWizardPreview.commands) +
 				len(m.importWizardPreview.rules) + len(m.importWizardPreview.skills)
 			if totalCount > 0 {

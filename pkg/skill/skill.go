@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/iheanyi/agentctl/pkg/safeio"
 )
 
 // InspectTitle returns the display name for the inspector modal header
@@ -114,7 +116,7 @@ type Skill struct {
 func Load(dir string) (*Skill, error) {
 	// Try SKILL.md first (Claude Code format)
 	skillMdPath := filepath.Join(dir, SkillFileName)
-	if data, err := os.ReadFile(skillMdPath); err == nil {
+	if data, err := safeio.SafeReadFile(skillMdPath); err == nil {
 		s, err := parseSkillMd(data)
 		if err != nil {
 			return nil, fmt.Errorf("parsing %s: %w", SkillFileName, err)
@@ -135,7 +137,7 @@ func Load(dir string) (*Skill, error) {
 
 	// Fall back to legacy skill.json
 	skillJsonPath := filepath.Join(dir, LegacySkillFileName)
-	data, err := os.ReadFile(skillJsonPath)
+	data, err := safeio.SafeReadFile(skillJsonPath)
 	if err != nil {
 		return nil, fmt.Errorf("no %s or %s found in %s", SkillFileName, LegacySkillFileName, dir)
 	}
@@ -156,7 +158,7 @@ func Load(dir string) (*Skill, error) {
 			if entry.IsDir() {
 				continue
 			}
-			content, err := os.ReadFile(filepath.Join(promptsDir, entry.Name()))
+			content, err := safeio.SafeReadFile(filepath.Join(promptsDir, entry.Name()))
 			if err != nil {
 				continue
 			}
@@ -190,7 +192,7 @@ func (s *Skill) loadCommands() error {
 		}
 
 		// Parse the command file
-		data, err := os.ReadFile(filepath.Join(s.Path, name))
+		data, err := safeio.SafeReadFile(filepath.Join(s.Path, name))
 		if err != nil {
 			continue
 		}
@@ -313,7 +315,7 @@ func (s *Skill) Save(dir string) error {
 	content := s.ToMarkdown()
 	skillPath := filepath.Join(dir, SkillFileName)
 
-	if err := os.WriteFile(skillPath, []byte(content), 0644); err != nil {
+	if err := safeio.SafeWriteFileWithLock(skillPath, []byte(content), 0644, safeio.DefaultBackupCount); err != nil {
 		return fmt.Errorf("writing %s: %w", SkillFileName, err)
 	}
 
@@ -401,7 +403,7 @@ func (s *Skill) SaveCommand(cmd *Command) error {
 	content := cmd.ToMarkdown()
 	cmdPath := filepath.Join(s.Path, cmd.FileName)
 
-	if err := os.WriteFile(cmdPath, []byte(content), 0644); err != nil {
+	if err := safeio.SafeWriteFileWithLock(cmdPath, []byte(content), 0644, safeio.DefaultBackupCount); err != nil {
 		return fmt.Errorf("writing command %s: %w", cmd.FileName, err)
 	}
 

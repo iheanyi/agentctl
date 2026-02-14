@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"sort"
 	"testing"
 
@@ -127,6 +128,7 @@ func newTestModel() *Model {
 	return &Model{
 		cfg:          cfg,
 		selected:     make(map[string]bool),
+		testCancels:  make(map[string]context.CancelFunc),
 		filterMode:   FilterAll,
 		profile:      "default",
 		logs:         []LogEntry{},

@@ -177,5 +177,5 @@ func (a *ClaudeDesktopAdapter) saveConfig(config *ClaudeConfig) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return SafeWriteFileWithLock(path, data, 0644, DefaultBackupCount)
 }
