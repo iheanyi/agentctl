@@ -731,30 +731,9 @@ func mergeServerSets(existing, incoming []*mcp.Server) []*mcp.Server {
 	return out
 }
 
-// preserveManagedServers keeps stale managed servers when --clean=false.
-func preserveManagedServers(existing, incoming []*mcp.Server, managedNames []string) []*mcp.Server {
-	managedSet := make(map[string]bool, len(managedNames))
-	for _, name := range managedNames {
-		managedSet[name] = true
-	}
-
-	merged := mergeServerSets(nil, incoming)
-	incomingSet := make(map[string]bool, len(merged))
-	for _, server := range merged {
-		incomingSet[sync.GetServerName(server)] = true
-	}
-
-	for _, server := range existing {
-		name := sync.GetServerName(server)
-		if name == "" {
-			continue
-		}
-		if managedSet[name] && !incomingSet[name] {
-			merged = append(merged, server)
-		}
-	}
-
-	return merged
+// preserveManagedServers keeps stale managed servers and unmanaged servers when --clean=false.
+func preserveManagedServers(existing, incoming []*mcp.Server, _ []string) []*mcp.Server {
+	return mergeServerSets(existing, incoming)
 }
 
 // printVerboseCommands prints detailed command information

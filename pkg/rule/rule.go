@@ -89,6 +89,9 @@ func Load(path string) (*Rule, error) {
 	base := filepath.Base(path)
 	ext := filepath.Ext(base)
 	rule.Name = strings.TrimSuffix(base, ext)
+	if rule.Name == "" {
+		rule.Name = base
+	}
 
 	// Check for frontmatter (starts with ---)
 	if strings.HasPrefix(content, "---") {

@@ -9,69 +9,21 @@ import (
 	"sort"
 	"strings"
 	"syscall"
-	"time"
+
+	"github.com/iheanyi/agentctl/pkg/safeio"
 )
 
 // DefaultBackupCount is the default number of backups to keep
-const DefaultBackupCount = 3
+const DefaultBackupCount = safeio.DefaultBackupCount
 
 // BackupSuffix is the suffix used for backup files
-const BackupSuffix = ".bak"
+const BackupSuffix = safeio.BackupSuffix
 
 // AtomicWriteFile writes data to a file atomically by first writing to a
 // temporary file and then renaming it to the target path. This prevents
 // corruption if the process is interrupted mid-write.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	// Ensure the directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating directory: %w", err)
-	}
-
-	// Create a temp file in the same directory to ensure same filesystem
-	// This is required for atomic rename to work
-	tmpFile, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-
-	// Clean up temp file on error
-	success := false
-	defer func() {
-		if !success {
-			os.Remove(tmpPath)
-		}
-	}()
-
-	// Write data to temp file
-	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("writing to temp file: %w", err)
-	}
-
-	// Sync to disk before rename
-	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("syncing temp file: %w", err)
-	}
-
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-
-	// Set permissions before rename
-	if err := os.Chmod(tmpPath, perm); err != nil {
-		return fmt.Errorf("setting permissions: %w", err)
-	}
-
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("renaming temp file: %w", err)
-	}
-
-	success = true
-	return nil
+	return safeio.AtomicWriteFile(path, data, perm)
 }
 
 // FileLock represents a file-based lock for synchronization
@@ -228,25 +180,7 @@ func isLockBusyWindows(err error) bool {
 // CreateBackup creates a timestamped backup of the file at the given path.
 // Returns the backup path or empty string if the source file doesn't exist.
 func CreateBackup(path string) (string, error) {
-	// Check if source file exists
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return "", nil
-	} else if err != nil {
-		return "", fmt.Errorf("checking source file: %w", err)
-	}
-
-	// Generate timestamp-based backup filename (include nanoseconds for uniqueness)
-	timestamp := time.Now().Format("20060102-150405.000000000")
-	ext := filepath.Ext(path)
-	base := strings.TrimSuffix(path, ext)
-	backupPath := fmt.Sprintf("%s%s.%s%s", base, BackupSuffix, timestamp, ext)
-
-	// Copy file to backup location
-	if err := copyFile(path, backupPath); err != nil {
-		return "", fmt.Errorf("creating backup: %w", err)
-	}
-
-	return backupPath, nil
+	return safeio.CreateBackup(path)
 }
 
 // CreateSimpleBackup creates a simple .bak backup (overwrites previous backup).
@@ -271,47 +205,7 @@ func CreateSimpleBackup(path string) (string, error) {
 // RotateBackups keeps only the most recent N backups for the given file.
 // It looks for files matching the pattern: base.bak.TIMESTAMP.ext
 func RotateBackups(path string, keepCount int) error {
-	if keepCount < 0 {
-		keepCount = DefaultBackupCount
-	}
-
-	dir := filepath.Dir(path)
-	base := filepath.Base(path)
-	ext := filepath.Ext(base)
-	nameWithoutExt := strings.TrimSuffix(base, ext)
-	prefix := nameWithoutExt + BackupSuffix + "."
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("reading directory: %w", err)
-	}
-
-	// Find all backup files
-	var backups []string
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ext) {
-			backups = append(backups, filepath.Join(dir, name))
-		}
-	}
-
-	// Sort by name (timestamp is in name, so lexicographic sort works)
-	sort.Strings(backups)
-
-	// Remove oldest backups beyond keepCount
-	if len(backups) > keepCount {
-		toRemove := backups[:len(backups)-keepCount]
-		for _, backup := range toRemove {
-			if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("removing old backup %s: %w", backup, err)
-			}
-		}
-	}
-
-	return nil
+	return safeio.RotateBackups(path, keepCount)
 }
 
 // RestoreBackup restores the most recent backup for the given file.
@@ -404,36 +298,13 @@ func ListBackups(path string) ([]string, error) {
 // SafeWriteFile combines backup creation, atomic write, and backup rotation.
 // This is the recommended way to safely write config files.
 func SafeWriteFile(path string, data []byte, perm os.FileMode, keepBackups int) error {
-	// Create backup if file exists
-	if _, err := CreateBackup(path); err != nil {
-		return fmt.Errorf("creating backup: %w", err)
-	}
-
-	// Write atomically
-	if err := AtomicWriteFile(path, data, perm); err != nil {
-		return fmt.Errorf("atomic write: %w", err)
-	}
-
-	// Rotate old backups
-	if err := RotateBackups(path, keepBackups); err != nil {
-		// Log but don't fail - the write succeeded
-		return nil
-	}
-
-	return nil
+	return safeio.SafeWriteFile(path, data, perm, keepBackups)
 }
 
 // SafeWriteFileWithLock combines file locking, backup, and atomic write.
 // Use this when multiple processes might write to the same file.
 func SafeWriteFileWithLock(path string, data []byte, perm os.FileMode, keepBackups int) error {
-	lock := NewFileLock(path)
-
-	if err := lock.Lock(); err != nil {
-		return fmt.Errorf("acquiring lock: %w", err)
-	}
-	defer func() { _ = lock.Unlock() }()
-
-	return SafeWriteFile(path, data, perm, keepBackups)
+	return safeio.SafeWriteFileWithLock(path, data, perm, keepBackups)
 }
 
 // copyFile copies a file from src to dst

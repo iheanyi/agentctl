@@ -1232,13 +1232,15 @@ func updateTrackedSkill(status skillUpdateStatus, out *output.Writer) error {
 		if err != nil {
 			return fmt.Errorf("could not locate skill in source: %w", err)
 		}
+		found := false
 		for _, candidate := range candidates {
 			if candidate.Skill.Name == status.Skill.Name {
 				skillPath = candidate.RelativePath
+				found = true
 				break
 			}
 		}
-		if skillPath == "" {
+		if !found {
 			return fmt.Errorf("skill %q not found in source repository", status.Skill.Name)
 		}
 	}
