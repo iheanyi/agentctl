@@ -3,6 +3,7 @@ package sync
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -39,7 +40,7 @@ func TestAtomicWriteFile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to stat file: %v", err)
 		}
-		if info.Mode().Perm() != 0644 {
+		if runtime.GOOS != "windows" && info.Mode().Perm() != 0644 {
 			t.Errorf("Permissions mismatch: got %o, want %o", info.Mode().Perm(), 0644)
 		}
 	})
@@ -753,7 +754,7 @@ func TestCopyFile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to stat dest: %v", err)
 		}
-		if dstInfo.Mode().Perm() != 0640 {
+		if runtime.GOOS != "windows" && dstInfo.Mode().Perm() != 0640 {
 			t.Errorf("Permissions mismatch: got %o, want %o", dstInfo.Mode().Perm(), 0640)
 		}
 	})

@@ -36,7 +36,7 @@ func TestServerDir(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := b.ServerDir(tt.server)
-			if got != tt.wantPath {
+			if got != filepath.FromSlash(tt.wantPath) {
 				t.Errorf("ServerDir() = %q, want %q", got, tt.wantPath)
 			}
 		})

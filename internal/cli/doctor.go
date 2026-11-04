@@ -12,6 +12,7 @@ import (
 	stdsync "sync"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/iheanyi/agentctl/pkg/config"
@@ -470,13 +471,22 @@ func validateToolConfig(adapter sync.Adapter) (valid bool, serverCount int, err 
 	}
 
 	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if adapter.Name() == "codex" {
+		// Codex uses TOML config; validate accordingly
+		var tomlRaw map[string]interface{}
+		if err := toml.Unmarshal(data, &tomlRaw); err != nil {
+			return false, 0, fmt.Errorf("invalid TOML")
+		}
+		raw = tomlRaw
+	} else if err := json.Unmarshal(data, &raw); err != nil {
 		return false, 0, fmt.Errorf("invalid JSON")
 	}
 
 	// Get server section
 	var serverKey string
 	switch adapter.Name() {
+	case "codex":
+		serverKey = "mcp_servers"
 	case "zed":
 		serverKey = "context_servers"
 	case "opencode":
