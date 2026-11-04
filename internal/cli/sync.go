@@ -186,7 +186,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 			})
 		}
 		fmt.Println("No supported tools detected.")
-		fmt.Println("\nSupported tools: Claude Code, Cursor, Codex, OpenCode, Cline, Windsurf, Zed, Continue")
+		fmt.Println("\nSupported tools: Claude Code, Cursor, Codex, OpenCode, Cline, Windsurf, Zed, Continue, WorkBuddy, TRAE CN, Qoder, DeepSeek Harness")
 		return nil
 	}
 

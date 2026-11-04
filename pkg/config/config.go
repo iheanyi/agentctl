@@ -422,7 +422,7 @@ func (c *Config) CacheDir() string {
 
 // defaultToolSettings returns default tool configuration
 func defaultToolSettings() map[string]ToolConfig {
-	tools := []string{"claude", "cursor", "codex", "opencode", "cline", "windsurf", "zed", "continue"}
+	tools := []string{"claude", "cursor", "codex", "opencode", "cline", "windsurf", "zed", "continue", "workbuddy", "trae_cn", "qoder", "dsh"}
 	settings := make(map[string]ToolConfig)
 	for _, tool := range tools {
 		settings[tool] = ToolConfig{Enabled: true}

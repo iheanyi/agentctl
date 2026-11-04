@@ -25,7 +25,7 @@ var rootCmd = &cobra.Command{
 	Long: `agentctl manages MCP servers, commands, rules, prompts, and skills
 across multiple agentic frameworks and developer tools.
 
-Supported tools: Claude Code, Cursor, Codex, OpenCode, Cline, Windsurf, Zed, Continue
+Supported tools: Claude Code, Cursor, Codex, OpenCode, Cline, Windsurf, Zed, Continue, WorkBuddy, TRAE CN, Qoder, DeepSeek Harness
 
 Examples:
   agentctl                             # Launch interactive TUI

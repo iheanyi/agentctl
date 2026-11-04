@@ -205,6 +205,10 @@ func (r *ResourceCRUD) CreateRule() (*rule.Rule, error) {
 		huh.NewOption("Zed", "zed"),
 		huh.NewOption("OpenCode", "opencode"),
 		huh.NewOption("Codex", "codex"),
+		huh.NewOption("WorkBuddy", "workbuddy"),
+		huh.NewOption("TRAE CN", "trae_cn"),
+		huh.NewOption("Qoder", "qoder"),
+		huh.NewOption("DeepSeek Harness", "dsh"),
 	}
 
 	form := huh.NewForm(
