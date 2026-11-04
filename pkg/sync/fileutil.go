@@ -5,10 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -154,75 +152,6 @@ func (l *FileLock) Unlock() error {
 
 	l.file = nil
 	return nil
-}
-
-// Platform-specific file locking implementations
-
-func lockFile(f *os.File) error {
-	if runtime.GOOS == "windows" {
-		return lockFileWindows(f)
-	}
-	return lockFileUnix(f)
-}
-
-func tryLockFile(f *os.File) error {
-	if runtime.GOOS == "windows" {
-		return tryLockFileWindows(f)
-	}
-	return tryLockFileUnix(f)
-}
-
-func unlockFile(f *os.File) error {
-	if runtime.GOOS == "windows" {
-		return unlockFileWindows(f)
-	}
-	return unlockFileUnix(f)
-}
-
-func isLockBusy(err error) bool {
-	if runtime.GOOS == "windows" {
-		return isLockBusyWindows(err)
-	}
-	return isLockBusyUnix(err)
-}
-
-// Unix implementation using flock
-func lockFileUnix(f *os.File) error {
-	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
-}
-
-func tryLockFileUnix(f *os.File) error {
-	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-}
-
-func unlockFileUnix(f *os.File) error {
-	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-}
-
-func isLockBusyUnix(err error) bool {
-	return err == syscall.EWOULDBLOCK || err == syscall.EAGAIN
-}
-
-// Windows implementation - uses LockFileEx via syscall
-// Note: On Windows, we use a simpler approach with file existence checks
-// since flock is not available. For production use, consider using
-// golang.org/x/sys/windows for proper LockFileEx support.
-func lockFileWindows(f *os.File) error {
-	// On Windows, opening with exclusive access provides basic locking
-	// This is a simplified implementation
-	return nil
-}
-
-func tryLockFileWindows(f *os.File) error {
-	return nil
-}
-
-func unlockFileWindows(f *os.File) error {
-	return nil
-}
-
-func isLockBusyWindows(err error) bool {
-	return false
 }
 
 // CreateBackup creates a timestamped backup of the file at the given path.

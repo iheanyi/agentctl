@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -85,8 +86,7 @@ func Load(path string) (*Rule, error) {
 
 	// Extract name from filename
 	base := strings.TrimSuffix(path, ".md")
-	parts := strings.Split(base, "/")
-	rule.Name = parts[len(parts)-1]
+	rule.Name = filepath.Base(base)
 
 	// Check for frontmatter (starts with ---)
 	if strings.HasPrefix(content, "---") {
