@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -90,9 +89,7 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	daemonCmd := exec.Command(executable, "daemon", "start", "-f")
 	daemonCmd.Stdout = nil
 	daemonCmd.Stderr = nil
-	daemonCmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
+	daemonCmd.SysProcAttr = daemonSysProcAttr()
 
 	if err := daemonCmd.Start(); err != nil {
 		return fmt.Errorf("failed to start daemon: %w", err)

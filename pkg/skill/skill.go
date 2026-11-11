@@ -473,11 +473,16 @@ func (s *Skill) HasCommands() bool {
 
 // SkillsDir returns the global skills directory path
 func SkillsDir() (string, error) {
+	// AGENTCTL_SKILLS_DIR overrides; default to a tool-neutral directory
+	// (upstream defaulted to ~/.claude/skills, which assumes Claude Code).
+	if dir := os.Getenv("AGENTCTL_SKILLS_DIR"); dir != "" {
+		return dir, nil
+	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(homeDir, ".claude", "skills"), nil
+	return filepath.Join(homeDir, ".agentctl", "skills"), nil
 }
 
 // GlobalSkills loads all skills from the global skills directory

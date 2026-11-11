@@ -101,6 +101,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 				"windsurf": {Enabled: true},
 				"zed":      {Enabled: true},
 				"continue": {Enabled: true},
+				"workbuddy": {Enabled: true},
+				"trae_cn":  {Enabled: true},
+				"qoder":    {Enabled: true},
+				"dsh":      {Enabled: true},
 			},
 		},
 	}

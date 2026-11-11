@@ -46,7 +46,7 @@ func TestDefaultConfigDir(t *testing.T) {
 			os.Setenv("XDG_CONFIG_HOME", tt.xdgConfig)
 
 			got := DefaultConfigDir()
-			if got != tt.wantSuffix {
+			if got != tt.wantSuffix && got != filepath.FromSlash(tt.wantSuffix) {
 				t.Errorf("DefaultConfigDir() = %q, want %q", got, tt.wantSuffix)
 			}
 		})
@@ -575,7 +575,7 @@ func TestProjectDir(t *testing.T) {
 		cfg := &Config{
 			ProjectPath: "/path/to/project/.agentctl.json",
 		}
-		if cfg.ProjectDir() != "/path/to/project" {
+		if cfg.ProjectDir() != filepath.FromSlash("/path/to/project") {
 			t.Errorf("Expected /path/to/project, got %q", cfg.ProjectDir())
 		}
 	})
